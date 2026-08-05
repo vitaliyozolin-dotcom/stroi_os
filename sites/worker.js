@@ -1940,9 +1940,9 @@ const processTelegramUpdate = async (update, env) => {
 };
 
 const handleTelegramUpdate = async (request, env, context) => {
-  const suppliedKey = clean(request.headers.get('x-stroios-setup-key'), 160);
-  const expectedKey = clean(env.TELEGRAM_SETUP_KEY, 160);
-  if (!expectedKey || suppliedKey !== expectedKey) return json({ ok: false, error: 'webhook_authorization_required' }, 403);
+  const suppliedSecret = clean(request.headers.get('x-telegram-bot-api-secret-token'), 256);
+  const expectedSecret = clean(env.TELEGRAM_WEBHOOK_SECRET, 256);
+  if (!expectedSecret || suppliedSecret !== expectedSecret) return json({ ok: false, error: 'webhook_authorization_required' }, 403);
   if (!env.DB || !env.TELEGRAM_BOT_TOKEN) return json({ ok: false, error: 'telegram_not_configured' }, 409);
   let update;
   try { update = await request.json(); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }

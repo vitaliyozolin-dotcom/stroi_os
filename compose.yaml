@@ -1,4 +1,11 @@
 services:
+  storage-init:
+    image: busybox:1.37
+    restart: "no"
+    command: ["sh", "-c", "mkdir -p /data/files && chown -R 1000:1000 /data/files"]
+    volumes:
+      - stroios_files:/data/files
+
   app:
     build: .
     restart: unless-stopped
@@ -18,6 +25,8 @@ services:
     volumes:
       - stroios_files:/data/files
     depends_on:
+      storage-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
     healthcheck:
