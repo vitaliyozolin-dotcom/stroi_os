@@ -1,0 +1,30 @@
+{
+  "name": "stroios-workspace",
+  "private": true,
+  "version": "0.6.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "build": "npm run test && tsc --noEmit && vite build --emptyOutDir && node scripts/prepare-sites-build.mjs",
+    "build:vps": "npm run test && tsc --noEmit && vite build --emptyOutDir",
+    "start:vps": "node server/index.js",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "lucide-react": "1.24.0",
+    "pg": "^8.16.3",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "typescript": "7.0.2",
+    "vite": "8.1.4"
+  }
+}

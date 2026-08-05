@@ -1,0 +1,65 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      FILE_STORAGE_PATH: /data/files
+      OWNER_EMAIL: ${OWNER_EMAIL}
+      OWNER_NAME: ${OWNER_NAME}
+      APP_USERNAME: ${APP_USERNAME}
+      APP_PASSWORD: ${APP_PASSWORD}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_SETUP_KEY: ${TELEGRAM_SETUP_KEY:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
+    volumes:
+      - stroios_files:/data/files
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - stroios_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  stroios_files:
+  stroios_postgres:
+  caddy_data:
+  caddy_config:
