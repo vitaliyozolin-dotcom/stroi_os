@@ -1,0 +1,12 @@
+{
+  "name": "stroios-work-2026",
+  "main": "index.js",
+  "compatibility_date": "2026-07-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "../client",
+    "not_found_handling": "none",
+    "binding": "ASSETS"
+  },
+  "no_bundle": true
+}
