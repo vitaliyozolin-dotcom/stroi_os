@@ -38,6 +38,7 @@ import { CounterpartiesPage } from './pages/CounterpartiesPage';
 import { TasksPage } from './pages/TasksPage';
 import { ProjectPage } from './pages/ProjectPage';
 import { HelpCenter } from './components/HelpCenter';
+import { AuthGate } from './components/AuthGate';
 import { Field, Modal, StatusBadge } from './components/Ui';
 import type { AuthenticatedUser, PageId, UserRole } from './types';
 import { useProjectState, type SyncPhase } from './useProjectState';
@@ -220,7 +221,8 @@ function App() {
   };
 
   if (!session) {
-    return <div className="session-gate"><span><ShieldCheck size={28} /></span><h1>{sessionError ? 'Доступ не назначен' : 'Проверяем рабочий доступ'}</h1><p>{sessionError || 'СтройОС определяет ваш аккаунт и роль в проектах.'}</p>{sessionError && <button type="button" className="button button--primary" onClick={() => window.location.reload()}>Повторить</button>}</div>;
+    if (!sessionError && !new URLSearchParams(window.location.search).get('invite')) return <div className="session-gate"><span><ShieldCheck size={28} /></span><h1>Проверяем рабочий доступ</h1><p>СтройОС определяет ваш аккаунт и роль в проектах.</p></div>;
+    return <AuthGate sessionError={sessionError} />;
   }
 
   return (
