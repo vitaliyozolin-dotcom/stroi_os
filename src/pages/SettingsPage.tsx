@@ -111,13 +111,38 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
     notifications: { ...state.settings.notifications, events: { ...state.settings.notifications.events, [event]: !state.settings.notifications.events[event] } },
   }, `Правило уведомлений «${eventLabels[event].title}» обновлено`);
 
-  const inviteUser = (event: FormEvent) => {
+  const inviteUser = async (event: FormEvent) => {
     event.preventDefault();
     if (!invite.name.trim() || !invite.email.trim()) return;
-    const user: SystemUser = { id: uid('user'), name: invite.name.trim(), email: invite.email.trim(), role: invite.role, telegram: invite.telegram.trim() || undefined, status: 'invited', invitedAt: new Date().toISOString(), inviteDelivery: 'draft' };
-    saveSettings({ ...state.settings, users: [...state.settings.users, user] }, `Добавлен участник ${user.name} · ${roleLabels[user.role]}. Доступ ещё не отправлен`);
-    setShowInvite(false);
-    setInvite({ name: '', email: '', role: 'foreman', telegram: '' });
+    const email = invite.email.trim().toLocaleLowerCase('en-US');
+    if (state.settings.users.some((item) => item.email.toLocaleLowerCase('en-US') === email)) {
+      setIntegrationMessage('Пользователь с такой почтой уже добавлен. Откройте его карточку для изменения доступа.');
+      return;
+    }
+    setIntegrationMessage('Отправляем приглашение…');
+    try {
+      const response = await fetch('/api/access/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: state.project.id, name: invite.name.trim(), email, role: invite.role }),
+      });
+      const body = await response.json() as { ok?: boolean; error?: string; expiresAt?: string };
+      if (!response.ok || !body.ok) {
+        setIntegrationMessage(body.error === 'email_not_configured'
+          ? 'Почта ещё не подключена. Завершите подключение Resend в разделе «Интеграции».'
+          : body.error === 'email_provider_error'
+            ? 'Почтовый сервис отклонил письмо. Проверьте подтверждение отправителя в Resend.'
+            : 'Не удалось отправить приглашение. Проверьте адрес и повторите.');
+        return;
+      }
+      const user: SystemUser = { id: uid('user'), name: invite.name.trim(), email, role: invite.role, telegram: invite.telegram.trim() || undefined, status: 'invited', invitedAt: new Date().toISOString(), inviteDelivery: 'sent' };
+      saveSettings({ ...state.settings, users: [...state.settings.users, user] }, `Приглашение в СтройОС отправлено: ${user.name} · ${roleLabels[user.role]}`);
+      setIntegrationMessage(`Приглашение отправлено на ${email}. Ссылка действует 48 часов.`);
+      setShowInvite(false);
+      setInvite({ name: '', email: '', role: 'foreman', telegram: '' });
+    } catch {
+      setIntegrationMessage('Сервер отправки временно недоступен. Повторите попытку.');
+    }
   };
 
   const saveUser = (event: FormEvent) => {
@@ -219,7 +244,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
         <div className="settings-content">
           {tab === 'access' && (
             <>
-              <section className="panel settings-panel"><SectionHeader eyebrow="Команда" title="Пользователи и роли" action={<button type="button" className="button button--primary button--compact" onClick={() => setShowInvite(true)}><Plus size={16} /> Добавить</button>} />
+              <section className="panel settings-panel"><SectionHeader eyebrow="Команда" title="Пользователи и роли" action={<button type="button" className="button button--primary button--compact" onClick={() => { setIntegrationMessage(''); setShowInvite(true); }}><Plus size={16} /> Пригласить</button>} />
                 <div className="user-list">{state.settings.users.map((user) => <article key={user.id} className="user-row"><span className="user-row__avatar">{user.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><div className="user-row__identity"><strong>{user.name}</strong><small>{user.email}{user.telegram ? ` · ${user.telegram}` : ''}</small></div><span className="user-row__role"><StatusBadge label={roleLabels[user.role]} tone={user.role === 'management' ? 'blue' : 'neutral'} /></span><span className="user-row__status"><StatusBadge label={user.telegramBoundAt ? 'Telegram подключён' : user.status === 'active' ? 'Активен' : user.inviteDelivery === 'sent' ? 'Приглашение отправлено' : user.status === 'invited' ? 'Доступ не выдан' : 'Отключён'} tone={user.telegramBoundAt || user.status === 'active' ? 'positive' : user.status === 'invited' ? 'warning' : 'neutral'} /></span><small className="user-row__last">{user.lastActiveAt ? formatDateTime(user.lastActiveAt) : 'Ещё не входил'}</small><span className="user-row__actions"><button type="button" aria-label={`Подключить Telegram для ${user.name}`} title="Персональная Telegram-ссылка" disabled={user.status === 'disabled'} onClick={() => void createTelegramLink(user)}><Link2 size={16} /></button><button type="button" aria-label={`Редактировать ${user.name}`} onClick={() => setEditingUser({ ...user })}><Pencil size={16} /></button></span></article>)}</div>
                 {integrationMessage && <div className="integration-result">{integrationMessage}</div>}
               </section>
@@ -227,7 +252,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
                 <div className="permission-table"><div className="permission-table__head"><strong>Раздел</strong><strong>Управление</strong><strong>Прораб</strong><strong>Клиент</strong></div>{[
                   ['Финансы и маржа', true, false, false], ['Маркетинг и заявки', true, false, false], ['Все задачи / только свои', true, true, false], ['Этапы и график', true, true, true], ['Снабжение', true, true, false], ['Контроль качества', true, true, true], ['Настройки и доступы', true, false, false],
                 ].map(([label, management, foreman, client]) => <div className="permission-table__row" key={String(label)}><span>{String(label)}</span>{[management, foreman, client].map((allowed, index) => <span key={index}>{allowed ? <Check size={17} /> : '—'}</span>)}</div>)}</div>
-                <div className="settings-note"><LockKeyhole size={18} /><span>Роль теперь определяется сервером по реальному аккаунту — переключить её в интерфейсе нельзя. После добавления участника владелец включает его email в защищённый список сайта, и человек входит через свой аккаунт ChatGPT.</span></div>
+                <div className="settings-note"><LockKeyhole size={18} /><span>Вы указываете обычную почту и роль. СтройОС отправляет одноразовую ссылку: сотрудник сам создаёт пароль, после чего доступ начинает работать. Пароли в письмах не пересылаются.</span></div>
               </section>
             </>
           )}
@@ -296,7 +321,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
         </div>
       </div>
 
-      {showInvite && <Modal title="Добавить пользователя" subtitle="Создадим профиль и назначим роль. Доступ к закрытому сайту выдаётся владельцем отдельно — система не будет притворяться, что приглашение уже отправлено." onClose={() => setShowInvite(false)}><form className="modal-form" onSubmit={inviteUser}><div className="form-grid"><Field label="Имя"><input required value={invite.name} onChange={(event) => setInvite({ ...invite, name: event.target.value })} /></Field><Field label="Email аккаунта ChatGPT"><input required type="email" value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} /></Field></div><div className="form-grid"><Field label="Роль"><select value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Telegram"><input value={invite.telegram} onChange={(event) => setInvite({ ...invite, telegram: event.target.value })} placeholder="@username, необязательно" /></Field></div><div className="settings-note"><Link2 size={18} /><span>Личный Telegram связывается безопасной одноразовой ссылкой после создания профиля. Chat ID вручную вводить не нужно.</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowInvite(false)}>Отмена</button><button type="submit" className="button button--primary"><Plus size={17} /> Сохранить профиль</button></div></form></Modal>}
+      {showInvite && <Modal title="Пригласить пользователя" subtitle="Укажите обычную почту и роль. СтройОС сразу отправит ссылку для создания пароля." onClose={() => setShowInvite(false)}><form className="modal-form" onSubmit={(event) => void inviteUser(event)}><div className="form-grid"><Field label="Имя"><input required value={invite.name} onChange={(event) => setInvite({ ...invite, name: event.target.value })} /></Field><Field label="Email"><input required type="email" autoComplete="email" value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} /></Field></div><div className="form-grid"><Field label="Роль"><select value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Telegram"><input value={invite.telegram} onChange={(event) => setInvite({ ...invite, telegram: event.target.value })} placeholder="@username, необязательно" /></Field></div><div className="settings-note"><Mail size={18} /><span>Ссылка действует 48 часов и используется один раз. Пользователь сам задаёт пароль — мы его не видим и не отправляем по почте.</span></div>{integrationMessage && <div className="integration-result">{integrationMessage}</div>}<div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowInvite(false)}>Отмена</button><button type="submit" className="button button--primary"><Mail size={17} /> Отправить приглашение</button></div></form></Modal>}
       {editingUser && <Modal title={`Редактировать: ${editingUser.name}`} subtitle="Изменения роли и статуса сразу сохранятся в настройках проекта." onClose={() => setEditingUser(null)}><form className="modal-form" onSubmit={saveUser}><div className="form-grid"><Field label="Имя"><input required value={editingUser.name} onChange={(event) => setEditingUser({ ...editingUser, name: event.target.value })} /></Field><Field label="Email"><input required type="email" value={editingUser.email} onChange={(event) => setEditingUser({ ...editingUser, email: event.target.value })} /></Field><Field label="Роль"><select value={editingUser.role} onChange={(event) => setEditingUser({ ...editingUser, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Статус"><select value={editingUser.status} onChange={(event) => setEditingUser({ ...editingUser, status: event.target.value as SystemUser['status'] })}><option value="active">Активен</option><option value="invited">Доступ не выдан</option><option value="disabled">Отключён</option></select></Field><Field label="Telegram"><input value={editingUser.telegram ?? ''} onChange={(event) => setEditingUser({ ...editingUser, telegram: event.target.value })} placeholder="@username" /></Field></div><div className="settings-note"><Link2 size={18} /><span>{editingUser.telegramBoundAt ? 'Telegram уже связан с этим профилем.' : 'Для связи Telegram используйте кнопку с цепочкой в списке пользователей.'}</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingUser(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить</button></div></form></Modal>}
       {telegramLink && <Modal title={`Telegram для ${telegramLink.userName}`} subtitle={`Персональная одноразовая ссылка действует до ${formatDateTime(telegramLink.expiresAt)}.`} onClose={() => setTelegramLink(null)}><div className="telegram-link-card"><p>Отправьте эту ссылку именно выбранному сотруднику. После нажатия «Запустить» его Telegram автоматически свяжется с профилем в СтройОС.</p><input readOnly value={telegramLink.url} onFocus={(event) => event.currentTarget.select()} /><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setTelegramLink(null)}>Закрыть</button><button type="button" className="button button--primary" onClick={() => { void navigator.clipboard.writeText(telegramLink.url); setIntegrationMessage('Ссылка скопирована.'); }}><Link2 size={16} /> Скопировать ссылку</button></div></div></Modal>}
     </div>
