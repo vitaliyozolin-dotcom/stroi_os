@@ -147,7 +147,7 @@ export function ProjectPage({
         clientVisible: form.clientVisible,
         signedAt: form.status === 'signed' ? timestamp : undefined,
         updatedAt: timestamp,
-        storageLocation: `СтройОС / ${state.project.code} / Документы`,
+        storageLocation: `ИКИОМА ОС / ${state.project.code} / Документы`,
         fileKey: body.file.key,
         fileName: body.file.name,
         mimeType: body.file.type,
@@ -235,7 +235,7 @@ export function ProjectPage({
                   <div className="field-report-card__head">
                     <span>{report.attachments.some((item) => item.mimeType.startsWith('audio/')) ? <Mic size={18} /> : <Image size={18} />}</span>
                     <div><strong>{report.author}</strong><small>{formatDateTime(report.createdAt)}{stage ? ` · ${stage.name}` : ''}</small></div>
-                    <StatusBadge label={report.source === 'telegram' ? 'Telegram' : 'СтройОС'} tone="neutral" />
+                    <StatusBadge label={report.source === 'telegram' ? 'Telegram' : 'ИКИОМА ОС'} tone="neutral" />
                   </div>
                   <p>{report.note}</p>
                   <div className="field-report-card__files">
@@ -323,7 +323,7 @@ export function ProjectPage({
           <div className="document-detail-card">
             <span><FileText size={26} /></span>
             <div><small>Статус</small><StatusBadge label={statusLabels[selected.status]} tone={statusTone(selected.status)} /></div>
-            <div><small>Файл</small><strong>{selected.fileName ?? 'Не загружен'}</strong><p>{selected.fileName ? `${readableSize(selected.sizeBytes)} · ${selected.uploadedBy ?? 'СтройОС'}` : selected.storageLocation ?? 'Место хранения не указано'}</p></div>
+            <div><small>Файл</small><strong>{selected.fileName ?? 'Не загружен'}</strong><p>{selected.fileName ? `${readableSize(selected.sizeBytes)} · ${selected.uploadedBy ?? 'ИКИОМА ОС'}` : selected.storageLocation ?? 'Место хранения не указано'}</p></div>
           </div>
           <div className="entity-detail-grid">
             <section className="entity-detail-card"><small>Контрагент</small><strong>{state.counterparties.find((item) => item.id === selected.counterpartyId)?.name ?? 'Не указан'}</strong><span>{selected.direction === 'incoming' ? 'Получен' : selected.direction === 'outgoing' ? 'Отправлен' : 'Внутренний'}</span></section>

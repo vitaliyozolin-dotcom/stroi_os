@@ -4,7 +4,9 @@ import {
   Bot,
   Camera,
   Check,
+  Copy,
   Globe2,
+  KeyRound,
   LayoutDashboard,
   Link2,
   LockKeyhole,
@@ -72,6 +74,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
   const [integrationMessage, setIntegrationMessage] = useState('');
+  const [accessLink, setAccessLink] = useState<{ userName: string; email: string; url: string; expiresAt: string } | null>(null);
   const [telegramLink, setTelegramLink] = useState<{ userName: string; url: string; expiresAt: string } | null>(null);
 
   const refreshIntegrationStatus = async () => {
@@ -111,13 +114,60 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
     notifications: { ...state.settings.notifications, events: { ...state.settings.notifications.events, [event]: !state.settings.notifications.events[event] } },
   }, `Правило уведомлений «${eventLabels[event].title}» обновлено`);
 
-  const inviteUser = (event: FormEvent) => {
+  const requestAccessLink = async (user: Pick<SystemUser, 'name' | 'email' | 'role'>) => {
+    const response = await fetch('/api/access/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: state.project.id, name: user.name, email: user.email, role: user.role }),
+    });
+    const body = await response.json() as { ok?: boolean; error?: string; inviteUrl?: string; expiresAt?: string };
+    if (!response.ok || !body.ok || !body.inviteUrl || !body.expiresAt) throw new Error(body.error || 'invite_failed');
+    return { url: body.inviteUrl, expiresAt: body.expiresAt };
+  };
+
+  const inviteUser = async (event: FormEvent) => {
     event.preventDefault();
     if (!invite.name.trim() || !invite.email.trim()) return;
-    const user: SystemUser = { id: uid('user'), name: invite.name.trim(), email: invite.email.trim(), role: invite.role, telegram: invite.telegram.trim() || undefined, status: 'invited', invitedAt: new Date().toISOString(), inviteDelivery: 'draft' };
-    saveSettings({ ...state.settings, users: [...state.settings.users, user] }, `Добавлен участник ${user.name} · ${roleLabels[user.role]}. Доступ ещё не отправлен`);
-    setShowInvite(false);
-    setInvite({ name: '', email: '', role: 'foreman', telegram: '' });
+    const email = invite.email.trim().toLocaleLowerCase('en-US');
+    if (state.settings.users.some((item) => item.email.toLocaleLowerCase('en-US') === email)) {
+      setIntegrationMessage('Пользователь с такой почтой уже добавлен. Откройте его карточку для изменения доступа.');
+      return;
+    }
+    setIntegrationMessage('Создаём персональный доступ…');
+    try {
+      const user: SystemUser = { id: uid('user'), name: invite.name.trim(), email, role: invite.role, telegram: invite.telegram.trim() || undefined, status: 'invited', invitedAt: new Date().toISOString(), inviteDelivery: 'manual' };
+      const link = await requestAccessLink(user);
+      saveSettings({ ...state.settings, users: [...state.settings.users, user] }, `Создан персональный доступ ИКИОМА ОС: ${user.name} · ${roleLabels[user.role]}`);
+      setAccessLink({ userName: user.name, email: user.email, ...link });
+      setIntegrationMessage(`Доступ для ${user.name} создан. Передайте ему одноразовую ссылку лично.`);
+      setShowInvite(false);
+      setInvite({ name: '', email: '', role: 'foreman', telegram: '' });
+    } catch (error) {
+      setIntegrationMessage(error instanceof Error && error.message === 'invalid_invite'
+        ? 'Проверьте имя, почту и роль пользователя.'
+        : 'Не удалось создать доступ. Обновите страницу и повторите.');
+    }
+  };
+
+  const reissueAccessLink = async (user: SystemUser) => {
+    setIntegrationMessage(`Создаём новую ссылку для ${user.name}…`);
+    try {
+      const link = await requestAccessLink(user);
+      setAccessLink({ userName: user.name, email: user.email, ...link });
+      setIntegrationMessage(`Новая ссылка для ${user.name} готова. Предыдущая ссылка больше не действует.`);
+    } catch {
+      setIntegrationMessage('Не удалось перевыпустить ссылку доступа. Повторите попытку.');
+    }
+  };
+
+  const copyAccessLink = async () => {
+    if (!accessLink) return;
+    try {
+      await navigator.clipboard.writeText(accessLink.url);
+      setIntegrationMessage(`Ссылка для ${accessLink.userName} скопирована.`);
+    } catch {
+      setIntegrationMessage('Не удалось скопировать автоматически. Выделите ссылку и скопируйте вручную.');
+    }
   };
 
   const saveUser = (event: FormEvent) => {
@@ -130,7 +180,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
   const testIntegration = async (channel: 'email' | 'telegram') => {
     setIntegrationMessage('Проверяем подключение…');
     try {
-      const response = await fetch('/api/integrations/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, to: state.settings.users.find((user) => user.role === 'management')?.email, message: `СтройОС: тест канала ${channel === 'email' ? 'Email' : 'Telegram'} для проекта ${state.project.code}` }) });
+      const response = await fetch('/api/integrations/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, to: state.settings.users.find((user) => user.role === 'management')?.email, message: `ИКИОМА ОС: тест канала ${channel === 'email' ? 'Email' : 'Telegram'} для проекта ${state.project.code}` }) });
       const body = await response.json();
       setIntegrationMessage(response.ok && body.ok
         ? `Тест ${channel === 'email' ? 'Email' : 'Telegram'} отправлен.`
@@ -219,15 +269,15 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
         <div className="settings-content">
           {tab === 'access' && (
             <>
-              <section className="panel settings-panel"><SectionHeader eyebrow="Команда" title="Пользователи и роли" action={<button type="button" className="button button--primary button--compact" onClick={() => setShowInvite(true)}><Plus size={16} /> Добавить</button>} />
-                <div className="user-list">{state.settings.users.map((user) => <article key={user.id} className="user-row"><span className="user-row__avatar">{user.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><div className="user-row__identity"><strong>{user.name}</strong><small>{user.email}{user.telegram ? ` · ${user.telegram}` : ''}</small></div><span className="user-row__role"><StatusBadge label={roleLabels[user.role]} tone={user.role === 'management' ? 'blue' : 'neutral'} /></span><span className="user-row__status"><StatusBadge label={user.telegramBoundAt ? 'Telegram подключён' : user.status === 'active' ? 'Активен' : user.inviteDelivery === 'sent' ? 'Приглашение отправлено' : user.status === 'invited' ? 'Доступ не выдан' : 'Отключён'} tone={user.telegramBoundAt || user.status === 'active' ? 'positive' : user.status === 'invited' ? 'warning' : 'neutral'} /></span><small className="user-row__last">{user.lastActiveAt ? formatDateTime(user.lastActiveAt) : 'Ещё не входил'}</small><span className="user-row__actions"><button type="button" aria-label={`Подключить Telegram для ${user.name}`} title="Персональная Telegram-ссылка" disabled={user.status === 'disabled'} onClick={() => void createTelegramLink(user)}><Link2 size={16} /></button><button type="button" aria-label={`Редактировать ${user.name}`} onClick={() => setEditingUser({ ...user })}><Pencil size={16} /></button></span></article>)}</div>
+              <section className="panel settings-panel"><SectionHeader eyebrow="Команда" title="Пользователи и роли" action={<button type="button" className="button button--primary button--compact" onClick={() => { setIntegrationMessage(''); setShowInvite(true); }}><Plus size={16} /> Пригласить</button>} />
+                <div className="user-list">{state.settings.users.map((user) => <article key={user.id} className="user-row"><span className="user-row__avatar">{user.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><div className="user-row__identity"><strong>{user.name}</strong><small title={`${user.email}${user.telegram ? ` · ${user.telegram}` : ''}`}>{user.email}{user.telegram ? ` · ${user.telegram}` : ''}</small></div><div className="user-row__details"><span className="user-row__role"><StatusBadge label={roleLabels[user.role]} tone={user.role === 'management' ? 'blue' : 'neutral'} /></span><span className="user-row__status"><StatusBadge label={user.telegramBoundAt ? 'Telegram подключён' : user.status === 'active' ? 'Активен' : user.inviteDelivery === 'manual' ? 'Ссылка создана' : user.status === 'invited' ? 'Доступ не выдан' : 'Отключён'} tone={user.telegramBoundAt || user.status === 'active' ? 'positive' : user.status === 'invited' ? 'warning' : 'neutral'} /></span><small className="user-row__last">{user.lastActiveAt ? formatDateTime(user.lastActiveAt) : 'Ещё не входил'}</small></div><span className="user-row__actions">{user.id !== 'user-owner' && <button type="button" aria-label={`Создать новую ссылку доступа для ${user.name}`} title="Новая ссылка доступа" disabled={user.status === 'disabled'} onClick={() => void reissueAccessLink(user)}><KeyRound size={16} /></button>}<button type="button" aria-label={`Подключить Telegram для ${user.name}`} title="Персональная Telegram-ссылка" disabled={user.status === 'disabled'} onClick={() => void createTelegramLink(user)}><Link2 size={16} /></button><button type="button" aria-label={`Редактировать ${user.name}`} onClick={() => setEditingUser({ ...user })}><Pencil size={16} /></button></span></article>)}</div>
                 {integrationMessage && <div className="integration-result">{integrationMessage}</div>}
               </section>
               <section className="panel settings-panel"><SectionHeader eyebrow="Матрица" title="Что видит каждая роль" />
                 <div className="permission-table"><div className="permission-table__head"><strong>Раздел</strong><strong>Управление</strong><strong>Прораб</strong><strong>Клиент</strong></div>{[
                   ['Финансы и маржа', true, false, false], ['Маркетинг и заявки', true, false, false], ['Все задачи / только свои', true, true, false], ['Этапы и график', true, true, true], ['Снабжение', true, true, false], ['Контроль качества', true, true, true], ['Настройки и доступы', true, false, false],
                 ].map(([label, management, foreman, client]) => <div className="permission-table__row" key={String(label)}><span>{String(label)}</span>{[management, foreman, client].map((allowed, index) => <span key={index}>{allowed ? <Check size={17} /> : '—'}</span>)}</div>)}</div>
-                <div className="settings-note"><LockKeyhole size={18} /><span>Роль теперь определяется сервером по реальному аккаунту — переключить её в интерфейсе нельзя. После добавления участника владелец включает его email в защищённый список сайта, и человек входит через свой аккаунт ChatGPT.</span></div>
+                <div className="settings-note"><LockKeyhole size={18} /><span>Вы указываете имя, почту-логин и роль. ИКИОМА ОС создаёт одноразовую ссылку без почтового сервиса: передайте её сотруднику лично, и он сам задаст пароль.</span></div>
               </section>
             </>
           )}
@@ -236,7 +286,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
 
           {tab === 'notifications' && (
             <>
-              <section className="panel settings-panel"><SectionHeader eyebrow="Каналы" title="Куда отправлять" /><div className="channel-grid"><article><span><Mail size={20} /></span><div><strong>Email</strong><small>{integrationStatus?.email ? 'Сводки и критичные события' : 'Сначала подключите Resend'}</small></div><Toggle label="Email" disabled={!integrationStatus?.email} checked={Boolean(integrationStatus?.email && state.settings.notifications.channels.email)} onChange={() => toggleChannel('email')} /></article><article><span><Send size={20} /></span><div><strong>Telegram</strong><small>{integrationStatus?.telegramCommon ? `${integrationStatus.telegramCommonTitle || 'Общий чат'} · личных адресатов: ${integrationStatus.telegramBoundUsers ?? state.settings.users.filter((user) => user.telegramChatId).length}` : 'Сначала подключите бота и общий чат'}</small></div><Toggle label="Telegram" disabled={!integrationStatus?.telegramCommon} checked={Boolean(integrationStatus?.telegramCommon && state.settings.notifications.channels.telegram)} onChange={() => toggleChannel('telegram')} /></article><article><span><Globe2 size={20} /></span><div><strong>В браузере</strong><small>Центр уведомлений СтройОС</small></div><Toggle label="В браузере" checked={state.settings.notifications.channels.browser} onChange={() => toggleChannel('browser')} /></article></div></section>
+              <section className="panel settings-panel"><SectionHeader eyebrow="Каналы" title="Куда отправлять" /><div className="channel-grid"><article><span><Mail size={20} /></span><div><strong>Email</strong><small>{integrationStatus?.email ? 'Сводки и критичные события' : 'Сначала подключите Resend'}</small></div><Toggle label="Email" disabled={!integrationStatus?.email} checked={Boolean(integrationStatus?.email && state.settings.notifications.channels.email)} onChange={() => toggleChannel('email')} /></article><article><span><Send size={20} /></span><div><strong>Telegram</strong><small>{integrationStatus?.telegramCommon ? `${integrationStatus.telegramCommonTitle || 'Общий чат'} · личных адресатов: ${integrationStatus.telegramBoundUsers ?? state.settings.users.filter((user) => user.telegramChatId).length}` : 'Сначала подключите бота и общий чат'}</small></div><Toggle label="Telegram" disabled={!integrationStatus?.telegramCommon} checked={Boolean(integrationStatus?.telegramCommon && state.settings.notifications.channels.telegram)} onChange={() => toggleChannel('telegram')} /></article><article><span><Globe2 size={20} /></span><div><strong>В браузере</strong><small>Центр уведомлений ИКИОМА ОС</small></div><Toggle label="В браузере" checked={state.settings.notifications.channels.browser} onChange={() => toggleChannel('browser')} /></article></div></section>
               <section className="panel settings-panel"><SectionHeader eyebrow="Правила" title="О каких событиях сообщать" /><div className="settings-list">{(Object.keys(eventLabels) as Array<keyof NotificationSettings['events']>).map((event) => <div className="settings-list__row" key={event}><span><strong>{eventLabels[event].title}</strong><small>{eventLabels[event].text}</small></span><Toggle label={eventLabels[event].title} checked={state.settings.notifications.events[event]} onChange={() => toggleEvent(event)} /></div>)}</div></section>
             </>
           )}
@@ -247,7 +297,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
               <div className="integration-grid">
                 <article>
                   <span><Globe2 size={21} /></span>
-                  <div><strong>Форма на stroios.online</strong><p>Входящий обработчик готов, но внешний посетитель не увидит форму, пока весь сайт закрыт авторизацией.</p></div>
+                  <div><strong>Форма на сайте ИКИОМА</strong><p>Входящий обработчик готов, но внешний посетитель не увидит форму, пока весь сайт закрыт авторизацией.</p></div>
                   <StatusBadge label={integrationStatus?.publicWebsiteForm ? 'Принимает заявки' : 'Только внутри'} tone={integrationStatus?.publicWebsiteForm ? 'positive' : 'warning'} />
                 </article>
                 <article>
@@ -258,7 +308,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
                       ? integrationStatus.telegramInbound
                         ? `Полевой штаб работает: изменения уходят в «${integrationStatus.telegramCommonTitle || 'общий чат'}», а команды, задачи и файлы принимаются обратно.`
                         : `Исходящие уведомления работают; входящие команды ещё не подключены.`
-                      : `Добавьте бота в общий чат, отправьте там ${telegramCommand} — СтройОС найдёт группу автоматически.`}</p>
+                      : `Добавьте бота в общий чат, отправьте там ${telegramCommand} — ИКИОМА ОС найдёт группу автоматически.`}</p>
                   </div>
                   <StatusBadge label={integrationStatus?.telegramInbound ? 'Полевой штаб готов' : telegramStatusLabel} tone={integrationStatus?.telegramInbound ? 'positive' : integrationStatus?.telegramIssue === 'invalid_token' ? 'warning' : 'neutral'} />
                   {integrationStatus?.telegramCandidates?.length ? (
@@ -284,7 +334,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
                 </article>
                 <article>
                   <span><Mail size={21} /></span>
-                  <div><strong>Email через Resend</strong><p>Уведомления и будущие приглашения пользователей.</p></div>
+                  <div><strong>Email через Resend</strong><p>Необязательный канал будущих уведомлений. Доступы работают без него.</p></div>
                   <StatusBadge label={integrationStatus?.email ? 'Подключён' : 'Нужны API-ключ и отправитель'} tone={integrationStatus?.email ? 'positive' : 'neutral'} />
                   {integrationStatus?.email && <button type="button" className="text-button integration-action" onClick={() => void testIntegration('email')}>Отправить тест</button>}
                 </article>
@@ -296,9 +346,10 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
         </div>
       </div>
 
-      {showInvite && <Modal title="Добавить пользователя" subtitle="Создадим профиль и назначим роль. Доступ к закрытому сайту выдаётся владельцем отдельно — система не будет притворяться, что приглашение уже отправлено." onClose={() => setShowInvite(false)}><form className="modal-form" onSubmit={inviteUser}><div className="form-grid"><Field label="Имя"><input required value={invite.name} onChange={(event) => setInvite({ ...invite, name: event.target.value })} /></Field><Field label="Email аккаунта ChatGPT"><input required type="email" value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} /></Field></div><div className="form-grid"><Field label="Роль"><select value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Telegram"><input value={invite.telegram} onChange={(event) => setInvite({ ...invite, telegram: event.target.value })} placeholder="@username, необязательно" /></Field></div><div className="settings-note"><Link2 size={18} /><span>Личный Telegram связывается безопасной одноразовой ссылкой после создания профиля. Chat ID вручную вводить не нужно.</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowInvite(false)}>Отмена</button><button type="submit" className="button button--primary"><Plus size={17} /> Сохранить профиль</button></div></form></Modal>}
+      {showInvite && <Modal title="Создать доступ" subtitle="Укажите пользователя и роль. Система покажет одноразовую ссылку — почтовый сервис не нужен." onClose={() => setShowInvite(false)}><form className="modal-form" onSubmit={(event) => void inviteUser(event)}><div className="form-grid"><Field label="Имя"><input required value={invite.name} onChange={(event) => setInvite({ ...invite, name: event.target.value })} /></Field><Field label="Почта — логин для входа" hint="Письмо на неё не отправляется"><input required type="email" autoComplete="email" value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} /></Field></div><div className="form-grid"><Field label="Роль"><select value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Telegram"><input value={invite.telegram} onChange={(event) => setInvite({ ...invite, telegram: event.target.value })} placeholder="@username, необязательно" /></Field></div><div className="settings-note"><KeyRound size={18} /><span>Ссылка действует 48 часов и используется один раз. Пользователь откроет её и самостоятельно задаст пароль.</span></div>{integrationMessage && <div className="integration-result">{integrationMessage}</div>}<div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowInvite(false)}>Отмена</button><button type="submit" className="button button--primary"><KeyRound size={17} /> Создать доступ</button></div></form></Modal>}
+      {accessLink && <Modal title={`Доступ для ${accessLink.userName}`} subtitle={`Логин: ${accessLink.email}. Ссылка действует до ${formatDateTime(accessLink.expiresAt)}.`} onClose={() => setAccessLink(null)}><div className="access-link-card"><p>Передайте эту ссылку только выбранному сотруднику. После первого использования она автоматически перестанет работать.</p><input aria-label={`Одноразовая ссылка для ${accessLink.userName}`} readOnly value={accessLink.url} onFocus={(event) => event.currentTarget.select()} /><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setAccessLink(null)}>Закрыть</button><button type="button" className="button button--primary" onClick={() => void copyAccessLink()}><Copy size={16} /> Скопировать ссылку</button></div></div></Modal>}
       {editingUser && <Modal title={`Редактировать: ${editingUser.name}`} subtitle="Изменения роли и статуса сразу сохранятся в настройках проекта." onClose={() => setEditingUser(null)}><form className="modal-form" onSubmit={saveUser}><div className="form-grid"><Field label="Имя"><input required value={editingUser.name} onChange={(event) => setEditingUser({ ...editingUser, name: event.target.value })} /></Field><Field label="Email"><input required type="email" value={editingUser.email} onChange={(event) => setEditingUser({ ...editingUser, email: event.target.value })} /></Field><Field label="Роль"><select value={editingUser.role} onChange={(event) => setEditingUser({ ...editingUser, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Статус"><select value={editingUser.status} onChange={(event) => setEditingUser({ ...editingUser, status: event.target.value as SystemUser['status'] })}><option value="active">Активен</option><option value="invited">Доступ не выдан</option><option value="disabled">Отключён</option></select></Field><Field label="Telegram"><input value={editingUser.telegram ?? ''} onChange={(event) => setEditingUser({ ...editingUser, telegram: event.target.value })} placeholder="@username" /></Field></div><div className="settings-note"><Link2 size={18} /><span>{editingUser.telegramBoundAt ? 'Telegram уже связан с этим профилем.' : 'Для связи Telegram используйте кнопку с цепочкой в списке пользователей.'}</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingUser(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить</button></div></form></Modal>}
-      {telegramLink && <Modal title={`Telegram для ${telegramLink.userName}`} subtitle={`Персональная одноразовая ссылка действует до ${formatDateTime(telegramLink.expiresAt)}.`} onClose={() => setTelegramLink(null)}><div className="telegram-link-card"><p>Отправьте эту ссылку именно выбранному сотруднику. После нажатия «Запустить» его Telegram автоматически свяжется с профилем в СтройОС.</p><input readOnly value={telegramLink.url} onFocus={(event) => event.currentTarget.select()} /><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setTelegramLink(null)}>Закрыть</button><button type="button" className="button button--primary" onClick={() => { void navigator.clipboard.writeText(telegramLink.url); setIntegrationMessage('Ссылка скопирована.'); }}><Link2 size={16} /> Скопировать ссылку</button></div></div></Modal>}
+      {telegramLink && <Modal title={`Telegram для ${telegramLink.userName}`} subtitle={`Персональная одноразовая ссылка действует до ${formatDateTime(telegramLink.expiresAt)}.`} onClose={() => setTelegramLink(null)}><div className="telegram-link-card"><p>Отправьте эту ссылку именно выбранному сотруднику. После нажатия «Запустить» его Telegram автоматически свяжется с профилем в ИКИОМА ОС.</p><input readOnly value={telegramLink.url} onFocus={(event) => event.currentTarget.select()} /><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setTelegramLink(null)}>Закрыть</button><button type="button" className="button button--primary" onClick={() => { void navigator.clipboard.writeText(telegramLink.url); setIntegrationMessage('Ссылка скопирована.'); }}><Link2 size={16} /> Скопировать ссылку</button></div></div></Modal>}
     </div>
   );
 }
