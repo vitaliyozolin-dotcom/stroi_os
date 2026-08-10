@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 import worker from '../sites/worker.js';
 import { FileBucket } from './file-bucket.js';
 import { PostgresDatabase } from './postgres.js';
-import { cookieValue, hashPassword, hashToken, newOpaqueToken, normalizeLogin, passwordIssue, verifyPassword } from './auth.js';
+import { buildInviteUrl, cookieValue, hashPassword, hashToken, newOpaqueToken, normalizeLogin, passwordIssue, verifyPassword } from './auth.js';
 
 const port = Number(process.env.PORT) || 3000;
 const clientRoot = resolve(process.env.CLIENT_ROOT || 'dist/client');
@@ -72,27 +72,6 @@ const ensureAuthSchema = async () => {
 };
 
 await ensureAuthSchema();
-const timingSafeEqualText = async (left, right) => {
-  const { timingSafeEqual } = await import('node:crypto');
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
-};
-
-const basicIdentity = async (request) => {
-  const header = request.headers.get('authorization') || '';
-  if (!header.startsWith('Basic ')) return null;
-  let decoded = '';
-  try { decoded = Buffer.from(header.slice(6), 'base64').toString('utf8'); } catch { return null; }
-  const separator = decoded.indexOf(':');
-  if (separator < 0) return null;
-  const user = decoded.slice(0, separator);
-  const password = decoded.slice(separator + 1);
-  const validUser = await timingSafeEqualText(user, basicUser);
-  const validPassword = await timingSafeEqualText(password, basicPassword);
-  return validUser && validPassword ? { email: ownerEmail, name: process.env.OWNER_NAME || 'Виталий Озолин' } : null;
-};
-
 const sessionIdentity = async (request) => {
   const token = cookieValue(request.headers.get('cookie'), sessionCookieName);
   if (!token) return null;
@@ -108,7 +87,7 @@ const sessionIdentity = async (request) => {
   return { id: row.id, email: row.email, name: row.name };
 };
 
-const requestIdentity = async (request) => (await sessionIdentity(request)) || basicIdentity(request);
+const requestIdentity = sessionIdentity;
 
 const authCookie = (token, request, maxAge = sessionDays * 86400) => {
   const secure = new URL(request.url).protocol === 'https:' ? '; Secure' : '';
@@ -166,22 +145,6 @@ const handleLogin = async (request, address) => {
   return jsonResponse({ ok: true, user: { email: user.email, name: user.name } }, 200, { 'Set-Cookie': await createSession(user.id, request) });
 };
 
-const sendInviteEmail = async (env, invite) => {
-  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return { ok: false, error: 'email_not_configured' };
-  const link = `${String(env.APP_PUBLIC_URL || '').replace(/\/$/, '')}/?invite=${encodeURIComponent(invite.token)}`;
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: env.EMAIL_FROM,
-      to: [invite.email],
-      subject: 'Вам открыт доступ в СтройОС',
-      html: `<div style="font-family:Arial,sans-serif;max-width:560px;color:#17231e"><h2>Доступ в СтройОС</h2><p>${invite.name}, вам назначена роль «${invite.roleLabel}».</p><p><a href="${link}" style="display:inline-block;background:#245a45;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">Создать пароль и войти</a></p><p style="color:#65736c;font-size:14px">Ссылка действует 48 часов и используется один раз.</p></div>`,
-    }),
-  });
-  return response.ok ? { ok: true } : { ok: false, error: 'email_provider_error' };
-};
-
 const handleInvite = async (request, identity, env) => {
   if (!identity || normalizeLogin(identity.email) !== normalizeLogin(ownerEmail)) return jsonResponse({ ok: false, error: 'owner_required' }, 403);
   const payload = await readJson(request);
@@ -190,7 +153,6 @@ const handleInvite = async (request, identity, env) => {
   const projectId = typeof payload?.projectId === 'string' ? payload.projectId.trim().slice(0, 100) : '';
   const role = ['management', 'foreman', 'client'].includes(payload?.role) ? payload.role : '';
   if (!/^\S+@\S+\.\S+$/.test(email) || !name || !projectId || !role) return jsonResponse({ ok: false, error: 'invalid_invite' }, 422);
-  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return jsonResponse({ ok: false, error: 'email_not_configured' }, 409);
   const token = newOpaqueToken();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 48 * 3600_000).toISOString();
@@ -199,12 +161,12 @@ const handleInvite = async (request, identity, env) => {
     INSERT INTO access_invites (token_hash, project_id, email, name, role, created_by, created_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(hashToken(token), projectId, email, name, role, identity.email, now.toISOString(), expiresAt).run();
-  const sent = await sendInviteEmail(env, { token, email, name, roleLabel: { management: 'Управление', foreman: 'Прораб', client: 'Клиент' }[role] });
-  if (!sent.ok) {
-    await database.prepare(`DELETE FROM access_invites WHERE token_hash = ?`).bind(hashToken(token)).run();
-    return jsonResponse({ ok: false, error: sent.error }, 502);
-  }
-  return jsonResponse({ ok: true, delivery: 'sent', expiresAt });
+  return jsonResponse({
+    ok: true,
+    delivery: 'manual',
+    inviteUrl: buildInviteUrl(env.APP_PUBLIC_URL, token),
+    expiresAt,
+  });
 };
 
 const handleAcceptInvite = async (request) => {
