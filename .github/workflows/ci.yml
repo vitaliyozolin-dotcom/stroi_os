@@ -1,4 +1,4 @@
-name: Check StroiOS
+name: Check IKIOMA OS
 
 on:
   pull_request:
