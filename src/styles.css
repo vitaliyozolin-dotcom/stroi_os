@@ -166,8 +166,9 @@ p {
 
 .brand-copy {
   display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
   flex-direction: column;
-  overflow: hidden;
   white-space: nowrap;
 }
 
@@ -184,8 +185,9 @@ p {
 .brand-copy small {
   margin-top: 1px;
   color: rgba(235, 243, 237, 0.52);
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  letter-spacing: 0.055em;
+  line-height: 1.25;
   text-transform: uppercase;
 }
 
