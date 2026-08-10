@@ -201,7 +201,7 @@ const isPublicRoute = (url) => url.pathname === '/api/health'
   || url.pathname === '/api/auth/accept-invite'
   || url.pathname === '/api/integrations/telegram/update'
   || !url.pathname.startsWith('/api/');
-const unauthorized = () => new Response('Требуется вход в СтройОС', {
+const unauthorized = () => new Response('Требуется вход в ИКИОМА ОС', {
   status: 401,
   headers: { 'Content-Type': 'text/plain; charset=utf-8' },
 });

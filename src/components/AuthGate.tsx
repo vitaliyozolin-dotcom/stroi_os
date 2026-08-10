@@ -59,14 +59,14 @@ export function AuthGate({ sessionError }: { sessionError?: string }) {
   return (
     <main className="auth-page">
       <div className="auth-shell">
-        <aside className="auth-story" aria-label="СтройОС — операционная система строительства">
-          <div className="auth-story__brand"><span><ShieldCheck size={25} /></span><div><strong>СТРОЙ<span>ОС</span></strong><small>операционная система строительства</small></div></div>
+        <aside className="auth-story" aria-label="ИКИОМА ОС — операционная система строительства">
+          <div className="auth-story__brand"><span><img src="/favicon.svg" alt="" /></span><div><strong>ИКИОМА <span>ОС</span></strong><small>операционная система строительства</small></div></div>
           <div className="auth-story__copy"><span className="auth-story__eyebrow">Рабочий контур ИКИОМА</span><h1>Стройка под контролем.<br />От заявки до сдачи.</h1><p>Проекты, сроки, деньги, снабжение и качество — в одном защищённом пространстве.</p></div>
           <div className="auth-story__points"><span><CalendarCheck2 size={18} /> План и факт по этапам</span><span><WalletCards size={18} /> Прозрачная экономика</span><span><ShieldCheck size={18} /> Персональные роли и доступы</span></div>
           <small className="auth-story__footer">Внутренняя система управления · доступ только для команды</small>
         </aside>
         <section className="auth-card">
-          <div className="auth-card__brand"><span><ShieldCheck size={25} /></span><div><strong>СТРОЙОС</strong><small>защищённый вход</small></div></div>
+          <div className="auth-card__brand"><span><img src="/favicon.svg" alt="" /></span><div><strong>ИКИОМА ОС</strong><small>защищённый вход</small></div></div>
           {inviteToken ? (
             <>
               <div className="auth-card__heading"><span>Первый вход</span><h2>Создайте свой пароль</h2><p>Пароль известен только вам. После сохранения вы сразу войдёте с назначенной ролью.</p></div>
@@ -79,7 +79,7 @@ export function AuthGate({ sessionError }: { sessionError?: string }) {
             </>
           ) : (
             <>
-              <div className="auth-card__heading"><span>С возвращением</span><h2>Вход в СтройОС</h2><p>Введите личный логин или почту и свой пароль.</p></div>
+              <div className="auth-card__heading"><span>С возвращением</span><h2>Вход в ИКИОМА ОС</h2><p>Введите личный логин или почту и свой пароль.</p></div>
               <form onSubmit={submitLogin} className="auth-form">
                 <Field label="Логин или почта"><div className="auth-input"><Mail size={17} /><input required autoCapitalize="none" autoCorrect="off" autoComplete="username" value={login} onChange={(event) => setLogin(event.target.value)} /></div></Field>
                 <Field label="Пароль"><div className="auth-input"><LockKeyhole size={17} /><input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></div></Field>
