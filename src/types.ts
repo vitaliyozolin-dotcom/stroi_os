@@ -225,7 +225,7 @@ export interface SystemUser {
   telegramBoundAt?: string;
   lastActiveAt?: string;
   invitedAt?: string;
-  inviteDelivery?: 'sent' | 'not_configured' | 'failed' | 'draft';
+  inviteDelivery?: 'manual' | 'sent' | 'not_configured' | 'failed' | 'draft';
 }
 
 export interface NotificationSettings {
