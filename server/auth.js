@@ -30,6 +30,15 @@ export const newOpaqueToken = () => randomBytes(32).toString('base64url');
 
 export const hashToken = (token) => createHash('sha256').update(String(token || '')).digest('hex');
 
+export const buildInviteUrl = (publicUrl, token) => {
+  const url = new URL(String(publicUrl || 'http://localhost'));
+  url.pathname = '/';
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('invite', String(token || ''));
+  return url.toString();
+};
+
 export const cookieValue = (cookieHeader, name) => {
   for (const part of String(cookieHeader || '').split(';')) {
     const separator = part.indexOf('=');
