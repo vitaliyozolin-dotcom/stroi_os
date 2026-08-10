@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cookieValue, hashPassword, hashToken, passwordIssue, verifyPassword } from '../server/auth.js';
+import { buildInviteUrl, cookieValue, hashPassword, hashToken, passwordIssue, verifyPassword } from '../server/auth.js';
 
 test('stores passwords as salted scrypt hashes', async () => {
   const stored = await hashPassword('correct horse battery staple');
@@ -17,6 +17,13 @@ test('requires a password of at least 12 characters', () => {
 test('hashes opaque invitation tokens before storage', () => {
   assert.equal(hashToken('invite-token').length, 64);
   assert.notEqual(hashToken('invite-token'), 'invite-token');
+});
+
+test('builds a manual one-time invitation URL on the configured public origin', () => {
+  assert.equal(
+    buildInviteUrl('https://stroios.example/path?old=1', 'token with spaces'),
+    'https://stroios.example/?invite=token+with+spaces',
+  );
 });
 
 test('reads only the named cookie', () => {
