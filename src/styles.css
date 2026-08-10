@@ -5467,22 +5467,18 @@ p {
 }
 
 .user-row {
-  position: relative;
   display: grid;
-  grid-template-columns: 35px minmax(150px, 1fr) 100px 90px 100px;
+  grid-template-columns: 35px minmax(180px, 1fr) minmax(0, auto) auto;
   align-items: center;
-  gap: 10px;
-  padding: 9px 112px 9px 3px;
+  gap: 12px;
+  padding: 9px 3px;
   border-top: 1px solid var(--border);
 }
 
 .user-row__actions {
-  position: absolute;
-  right: 2px;
-  top: 50%;
   display: flex;
+  flex: 0 0 auto;
   gap: 5px;
-  transform: translateY(-50%);
 }
 
 .user-row__actions button {
@@ -5522,14 +5518,32 @@ p {
   gap: 3px;
 }
 
+.user-row__identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-row__details {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .user-row__role,
 .user-row__status {
+  display: inline-flex;
+  flex: 0 0 auto;
   justify-self: start;
   min-width: 0;
 }
 
 .user-row__last {
+  flex: 0 0 auto;
   min-width: 0;
+  white-space: nowrap;
 }
 
 .user-row small,
@@ -6616,6 +6630,37 @@ p {
   }
 }
 
+@media (max-width: 960px) {
+  .user-row {
+    grid-template-columns: 35px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 7px 10px;
+    padding: 11px 3px;
+  }
+
+  .user-row__avatar {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .user-row__identity {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .user-row__details {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .user-row__actions {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+
 @media (max-width: 640px) {
   .client-camera-view iframe {
     min-height: 250px;
@@ -6768,26 +6813,24 @@ p {
     grid-template-columns: 35px minmax(0, 1fr);
     align-items: start;
     gap: 6px 10px;
-    padding: 13px 112px 13px 3px;
+    padding: 13px 3px;
   }
 
   .user-row__avatar {
     grid-column: 1;
-    grid-row: 1 / span 4;
+    grid-row: 1 / span 3;
   }
 
   .user-row__identity,
-  .user-row__role,
-  .user-row__status,
-  .user-row__last {
+  .user-row__details,
+  .user-row__actions {
     grid-column: 2;
     justify-self: start;
   }
 
   .user-row__identity { grid-row: 1; }
-  .user-row__role { grid-row: 2; }
-  .user-row__status { grid-row: 3; }
-  .user-row__last { grid-row: 4; }
+  .user-row__details { grid-row: 2; }
+  .user-row__actions { grid-row: 3; }
 
   .user-row__role .status-badge,
   .user-row__status .status-badge {
