@@ -19,7 +19,7 @@ const sessionDays = 30;
 const loginFailures = new Map();
 
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
-if (!basicPassword || basicPassword.length < 16) throw new Error('APP_PASSWORD must contain at least 16 characters');
+if (!basicPassword || basicPassword.length < 10) throw new Error('APP_PASSWORD must contain at least 10 characters');
 
 const database = new PostgresDatabase(databaseUrl);
 const bucket = new FileBucket(process.env.FILE_STORAGE_PATH || '/data/files');
@@ -77,14 +77,14 @@ const sessionIdentity = async (request) => {
   if (!token) return null;
   const now = new Date().toISOString();
   const row = await database.prepare(`
-    SELECT u.id, u.email, u.name, u.status, s.expires_at
+    SELECT u.id, u.email, u.name, u.status, u.last_login_at, s.expires_at
     FROM app_sessions s
     JOIN app_users u ON u.id = s.user_id
     WHERE s.token_hash = ?
   `).bind(hashToken(token)).first();
   if (!row || row.status !== 'active' || row.expires_at <= now) return null;
   void database.prepare(`UPDATE app_sessions SET last_seen_at = ? WHERE token_hash = ?`).bind(now, hashToken(token)).run().catch(console.error);
-  return { id: row.id, email: row.email, name: row.name };
+  return { id: row.id, email: row.email, name: row.name, lastLoginAt: row.last_login_at || null };
 };
 
 const requestIdentity = sessionIdentity;
@@ -145,13 +145,19 @@ const handleLogin = async (request, address) => {
   return jsonResponse({ ok: true, user: { email: user.email, name: user.name } }, 200, { 'Set-Cookie': await createSession(user.id, request) });
 };
 
+const handleLogout = async (request) => {
+  const token = cookieValue(request.headers.get('cookie'), sessionCookieName);
+  if (token) await database.prepare(`DELETE FROM app_sessions WHERE token_hash = ?`).bind(hashToken(token)).run();
+  return jsonResponse({ ok: true }, 200, { 'Set-Cookie': authCookie('', request, 0) });
+};
+
 const handleInvite = async (request, identity, env) => {
   if (!identity || normalizeLogin(identity.email) !== normalizeLogin(ownerEmail)) return jsonResponse({ ok: false, error: 'owner_required' }, 403);
   const payload = await readJson(request);
   const email = normalizeLogin(payload?.email);
   const name = typeof payload?.name === 'string' ? payload.name.trim().slice(0, 120) : '';
   const projectId = typeof payload?.projectId === 'string' ? payload.projectId.trim().slice(0, 100) : '';
-  const role = ['management', 'foreman', 'client'].includes(payload?.role) ? payload.role : '';
+  const role = ['management', 'foreman'].includes(payload?.role) ? payload.role : '';
   if (!/^\S+@\S+\.\S+$/.test(email) || !name || !projectId || !role) return jsonResponse({ ok: false, error: 'invalid_invite' }, 422);
   const token = newOpaqueToken();
   const now = new Date();
@@ -177,9 +183,9 @@ const handleAcceptInvite = async (request) => {
   if (!token || issue) return jsonResponse({ ok: false, error: issue || 'invalid_invite' }, 422);
   const now = new Date().toISOString();
   const invite = await database.prepare(`
-    SELECT token_hash, email, name, expires_at, used_at FROM access_invites WHERE token_hash = ?
+    SELECT token_hash, email, name, role, expires_at, used_at FROM access_invites WHERE token_hash = ?
   `).bind(hashToken(token)).first();
-  if (!invite || invite.used_at || invite.expires_at <= now) return jsonResponse({ ok: false, error: 'invite_expired' }, 410);
+  if (!invite || invite.used_at || invite.expires_at <= now || !['management', 'foreman'].includes(invite.role)) return jsonResponse({ ok: false, error: 'invite_expired' }, 410);
   const existing = await database.prepare(`SELECT id FROM app_users WHERE email = ?`).bind(invite.email).first();
   const userId = existing?.id || `user-${crypto.randomUUID()}`;
   const passwordHash = await hashPassword(password);
@@ -265,6 +271,7 @@ const server = createServer(async (incoming, outgoing) => {
 
     if (url.pathname === '/api/auth/login' && request.method === 'POST') return writeResponse(outgoing, await handleLogin(request, clientAddress(incoming)));
     if (url.pathname === '/api/auth/accept-invite' && request.method === 'POST') return writeResponse(outgoing, await handleAcceptInvite(request));
+    if (url.pathname === '/api/auth/logout' && request.method === 'POST') return writeResponse(outgoing, await handleLogout(request));
 
     const identity = await requestIdentity(request);
     if (url.pathname === '/api/access/invite' && request.method === 'POST') return writeResponse(outgoing, await handleInvite(request, identity, env));
@@ -276,6 +283,7 @@ const server = createServer(async (incoming, outgoing) => {
       headers.set('oai-authenticated-user-email', identity.email);
       headers.set('oai-authenticated-user-full-name', encodeURIComponent(identity.name));
       headers.set('oai-authenticated-user-full-name-encoding', 'percent-encoded-utf-8');
+      if (identity.lastLoginAt) headers.set('oai-authenticated-user-last-login-at', identity.lastLoginAt);
     }
 
     const authenticatedRequest = new Request(request, { headers });
