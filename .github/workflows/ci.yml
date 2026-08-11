@@ -20,3 +20,5 @@ jobs:
       - run: npm ci
       - run: npm run build:vps
       - run: docker build -t stroios:test .
+      - name: Verify server modules inside runtime image
+        run: docker run --rm --entrypoint node stroios:test --input-type=module -e "await import('./sites/worker.js')"
