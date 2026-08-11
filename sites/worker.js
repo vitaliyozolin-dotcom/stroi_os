@@ -5,6 +5,8 @@ const TELEGRAM_CONFIG_PROJECT_ID = '__integration__:telegram';
 const BATTLE_SCHEMA_VERSION = 17;
 const BATTLE_RESET_KEY = 'battle_v17_reset';
 const ALLOWED_ROLES = new Set(['management', 'foreman', 'client']);
+const PUBLIC_LEAD_PROJECT_ID = 'ikioma-sales';
+const PUBLIC_LEAD_ORIGINS = new Set(['https://ikioma.ru', 'https://www.ikioma.ru']);
 let schemaPromise;
 let battleResetPromise;
 
@@ -12,6 +14,19 @@ const json = (body, status = 200) => Response.json(body, {
   status,
   headers: {
     'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  },
+});
+
+const publicLeadResponse = (body, status, origin) => Response.json(body, {
+  status,
+  headers: {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400',
+    'Cache-Control': 'no-store',
+    'Vary': 'Origin',
     'X-Content-Type-Options': 'nosniff',
   },
 });
@@ -2747,8 +2762,12 @@ const handleLeadInbox = async (request, env) => {
     if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
     try {
       const snapshot = await readSnapshot(env.DB, projectId);
-      const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
-      if (!identity || identity.role !== 'management') return json({ ok: false, error: 'project_access_denied' }, 403);
+      const identity = projectId === PUBLIC_LEAD_PROJECT_ID
+        ? authenticatedIdentity(request, env)
+        : snapshot ? projectIdentity(request, env, snapshot.state) : null;
+      if (!identity || (projectId === PUBLIC_LEAD_PROJECT_ID ? !identity.isOwner : identity.role !== 'management')) {
+        return json({ ok: false, error: 'project_access_denied' }, 403);
+      }
       const result = await env.DB.prepare(`SELECT id, project_id, created_at, name, phone, email, source, message, status FROM lead_inbox WHERE project_id = ? ORDER BY created_at DESC LIMIT 100`).bind(projectId).all();
       return json({ ok: true, leads: result?.results ?? [] });
     } catch { return json({ ok: false, error: 'storage_error' }, 500); }
@@ -2773,8 +2792,61 @@ const handleLeadInbox = async (request, env) => {
   } catch { return json({ ok: false, error: 'storage_error' }, 500); }
 };
 
+const handlePublicLead = async (request, env) => {
+  const origin = clean(request.headers.get('origin'), 500);
+  if (!PUBLIC_LEAD_ORIGINS.has(origin)) return json({ ok: false, error: 'forbidden_origin' }, 403);
+  if (request.method === 'OPTIONS') return new Response(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin',
+    },
+  });
+  if (request.method !== 'POST') return publicLeadResponse({ ok: false, error: 'method_not_allowed' }, 405, origin);
+  if (!env.DB) return publicLeadResponse({ ok: false, error: 'storage_unavailable' }, 503, origin);
+
+  let payload;
+  try { payload = await request.json(); } catch { return publicLeadResponse({ ok: false, error: 'invalid_json' }, 400, origin); }
+
+  const name = clean(payload?.name, 120);
+  const phone = clean(payload?.phone, 60);
+  const email = clean(payload?.email, 240);
+  const source = clean(payload?.source, 40) || 'website';
+  const message = clean(payload?.message, 1000);
+  const trap = clean(payload?.company, 120);
+  if (trap) return publicLeadResponse({ ok: true }, 202, origin);
+  if (!name || phone.replace(/\D/g, '').length < 10 || (email && !/^\S+@\S+\.\S+$/.test(email))) {
+    return publicLeadResponse({ ok: false, error: 'invalid_lead' }, 422, origin);
+  }
+
+  try {
+    await ensureSchema(env.DB);
+    const duplicateAfter = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const duplicate = await env.DB.prepare(`
+      SELECT id FROM lead_inbox
+      WHERE project_id = ? AND phone = ? AND created_at >= ?
+      LIMIT 1
+    `).bind(PUBLIC_LEAD_PROJECT_ID, phone, duplicateAfter).first();
+    if (duplicate?.id) return publicLeadResponse({ ok: true, duplicate: true }, 200, origin);
+
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    await env.DB.prepare(`
+      INSERT INTO lead_inbox (id, project_id, created_at, name, phone, email, source, message, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')
+    `).bind(id, PUBLIC_LEAD_PROJECT_ID, createdAt, name, phone, email || null, source, message || null).run();
+    return publicLeadResponse({ ok: true, leadId: id }, 201, origin);
+  } catch {
+    return publicLeadResponse({ ok: false, error: 'storage_error' }, 500, origin);
+  }
+};
+
 const handleApi = async (request, env, context) => {
   const url = new URL(request.url);
+  if (url.pathname === '/api/public/leads') return handlePublicLead(request, env);
   const origin = request.headers.get('origin');
   if (origin && origin !== url.origin) return json({ ok: false, error: 'forbidden_origin' }, 403);
 
