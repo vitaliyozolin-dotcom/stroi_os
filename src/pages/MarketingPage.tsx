@@ -65,7 +65,7 @@ export function MarketingPage({ state, actor, focusId, onChange }: { state: AppS
   useEffect(() => {
     if (importedProjects.current.has(state.project.id)) return;
     importedProjects.current.add(state.project.id);
-    void fetch(`/api/leads?projectId=${encodeURIComponent(state.project.id)}`, { cache: 'no-store' }).then((response) => response.json()).then((body: { leads?: Array<{ id: string; created_at: string; name: string; phone: string; email?: string; source?: string; message?: string }> }) => {
+    void fetch('/api/leads?projectId=ikioma-sales', { cache: 'no-store' }).then((response) => response.json()).then((body: { leads?: Array<{ id: string; created_at: string; name: string; phone: string; email?: string; source?: string; message?: string }> }) => {
       const incoming = (body.leads ?? []).filter((item) => !state.leads.some((lead) => lead.id === item.id)).map((item): Lead => ({ id: item.id, createdAt: item.created_at, name: item.name, phone: item.phone, email: item.email || undefined, source: (Object.hasOwn(sourceLabels, item.source ?? '') ? item.source : 'website') as LeadSource, stage: 'new', nextAction: 'Позвонить и квалифицировать заявку', owner: actor, notes: item.message || undefined }));
       if (!incoming.length) return;
       onChange({ ...state, leads: [...incoming, ...state.leads], activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor: 'СтройОС', text: `Из формы сайта получено заявок: ${incoming.length}`, tone: 'neutral' }, ...state.activity] });
