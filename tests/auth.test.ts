@@ -9,9 +9,9 @@ test('stores passwords as salted scrypt hashes', async () => {
   assert.equal(await verifyPassword('wrong password', stored), false);
 });
 
-test('requires a password of at least 12 characters', () => {
-  assert.equal(passwordIssue('short'), 'password_too_short');
-  assert.equal(passwordIssue('long-enough-password'), '');
+test('requires a password of at least 10 characters', () => {
+  assert.equal(passwordIssue('123456789'), 'password_too_short');
+  assert.equal(passwordIssue('1234567890'), '');
 });
 
 test('hashes opaque invitation tokens before storage', () => {
