@@ -881,9 +881,104 @@ p {
   background: var(--red);
 }
 
+.user-menu {
+  position: relative;
+}
+
+.user-menu > summary {
+  list-style: none;
+}
+
+.user-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
 .user-chip {
   gap: 9px;
-  padding-left: 2px;
+  padding: 4px 7px 4px 4px;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.user-chip:hover,
+.user-menu[open] .user-chip {
+  border-color: var(--border);
+  background: #fff;
+}
+
+.user-chip__chevron {
+  color: var(--soft-muted);
+  transition: transform 160ms ease;
+}
+
+.user-menu[open] .user-chip__chevron {
+  transform: rotate(180deg);
+}
+
+.user-menu__dropdown {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  z-index: 60;
+  display: grid;
+  width: 250px;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 16px 38px rgba(18, 42, 32, .16);
+}
+
+.user-menu__dropdown > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 3px 5px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.user-menu__dropdown > div strong,
+.user-menu__dropdown > div small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-menu__dropdown > div strong {
+  font-size: 13px;
+}
+
+.user-menu__dropdown > div small {
+  margin-top: 3px;
+  color: var(--soft-muted);
+  font-size: 11px;
+}
+
+.user-menu__dropdown > button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  color: var(--red);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  border: 0;
+  border-radius: 9px;
+  background: var(--red-light);
+  cursor: pointer;
+}
+
+.user-menu__error {
+  color: var(--red);
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .user-chip > span {
@@ -8832,4 +8927,10 @@ button.project-quick-card:hover {
   .document-detail-card > div:last-child {
     grid-column: 1 / -1;
   }
+}
+
+
+.permission-table--internal .permission-table__head,
+.permission-table--internal .permission-table__row {
+  grid-template-columns: minmax(180px, 1.6fr) repeat(2, minmax(110px, 1fr));
 }
