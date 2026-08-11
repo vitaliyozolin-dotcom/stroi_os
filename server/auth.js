@@ -7,7 +7,7 @@ const KEY_LENGTH = 64;
 export const normalizeLogin = (value) => typeof value === 'string' ? value.trim().toLowerCase() : '';
 
 export const passwordIssue = (password) => {
-  if (typeof password !== 'string' || password.length < 12) return 'password_too_short';
+  if (typeof password !== 'string' || password.length < 10) return 'password_too_short';
   if (password.length > 256) return 'password_too_long';
   return '';
 };
