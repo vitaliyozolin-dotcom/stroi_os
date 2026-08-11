@@ -159,7 +159,6 @@ function App() {
   }, []);
 
   const navigation = useMemo(() => {
-    if (role === 'client') return fullNavigation.filter((item) => item.id === 'client');
     if (role === 'foreman') return fullNavigation.filter((item) => ['overview', 'project', 'tasks', 'schedule', 'procurement', 'quality'].includes(item.id));
     return fullNavigation.filter((item) => item.id !== 'settings');
   }, [role]);
@@ -246,7 +245,7 @@ function App() {
         </button>
 
         <nav className="sidebar__nav" aria-label="Основная навигация">
-          <small className="sidebar__label">{role === 'client' ? 'Мой дом' : 'Управление проектом'}</small>
+          <small className="sidebar__label">Управление проектом</small>
           {navigation.map((item) => {
             const Icon = item.icon;
             return (
