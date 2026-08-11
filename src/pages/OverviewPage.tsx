@@ -3,7 +3,6 @@ import {
   ArrowUpRight,
   Banknote,
   CalendarClock,
-  Camera,
   CheckCircle2,
   ChevronRight,
   CircleDollarSign,
@@ -131,11 +130,6 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
           <h1>{role === 'foreman' ? 'Сегодня на объекте' : state.project.name}</h1>
           <p>{[state.project.model, state.project.area ? `${state.project.area} м²` : '', state.project.address].filter(Boolean).join(' · ') || 'Заполните параметры первого объекта'}</p>
         </div>
-        {role !== 'foreman' && (
-          <button className="button button--light project-heading__action" type="button" onClick={() => onNavigate('client')}>
-            <Camera size={18} /> Кабинет клиента <ArrowUpRight size={17} />
-          </button>
-        )}
       </section>}
 
       {(show('progress') || show('finance')) && <section className="metric-grid">
@@ -239,7 +233,7 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
               </button>
             ))}
             {nextDecision && (
-              <button type="button" onClick={() => onNavigate('client')} className="decision-item">
+              <button type="button" onClick={() => onNavigate('project')} className="decision-item">
                 <span className="decision-item__icon"><Clock3 size={18} /></span>
                 <span><strong>Ответ клиента</strong><small>{nextDecision.title} · до {formatDate(nextDecision.dueDate)}</small></span>
                 <ChevronRight size={17} />
