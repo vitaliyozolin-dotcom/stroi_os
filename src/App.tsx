@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   ListTodo,
   LoaderCircle,
+  LogOut,
   Menu,
   Megaphone,
   PackageSearch,
@@ -20,12 +21,10 @@ import {
   RefreshCw,
   Settings2,
   ShieldCheck,
-  UserRound,
   UsersRound,
   WalletCards,
   X,
 } from 'lucide-react';
-import { ClientPage } from './pages/ClientPage';
 import { FinancePage } from './pages/FinancePage';
 import { MarketingPage } from './pages/MarketingPage';
 import { OverviewPage } from './pages/OverviewPage';
@@ -60,7 +59,6 @@ const pageLabels: Record<PageId, string> = {
   schedule: 'График работ',
   procurement: 'Снабжение',
   quality: 'Контроль качества',
-  client: 'Кабинет клиента',
   settings: 'Настройки',
 };
 
@@ -74,7 +72,6 @@ const fullNavigation: Array<{ id: PageId; label: string; icon: typeof LayoutDash
   { id: 'procurement', label: 'Снабжение', icon: PackageSearch },
   { id: 'counterparties', label: 'Подрядчики и поставщики', icon: UsersRound },
   { id: 'quality', label: 'Качество', icon: ShieldCheck },
-  { id: 'client', label: 'Кабинет клиента', icon: UserRound },
 ];
 
 const syncLabels: Record<SyncPhase, string> = {
@@ -200,11 +197,21 @@ function App() {
       case 'schedule': return <SchedulePage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'procurement': return <ProcurementPage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'quality': return <QualityPage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
-      case 'client': return <ClientPage state={state} onChange={updateState} />;
-      case 'settings': return <SettingsPage state={state} actor={session?.name ?? 'Владелец'} onChange={updateState} />;
+      case 'settings': return <SettingsPage state={state} actor={session?.name ?? 'Владелец'} currentUserEmail={session?.email ?? ''} onChange={updateState} />;
       default: return <OverviewPage state={state} role={role} onNavigate={navigate} onOpenProjects={() => setCreateProjectOpen(true)} />;
     }
   })();
+
+  const logout = async () => {
+    setSessionError('');
+    try {
+      const response = await fetch('/api/auth/logout', { method: 'POST', headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('logout_failed');
+      window.location.assign('/');
+    } catch {
+      setSessionError('Не удалось завершить сеанс. Проверьте соединение и повторите выход.');
+    }
+  };
 
   const submitProject = async (event: FormEvent) => {
     event.preventDefault();
@@ -290,7 +297,14 @@ function App() {
             </button>
             <span className="session-role"><ShieldCheck size={15} /> {roleLabels[role]}</span>
             <button type="button" className="notification-button" aria-label={`Уведомления: ${notificationCount}`} onClick={() => setNotificationsOpen(true)}><Bell size={19} />{notificationCount > 0 && <i />}</button>
-            <div className="user-chip"><span>{initials(session.name)}</span><div><strong>{session.name}</strong><small>{session.email}</small></div></div>
+            <details className="user-menu">
+              <summary className="user-chip" aria-label="Открыть меню профиля"><span>{initials(session.name)}</span><div><strong>{session.name}</strong><small>{session.email}</small></div><ChevronDown className="user-chip__chevron" size={15} /></summary>
+              <div className="user-menu__dropdown">
+                <div><strong>{session.name}</strong><small>{roleLabels[role]} · {session.lastLoginAt ? `вход ${shortTime(session.lastLoginAt)}` : 'сейчас в системе'}</small></div>
+                <button type="button" onClick={() => void logout()}><LogOut size={16} /> Выйти</button>
+                {sessionError && <small className="user-menu__error">{sessionError}</small>}
+              </div>
+            </details>
           </div>
         </header>
         {conflict && (
