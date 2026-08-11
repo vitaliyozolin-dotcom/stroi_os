@@ -6,7 +6,7 @@ const messageFor = (error: string) => ({
   invalid_credentials: 'Неверная почта, логин или пароль.',
   too_many_attempts: 'Слишком много попыток. Подождите 15 минут.',
   invite_expired: 'Ссылка уже использована или её срок истёк. Попросите выдать доступ повторно.',
-  password_too_short: 'Пароль должен содержать не менее 12 символов.',
+  password_too_short: 'Пароль должен содержать не менее 10 символов.',
 }[error] || 'Не удалось выполнить вход. Повторите попытку.');
 
 export function AuthGate({ sessionError }: { sessionError?: string }) {
@@ -71,8 +71,8 @@ export function AuthGate({ sessionError }: { sessionError?: string }) {
             <>
               <div className="auth-card__heading"><span>Первый вход</span><h2>Создайте свой пароль</h2><p>Пароль известен только вам. После сохранения вы сразу войдёте с назначенной ролью.</p></div>
               <form onSubmit={acceptInvite} className="auth-form">
-                <Field label="Новый пароль" hint="Не менее 12 символов"><div className="auth-input"><LockKeyhole size={17} /><input required minLength={12} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></div></Field>
-                <Field label="Повторите пароль"><div className="auth-input"><LockKeyhole size={17} /><input required minLength={12} type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></div></Field>
+                <Field label="Новый пароль" hint="Не менее 10 символов"><div className="auth-input"><LockKeyhole size={17} /><input required minLength={10} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></div></Field>
+                <Field label="Повторите пароль"><div className="auth-input"><LockKeyhole size={17} /><input required minLength={10} type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></div></Field>
                 {message && <div className="auth-message" role="alert">{message}</div>}
                 <button className="button button--primary auth-submit" disabled={busy} type="submit"><KeyRound size={17} /> {busy ? 'Создаём доступ…' : 'Создать пароль и войти'}</button>
               </form>
