@@ -33,6 +33,10 @@ project:
     - "Не отправлять в общий чат обычные сохранения и технический шум"
     - "Не хранить секреты в GitHub"
   risks:
+    - id: runtime_artifact_completeness
+      status: mitigated
+      owner: "Codex"
+      mitigation: "Runtime-образ копирует весь каталог sites; CI импортирует worker.js внутри готового Docker-образа и падает при отсутствующей зависимости"
     - id: domain_hold
       status: open
       owner: "Beget/OpenAI support"
