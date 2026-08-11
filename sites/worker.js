@@ -4,7 +4,7 @@ const MAX_QUALITY_PHOTO_BYTES = 12 * 1024 * 1024;
 const TELEGRAM_CONFIG_PROJECT_ID = '__integration__:telegram';
 const BATTLE_SCHEMA_VERSION = 17;
 const BATTLE_RESET_KEY = 'battle_v17_reset';
-const ALLOWED_ROLES = new Set(['management', 'foreman', 'client']);
+const ALLOWED_ROLES = new Set(['management', 'foreman']);
 let schemaPromise;
 let battleResetPromise;
 
@@ -426,11 +426,13 @@ const authenticatedIdentity = (request, env) => {
     }
   }
   const isOwner = Boolean(ownerEmail && email === ownerEmail);
+  const lastLoginAt = clean(request.headers.get('oai-authenticated-user-last-login-at'), 40);
 
   return {
     email,
     name: clean(name, 120) || (isOwner ? clean(env.OWNER_NAME, 120) : '') || email,
     isOwner,
+    lastLoginAt: lastLoginAt || undefined,
   };
 };
 
@@ -2499,6 +2501,7 @@ const handleSession = async (request, env) => {
         name: identity.name,
         role: identity.role,
         isOwner: identity.isOwner,
+        lastLoginAt: identity.lastLoginAt,
       },
     });
   } catch {
