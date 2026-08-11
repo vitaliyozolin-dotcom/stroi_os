@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 import worker from '../sites/worker.js';
 import { FileBucket } from './file-bucket.js';
 import { PostgresDatabase } from './postgres.js';
+import { isPublicRoute } from './public-routes.js';
 
 const port = Number(process.env.PORT) || 3000;
 const clientRoot = resolve(process.env.CLIENT_ROOT || 'dist/client');
@@ -40,7 +41,6 @@ const basicIdentity = async (request) => {
   return validUser && validPassword ? { email: ownerEmail, name: process.env.OWNER_NAME || 'Виталий Озолин' } : null;
 };
 
-const isPublicRoute = (url) => url.pathname === '/api/health' || url.pathname === '/api/integrations/telegram/update';
 const unauthorized = () => new Response('Требуется вход в СтройОС', {
   status: 401,
   headers: { 'Content-Type': 'text/plain; charset=utf-8', 'WWW-Authenticate': 'Basic realm="StroiOS", charset="UTF-8"' },
