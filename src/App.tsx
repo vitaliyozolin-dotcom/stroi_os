@@ -127,12 +127,10 @@ function App() {
         const params = new URLSearchParams(window.location.search);
         const requestedPage = params.get('page') as PageId | null;
         const requestedProject = params.get('projectId');
-        const allowed = body.user.role === 'client'
-          ? ['client']
-          : body.user.role === 'foreman'
-            ? ['overview', 'project', 'tasks', 'schedule', 'procurement', 'quality']
-            : Object.keys(pageLabels);
-        setPage(requestedPage && allowed.includes(requestedPage) ? requestedPage : body.user.role === 'client' ? 'client' : 'overview');
+        const allowed = body.user.role === 'foreman'
+          ? ['overview', 'project', 'tasks', 'schedule', 'procurement', 'quality']
+          : Object.keys(pageLabels);
+        setPage(requestedPage && allowed.includes(requestedPage) ? requestedPage : 'overview');
         setFocusEntityId(params.get('entity'));
         if (!deepLinkApplied.current && requestedProject && requestedProject !== state.project.id) {
           deepLinkApplied.current = true;
