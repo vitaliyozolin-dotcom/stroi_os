@@ -2368,9 +2368,22 @@ const handleIntegrationTest = async (request, env) => {
     if (!status.telegram) return json({ ok: false, error: status.telegramIssue || 'telegram_not_configured' }, 409);
     try {
       const connection = await resolveTelegramConnection(env, { discover: false });
-      const response = await telegramSend(env.TELEGRAM_BOT_TOKEN, connection.chat?.id, message);
-      if (!response.ok) return json({ ok: false, error: 'provider_error' }, 502);
-      return json({ ok: true, channel: 'telegram' });
+      const chatId = clean(connection.chat?.id, 120);
+      const dedupeKey = `system:test:${crypto.randomUUID()}`;
+      await queueTelegramDelivery(env, {
+        dedupeKey,
+        projectId: TELEGRAM_CONFIG_PROJECT_ID,
+        chatId,
+        text: `🧪 ${message}\n\nОчередь, защита от дублей и доставка работают.`,
+      });
+      await flushTelegramDeliveries(env);
+      const delivery = await env.DB.prepare(`
+        SELECT status, attempts, last_error
+        FROM notification_deliveries
+        WHERE dedupe_key = ?
+      `).bind(dedupeKey).first();
+      if (delivery?.status === 'sent') return json({ ok: true, channel: 'telegram', delivery: 'sent' });
+      return json({ ok: true, channel: 'telegram', delivery: 'queued', attempts: Number(delivery?.attempts) || 0 }, 202);
     } catch { return json({ ok: false, error: 'provider_unavailable' }, 502); }
   }
   return json({ ok: false, error: 'unsupported_channel' }, 422);

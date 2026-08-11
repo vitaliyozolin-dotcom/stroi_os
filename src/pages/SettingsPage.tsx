@@ -185,7 +185,9 @@ export function SettingsPage({ state, actor, currentUserEmail, onChange }: { sta
       const response = await fetch('/api/integrations/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, to: state.settings.users.find((user) => user.role === 'management')?.email, message: `ИКИОМА ОС: тест канала ${channel === 'email' ? 'Email' : 'Telegram'} для проекта ${state.project.code}` }) });
       const body = await response.json();
       setIntegrationMessage(response.ok && body.ok
-        ? `Тест ${channel === 'email' ? 'Email' : 'Telegram'} отправлен.`
+        ? body.delivery === 'queued'
+          ? 'Тест Telegram поставлен в очередь и будет повторён автоматически.'
+          : `Тест ${channel === 'email' ? 'Email' : 'Telegram'} отправлен.`
         : body.error === 'email_not_configured'
           ? 'Email ещё не подключён: нужен ключ Resend и подтверждённый адрес отправителя.'
           : ['telegram_not_configured', 'chat_not_found'].includes(body.error)
