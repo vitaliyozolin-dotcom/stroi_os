@@ -12,7 +12,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist/client ./dist/client
 COPY --from=build /app/server ./server
-COPY --from=build /app/sites/worker.js ./sites/worker.js
+COPY --from=build /app/sites ./sites
 USER node
 EXPOSE 3000
 CMD ["node", "server/index.js"]
