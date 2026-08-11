@@ -16,7 +16,7 @@ const basicUser = process.env.APP_USERNAME || 'vitaliy';
 const basicPassword = process.env.APP_PASSWORD;
 
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
-if (!basicPassword || basicPassword.length < 16) throw new Error('APP_PASSWORD must contain at least 16 characters');
+if (!basicPassword || basicPassword.length < 10) throw new Error('APP_PASSWORD must contain at least 10 characters');
 
 const database = new PostgresDatabase(databaseUrl);
 const bucket = new FileBucket(process.env.FILE_STORAGE_PATH || '/data/files');
