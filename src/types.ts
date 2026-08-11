@@ -6,6 +6,7 @@ export interface AuthenticatedUser {
   name: string;
   role: UserRole;
   isOwner: boolean;
+  lastLoginAt?: string;
 }
 
 export type PageId =
@@ -18,7 +19,6 @@ export type PageId =
   | 'schedule'
   | 'procurement'
   | 'quality'
-  | 'client'
   | 'settings';
 
 export type StageStatus =
