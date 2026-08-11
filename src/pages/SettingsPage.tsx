@@ -35,6 +35,8 @@ type IntegrationStatus = {
   telegramIssue?: string;
   telegramInbound?: boolean;
   telegramBoundUsers?: number;
+  telegramPending?: number;
+  telegramFailed?: number;
   camera: boolean;
   websiteForm: boolean;
   publicWebsiteForm: boolean;
@@ -60,7 +62,7 @@ const eventLabels: Record<keyof NotificationSettings['events'], { title: string;
   scheduleDelay: { title: 'Отклонение от графика', text: 'Прогноз этапа вышел за план' },
   taskAssigned: { title: 'Новая задача', text: 'Назначен ответственный или задача передана другому' },
   taskOverdue: { title: 'Просрочка задачи', text: 'Срок прошёл, а задача не закрыта' },
-  projectActivity: { title: 'Все изменения проекта', text: 'Отправлять изменения объекта в общий Telegram-чат' },
+  projectActivity: { title: 'Проект, документы и решения', text: 'Статус и срок проекта, документы, решения, отчёты и блокировки' },
 };
 
 function Toggle({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: () => void; label: string; disabled?: boolean }) {
@@ -286,7 +288,7 @@ export function SettingsPage({ state, actor, currentUserEmail, onChange }: { sta
 
           {tab === 'notifications' && (
             <>
-              <section className="panel settings-panel"><SectionHeader eyebrow="Каналы" title="Куда отправлять" /><div className="channel-grid"><article><span><Mail size={20} /></span><div><strong>Email</strong><small>{integrationStatus?.email ? 'Сводки и критичные события' : 'Сначала подключите Resend'}</small></div><Toggle label="Email" disabled={!integrationStatus?.email} checked={Boolean(integrationStatus?.email && state.settings.notifications.channels.email)} onChange={() => toggleChannel('email')} /></article><article><span><Send size={20} /></span><div><strong>Telegram</strong><small>{integrationStatus?.telegramCommon ? `${integrationStatus.telegramCommonTitle || 'Общий чат'} · личных адресатов: ${integrationStatus.telegramBoundUsers ?? state.settings.users.filter((user) => user.telegramChatId).length}` : 'Сначала подключите бота и общий чат'}</small></div><Toggle label="Telegram" disabled={!integrationStatus?.telegramCommon} checked={Boolean(integrationStatus?.telegramCommon && state.settings.notifications.channels.telegram)} onChange={() => toggleChannel('telegram')} /></article><article><span><Globe2 size={20} /></span><div><strong>В браузере</strong><small>Центр уведомлений ИКИОМА ОС</small></div><Toggle label="В браузере" checked={state.settings.notifications.channels.browser} onChange={() => toggleChannel('browser')} /></article></div></section>
+              <section className="panel settings-panel"><SectionHeader eyebrow="Каналы" title="Куда отправлять" /><div className="channel-grid"><article><span><Mail size={20} /></span><div><strong>Email</strong><small>{integrationStatus?.email ? 'Сводки и критичные события' : 'Сначала подключите Resend'}</small></div><Toggle label="Email" disabled={!integrationStatus?.email} checked={Boolean(integrationStatus?.email && state.settings.notifications.channels.email)} onChange={() => toggleChannel('email')} /></article><article><span><Send size={20} /></span><div><strong>Telegram</strong><small>{integrationStatus?.telegramCommon ? integrationStatus.telegramFailed ? `${integrationStatus.telegramCommonTitle || 'Общий чат'} · ошибок доставки: ${integrationStatus.telegramFailed}` : integrationStatus.telegramPending ? `${integrationStatus.telegramCommonTitle || 'Общий чат'} · в очереди: ${integrationStatus.telegramPending}` : `${integrationStatus.telegramCommonTitle || 'Общий чат'} · доставка работает` : 'Сначала подключите бота и общий чат'}</small></div><Toggle label="Telegram" disabled={!integrationStatus?.telegramCommon} checked={Boolean(integrationStatus?.telegramCommon && state.settings.notifications.channels.telegram)} onChange={() => toggleChannel('telegram')} /></article><article><span><Globe2 size={20} /></span><div><strong>В браузере</strong><small>Центр уведомлений ИКИОМА ОС</small></div><Toggle label="В браузере" checked={state.settings.notifications.channels.browser} onChange={() => toggleChannel('browser')} /></article></div></section>
               <section className="panel settings-panel"><SectionHeader eyebrow="Правила" title="О каких событиях сообщать" /><div className="settings-list">{(Object.keys(eventLabels) as Array<keyof NotificationSettings['events']>).map((event) => <div className="settings-list__row" key={event}><span><strong>{eventLabels[event].title}</strong><small>{eventLabels[event].text}</small></span><Toggle label={eventLabels[event].title} checked={state.settings.notifications.events[event]} onChange={() => toggleEvent(event)} /></div>)}</div></section>
             </>
           )}
@@ -310,7 +312,7 @@ export function SettingsPage({ state, actor, currentUserEmail, onChange }: { sta
                         : `Исходящие уведомления работают; входящие команды ещё не подключены.`
                       : `Добавьте бота в общий чат, отправьте там ${telegramCommand} — ИКИОМА ОС найдёт группу автоматически.`}</p>
                   </div>
-                  <StatusBadge label={integrationStatus?.telegramInbound ? 'Полевой штаб готов' : telegramStatusLabel} tone={integrationStatus?.telegramInbound ? 'positive' : integrationStatus?.telegramIssue === 'invalid_token' ? 'warning' : 'neutral'} />
+                  <StatusBadge label={integrationStatus?.telegramFailed ? `Ошибок доставки: ${integrationStatus.telegramFailed}` : integrationStatus?.telegramPending ? `В очереди: ${integrationStatus.telegramPending}` : integrationStatus?.telegramInbound ? 'Полевой штаб готов' : telegramStatusLabel} tone={integrationStatus?.telegramFailed ? 'warning' : integrationStatus?.telegramInbound ? 'positive' : integrationStatus?.telegramIssue === 'invalid_token' ? 'warning' : 'neutral'} />
                   {integrationStatus?.telegramCandidates?.length ? (
                     <div className="telegram-chat-options">
                       <small>Бот видит несколько групп. Какая из них общая?</small>

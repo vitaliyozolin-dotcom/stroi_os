@@ -1,8 +1,10 @@
+import { formatNotificationMessage, notificationEvents } from './notifications.js';
+
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_QUALITY_PHOTO_BYTES = 12 * 1024 * 1024;
 const TELEGRAM_CONFIG_PROJECT_ID = '__integration__:telegram';
-const BATTLE_SCHEMA_VERSION = 17;
+const BATTLE_SCHEMA_VERSION = 18;
 const BATTLE_RESET_KEY = 'battle_v17_reset';
 const ALLOWED_ROLES = new Set(['management', 'foreman']);
 let schemaPromise;
@@ -116,6 +118,23 @@ const ensureSchema = async (db) => {
         )
       `).run(),
       db.prepare(`
+        CREATE TABLE IF NOT EXISTS notification_deliveries (
+          id TEXT PRIMARY KEY,
+          dedupe_key TEXT UNIQUE NOT NULL,
+          project_id TEXT NOT NULL,
+          channel TEXT NOT NULL,
+          destination TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempts INTEGER NOT NULL,
+          next_attempt_at TEXT NOT NULL,
+          last_attempt_at TEXT,
+          last_error TEXT,
+          created_at TEXT NOT NULL,
+          sent_at TEXT
+        )
+      `).run(),
+      db.prepare(`
         CREATE TABLE IF NOT EXISTS system_meta (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL,
@@ -140,6 +159,10 @@ const ensureSchema = async (db) => {
       db.prepare(`
         CREATE INDEX IF NOT EXISTS telegram_bindings_project_user
         ON telegram_bindings (project_id, system_user_id)
+      `).run(),
+      db.prepare(`
+        CREATE INDEX IF NOT EXISTS notification_deliveries_retry
+        ON notification_deliveries (status, next_attempt_at)
       `).run(),
       db.prepare(`
         CREATE INDEX IF NOT EXISTS data_reset_backups_created_at
@@ -263,7 +286,7 @@ const cleanWorkspaceState = (env) => {
         status: 'active',
       }],
       notifications: {
-        channels: { email: false, telegram: false, browser: true },
+        channels: { email: false, telegram: true, browser: true },
         events: {
           financeApproval: true,
           supplyRisk: true,
@@ -385,7 +408,24 @@ const ensureBattleReset = async (env) => {
   await battleResetPromise;
 };
 
-const applyCurrentBrand = (state) => JSON.parse(JSON.stringify(state).replaceAll('СтройОС', 'ИКИОМА ОС'));
+const applyCurrentBrand = (state) => {
+  const next = JSON.parse(JSON.stringify(state).replaceAll('СтройОС', 'ИКИОМА ОС'));
+  if (Number(next.settings?.schemaVersion ?? 0) < BATTLE_SCHEMA_VERSION) {
+    next.schemaVersion = BATTLE_SCHEMA_VERSION;
+    next.settings = next.settings ?? {};
+    next.settings.schemaVersion = BATTLE_SCHEMA_VERSION;
+    next.settings.notifications = next.settings.notifications ?? {};
+    next.settings.notifications.channels = {
+      ...(next.settings.notifications.channels ?? {}),
+      telegram: true,
+    };
+    next.settings.notifications.events = {
+      ...(next.settings.notifications.events ?? {}),
+      projectActivity: true,
+    };
+  }
+  return next;
+};
 
 const readSnapshot = async (db, projectId) => {
   const row = await db.prepare(`
@@ -738,56 +778,6 @@ const applyBattleAutomations = (previous, next, actor) => {
     });
   }
   return next;
-};
-
-const notificationEvent = (text, page, entityId, recipientId) => ({ text, page, entityId, recipientId });
-
-const notificationEvents = (previous, next) => {
-  if (!previous) return [];
-  const enabled = next.settings?.notifications?.events ?? {};
-  const events = [];
-  const beforeCheckpoints = new Map((previous.checkpoints ?? []).map((item) => [item.id, item]));
-  for (const item of next.checkpoints ?? []) {
-    const before = beforeCheckpoints.get(item.id);
-    if (enabled.qualityRework && item.status === 'rework' && before?.status !== 'rework') events.push(notificationEvent(`Качество: «${item.title}» возвращено на доработку`, 'quality', item.id));
-    if (enabled.qualityRework && item.status === 'accepted' && before?.status !== 'accepted') events.push(notificationEvent(`Качество: «${item.title}» принято`, 'quality', item.id));
-  }
-  const beforeSupply = new Map((previous.procurement ?? []).map((item) => [item.id, item]));
-  for (const item of next.procurement ?? []) {
-    const before = beforeSupply.get(item.id);
-    if (enabled.supplyRisk && item.risk && before?.risk !== item.risk) events.push(notificationEvent(`Снабжение: «${item.item}» — ${item.risk}`, 'procurement', item.id));
-    if (enabled.supplyRisk && before && before.status !== item.status && ['ordered', 'in_transit', 'delivered', 'accepted'].includes(item.status)) events.push(notificationEvent(`Снабжение: «${item.item}» → ${notificationStatusLabels[item.status] ?? item.status}`, 'procurement', item.id));
-  }
-  const beforeFinance = new Map((previous.financeEntries ?? []).map((item) => [item.id, item]));
-  for (const item of next.financeEntries ?? []) {
-    const before = beforeFinance.get(item.id);
-    if (enabled.financeApproval && item.kind === 'expense' && item.status === 'accepted' && before?.status !== 'accepted') events.push(notificationEvent(`Финансы: принято «${item.description}», ${item.amount} ₽`, 'finance', item.id));
-    if (enabled.financeApproval && item.kind === 'expense' && Number(item.paidAmount) > Number(before?.paidAmount ?? 0)) events.push(notificationEvent(`Финансы: оплачено «${item.description}», всего ${Number(item.paidAmount)} ₽`, 'finance', item.id));
-    if (enabled.financeApproval && item.kind === 'income' && Number(item.paidAmount) > Number(before?.paidAmount ?? 0)) events.push(notificationEvent(`Финансы: получено «${item.description}», всего ${Number(item.paidAmount)} ₽`, 'finance', item.id));
-  }
-  const beforeStages = new Map((previous.stages ?? []).map((item) => [item.id, item]));
-  for (const item of next.stages ?? []) {
-    const before = beforeStages.get(item.id);
-    if (enabled.scheduleDelay && item.forecastEnd > item.planEnd && before?.forecastEnd !== item.forecastEnd) events.push(notificationEvent(`График: «${item.name}», прогноз ${item.forecastEnd} позже плана ${item.planEnd}`, 'schedule', item.id));
-    if (enabled.scheduleDelay && before && before.status !== item.status && ['blocked', 'accepted', 'rework'].includes(item.status)) events.push(notificationEvent(`Этап: «${item.name}» → ${notificationStatusLabels[item.status] ?? item.status}`, 'schedule', item.id));
-  }
-  const beforeLeads = new Set((previous.leads ?? []).map((item) => item.id));
-  for (const item of next.leads ?? []) if (enabled.leadWithoutAction && !beforeLeads.has(item.id)) events.push(notificationEvent(`CRM: новая заявка ${item.name}${clean(item.nextAction) ? `, далее: ${clean(item.nextAction)}` : ' без следующего действия'}`, 'marketing', item.id));
-  const beforeTasks = new Map((previous.tasks ?? []).map((item) => [item.id, item]));
-  const today = new Date().toISOString().slice(0, 10);
-  for (const item of next.tasks ?? []) {
-    const before = beforeTasks.get(item.id);
-    if (enabled.taskAssigned && (!before || before.assigneeId !== item.assigneeId)) events.push(notificationEvent(`Задача: «${item.title}» → ${item.assigneeName}, срок ${item.dueDate}`, 'tasks', item.id, item.assigneeId));
-    if (enabled.taskAssigned && before && before.dueDate !== item.dueDate) events.push(notificationEvent(`Срок задачи «${item.title}» перенесён: ${before.dueDate} → ${item.dueDate}`, 'tasks', item.id, item.assigneeId));
-    if (enabled.taskAssigned && before && before.status !== item.status && ['waiting', 'review', 'done'].includes(item.status)) events.push(notificationEvent(`Задача: «${item.title}» → ${notificationStatusLabels[item.status] ?? item.status}`, 'tasks', item.id, item.assigneeId));
-    if (enabled.taskOverdue && item.dueDate < today && !['done', 'canceled'].includes(item.status) && (!before || before.dueDate >= today || ['done', 'canceled'].includes(before.status))) events.push(notificationEvent(`Просрочена задача: «${item.title}», ответственный ${item.assigneeName}`, 'tasks', item.id, item.assigneeId));
-  }
-  const beforeDocuments = new Map((previous.documents ?? []).map((item) => [item.id, item]));
-  for (const item of next.documents ?? []) {
-    const before = beforeDocuments.get(item.id);
-    if (before && before.status !== 'signed' && item.status === 'signed') events.push(notificationEvent(`Документ подписан: «${item.name}»`, 'project', item.id));
-  }
-  return events.slice(0, 8);
 };
 
 const deepLink = (origin, projectId, page, entityId) => {
@@ -1725,7 +1715,7 @@ const telegramConfirmTask = async (callback, draft, binding, env) => {
     callback.message.message_id,
     `Задача создана\n\n${task.title}\nОтветственный: ${assignee.name}\nСрок: ${task.dueDate}\n\n${deepLink(telegramOrigin(env), draft.project_id, 'tasks', task.id)}`,
   );
-  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), `Создана задача «${task.title}»`);
+  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), mutation.revision);
 };
 
 const telegramConfirmFile = async (callback, draft, binding, env) => {
@@ -1799,7 +1789,7 @@ const telegramConfirmFile = async (callback, draft, binding, env) => {
     callback.message.message_id,
     `${isDocument ? 'Документ сохранён' : 'Запись добавлена в дневник объекта'}\n\n${attachment.name}\nАвтор: ${user.name}\n\n${deepLink(telegramOrigin(env), draft.project_id, 'project')}`,
   );
-  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), summary);
+  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), mutation.revision);
 };
 
 const telegramChangeTaskStatus = async (callback, binding, taskId, action, env) => {
@@ -1846,7 +1836,7 @@ const telegramChangeTaskStatus = async (callback, binding, taskId, action, env) 
     `Задача «${task.title}» теперь: ${taskStatusLabel(status)}.\n${deepLink(telegramOrigin(env), binding.project_id, 'tasks', task.id)}`,
     status === 'done' ? {} : { reply_markup: taskActionMarkup(task.id, user.role) },
   );
-  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), `Обновлена задача «${task.title}»`);
+  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), mutation.revision);
 };
 
 const telegramHandleCallback = async (callback, env) => {
@@ -1972,21 +1962,109 @@ const handleTelegramUpdate = async (request, env, context) => {
   return json({ ok: true, accepted: true }, 202);
 };
 
-const dispatchNotifications = async (previous, next, env, actor, origin, summary) => {
-  let events = notificationEvents(previous, next);
+const queueTelegramDelivery = async (env, { dedupeKey, projectId, chatId, text, options = {} }) => {
+  if (!env.DB || !chatId || !text) return false;
+  const now = new Date().toISOString();
+  const result = await env.DB.prepare(`
+    INSERT OR IGNORE INTO notification_deliveries (
+      id, dedupe_key, project_id, channel, destination, payload_json, status,
+      attempts, next_attempt_at, last_attempt_at, last_error, created_at, sent_at
+    ) VALUES (?, ?, ?, 'telegram', ?, ?, 'pending', 0, ?, NULL, NULL, ?, NULL)
+  `).bind(
+    crypto.randomUUID(),
+    clean(dedupeKey, 500),
+    clean(projectId, 100),
+    clean(chatId, 120),
+    JSON.stringify({ text, options }),
+    now,
+    now,
+  ).run();
+  return changes(result) === 1;
+};
+
+const retryDelayMs = (attempts) => Math.min(60 * 60_000, 15_000 * (2 ** Math.max(0, attempts - 1)));
+
+const flushTelegramDeliveries = async (env, limit = 30) => {
+  if (!env.DB || !env.TELEGRAM_BOT_TOKEN) return { sent: 0, failed: 0 };
+  await ensureSchema(env.DB);
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const staleIso = new Date(now.getTime() - 5 * 60_000).toISOString();
+  await env.DB.prepare(`
+    UPDATE notification_deliveries
+    SET status = 'error', next_attempt_at = ?, last_error = 'stale_delivery_recovered'
+    WHERE channel = 'telegram' AND status = 'sending' AND last_attempt_at <= ?
+  `).bind(nowIso, staleIso).run();
+  const pending = await env.DB.prepare(`
+    SELECT id, destination, payload_json, attempts
+    FROM notification_deliveries
+    WHERE channel = 'telegram'
+      AND status IN ('pending', 'error')
+      AND next_attempt_at <= ?
+      AND attempts < 8
+    ORDER BY created_at
+    LIMIT ?
+  `).bind(nowIso, limit).all();
+  let sent = 0;
+  let failed = 0;
+  for (const row of pending?.results ?? []) {
+    const claimed = await env.DB.prepare(`
+      UPDATE notification_deliveries
+      SET status = 'sending', attempts = attempts + 1, last_attempt_at = ?, last_error = NULL
+      WHERE id = ? AND status IN ('pending', 'error')
+    `).bind(new Date().toISOString(), row.id).run();
+    if (changes(claimed) !== 1) continue;
+    try {
+      const payload = JSON.parse(row.payload_json);
+      const response = await telegramSend(env.TELEGRAM_BOT_TOKEN, row.destination, payload.text, payload.options ?? {});
+      const body = await parseTelegramBody(response);
+      if (!response.ok || !body?.ok) throw new Error(`telegram_rejected_${response.status}`);
+      await env.DB.prepare(`
+        UPDATE notification_deliveries
+        SET status = 'sent', sent_at = ?, next_attempt_at = ?, last_error = NULL
+        WHERE id = ?
+      `).bind(new Date().toISOString(), new Date().toISOString(), row.id).run();
+      sent += 1;
+    } catch (error) {
+      const attempts = Number(row.attempts) + 1;
+      const nextAttemptAt = new Date(Date.now() + retryDelayMs(attempts)).toISOString();
+      await env.DB.prepare(`
+        UPDATE notification_deliveries
+        SET status = 'error', next_attempt_at = ?, last_error = ?
+        WHERE id = ?
+      `).bind(nextAttemptAt, clean(error instanceof Error ? error.message : 'telegram_delivery_failed', 300), row.id).run();
+      failed += 1;
+    }
+  }
+  return { sent, failed };
+};
+
+const dispatchNotifications = async (previous, next, env, actor, origin, revision = 0) => {
+  const events = notificationEvents(previous, next);
+  if (!events.length || !env.TELEGRAM_BOT_TOKEN || !env.DB) return;
   const channels = next.settings?.notifications?.channels ?? {};
-  const allActivity = next.settings?.notifications?.events?.projectActivity !== false;
-  if (!events.length && allActivity && clean(summary, 300)) events = [notificationEvent(clean(summary, 300), 'overview')];
-  if (!events.length) return;
-  const lines = events.map((event) => `• ${event.text}\n  ${deepLink(origin, next.project.id, event.page, event.entityId)}`);
-  const message = `ИКИОМА ОС · ${next.project?.code ?? 'проект'}\nИзменил: ${actor}\n\n${lines.join('\n')}`;
-  const tasks = [];
-  const telegramConnection = channels.telegram && env.TELEGRAM_BOT_TOKEN
-    ? await resolveTelegramConnection(env)
-    : null;
+  const telegramConnection = await resolveTelegramConnection(env, { discover: false });
   const commonChatId = clean(telegramConnection?.chat?.id, 120);
-  if (channels.telegram && env.TELEGRAM_BOT_TOKEN && commonChatId) tasks.push(telegramSend(env.TELEGRAM_BOT_TOKEN, commonChatId, message));
-  if (channels.telegram && env.TELEGRAM_BOT_TOKEN) {
+  const occurredAt = new Date().toISOString();
+  if (commonChatId && channels.telegram !== false) {
+    for (const event of events) {
+      const occurrenceKey = event.key.includes('.overdue.') ? event.key : `${event.key}:r${revision}`;
+      const text = formatNotificationMessage({
+        project: next.project,
+        actor,
+        occurredAt,
+        events: [event],
+        linkFor: (item) => deepLink(origin, next.project.id, item.page, item.entityId),
+      });
+      await queueTelegramDelivery(env, {
+        dedupeKey: `${next.project.id}:common:${commonChatId}:${occurrenceKey}`,
+        projectId: next.project.id,
+        chatId: commonChatId,
+        text,
+      });
+    }
+  }
+  if (channels.telegram !== false) {
     const users = new Map((next.settings?.users ?? []).map((user) => [clean(user.id, 100), user]));
     const directByChat = new Map();
     for (const event of events) {
@@ -2013,23 +2091,29 @@ const dispatchNotifications = async (previous, next, env, actor, origin, summary
       directByChat.set(chatId, personalEvents);
     }
     for (const [chatId, personalEvents] of directByChat) {
-      const personalText = `ИКИОМА ОС · ${next.project?.code ?? 'проект'}\nУведомление по вашим задачам\n\n${personalEvents.map((event) => `• ${event.text}\n  ${deepLink(origin, next.project.id, event.page, event.entityId)}`).join('\n')}`;
-      const taskEvent = personalEvents.length === 1 && personalEvents[0].page === 'tasks' && personalEvents[0].entityId
-        ? personalEvents[0]
-        : null;
-      tasks.push(telegramSend(
-        env.TELEGRAM_BOT_TOKEN,
-        chatId,
-        personalText,
-        taskEvent ? { reply_markup: taskActionMarkup(taskEvent.entityId, taskEvent.role) } : {},
-      ));
+      for (const event of personalEvents) {
+        const occurrenceKey = event.key.includes('.overdue.') ? event.key : `${event.key}:r${revision}`;
+        const personalText = formatNotificationMessage({
+          project: next.project,
+          actor,
+          occurredAt,
+          events: [event],
+          linkFor: (item) => deepLink(origin, next.project.id, item.page, item.entityId),
+        });
+        const taskOptions = event.page === 'tasks' && event.entityId
+          ? { reply_markup: taskActionMarkup(event.entityId, event.role) }
+          : {};
+        await queueTelegramDelivery(env, {
+          dedupeKey: `${next.project.id}:direct:${chatId}:${occurrenceKey}`,
+          projectId: next.project.id,
+          chatId,
+          text: personalText,
+          options: taskOptions,
+        });
+      }
     }
   }
-  if (channels.email && env.RESEND_API_KEY && env.EMAIL_FROM) {
-    const recipients = (next.settings?.users ?? []).filter((user) => user.status === 'active' && user.role === 'management' && /^\S+@\S+\.\S+$/.test(user.email)).map((user) => user.email);
-    if (recipients.length) tasks.push(fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: env.EMAIL_FROM, to: recipients, subject: `ИКИОМА ОС: требуется внимание · ${next.project?.code ?? ''}`, text: message }) }));
-  }
-  await Promise.allSettled(tasks);
+  await flushTelegramDeliveries(env);
 };
 
 const handlePutState = async (request, env, context) => {
@@ -2118,7 +2202,7 @@ const handlePutState = async (request, env, context) => {
       // Состояние уже сохранено. Сбой журнала не должен заставлять клиента повторять запись.
     }
 
-    const notificationTask = dispatchNotifications(previousSnapshot?.state ?? null, state, env, actor, new URL(request.url).origin, summary);
+    const notificationTask = dispatchNotifications(previousSnapshot?.state ?? null, state, env, actor, new URL(request.url).origin, nextRevision);
     if (context?.waitUntil) context.waitUntil(notificationTask);
     else await notificationTask;
 
@@ -2212,13 +2296,27 @@ const integrationStatus = async (env) => {
   const telegramConnection = await resolveTelegramConnection(env);
   const botUsername = clean(telegramConnection.bot?.username, 120);
   let telegramBoundUsers = 0;
+  let telegramPending = 0;
+  let telegramFailed = 0;
   if (env.DB) {
     try {
       await ensureSchema(env.DB);
-      const row = await env.DB.prepare(`SELECT COUNT(*) AS count FROM telegram_bindings`).first();
-      telegramBoundUsers = Number(row?.count) || 0;
+      const [bindings, deliveries] = await Promise.all([
+        env.DB.prepare(`SELECT COUNT(*) AS count FROM telegram_bindings`).first(),
+        env.DB.prepare(`
+          SELECT
+            SUM(CASE WHEN status IN ('pending', 'sending') THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS failed
+          FROM notification_deliveries
+        `).first(),
+      ]);
+      telegramBoundUsers = Number(bindings?.count) || 0;
+      telegramPending = Number(deliveries?.pending) || 0;
+      telegramFailed = Number(deliveries?.failed) || 0;
     } catch {
       telegramBoundUsers = 0;
+      telegramPending = 0;
+      telegramFailed = 0;
     }
   }
   return {
@@ -2232,6 +2330,8 @@ const integrationStatus = async (env) => {
     telegramIssue: clean(telegramConnection.issue, 80),
     telegramInbound: Boolean(env.TELEGRAM_WEBHOOK_URL && env.TELEGRAM_WEBHOOK_SECRET),
     telegramBoundUsers,
+    telegramPending,
+    telegramFailed,
     camera: Boolean(env.CAMERA_VIEW_URL),
     websiteForm: true,
     publicWebsiteForm: false,
