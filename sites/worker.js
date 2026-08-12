@@ -2527,6 +2527,9 @@ const handleTelegramBootstrap = async (request, env) => {
           commands: [
             { command: 'task', description: 'Поставить задачу' },
             { command: 'tasks', description: 'Открытые задачи' },
+            { command: 'stages', description: 'Этапы и сроки' },
+            { command: 'done', description: 'Выполненные задачи' },
+            { command: 'finance', description: 'Расходы, доходы и баланс' },
             { command: 'status', description: 'Статус объекта' },
             { command: 'report', description: 'Добавить фотоотчёт' },
             { command: 'doc', description: 'Сохранить документ' },
