@@ -127,7 +127,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
       text = `${item.description}: ${actionKind === 'receive' ? 'получено' : 'оплачено'} ${money(amount)}`;
       return { ...item, status: paidAmount >= item.amount ? 'paid' as ExpenseStatus : item.status, paidAmount, paidAt: actionForm.date, paymentDocument: actionForm.document.trim() || undefined };
     });
-    const document: ProjectDocument | null = actionForm.document.trim() ? { id: uid('document'), name: actionForm.document.trim(), type: actionKind === 'accept' ? 'Акт / приёмка' : 'Платёжный документ', category: actionKind === 'accept' ? 'act' : 'other', documentDate: actionForm.date, updatedAt: now, clientVisible: false, status: 'current', direction: actionKind === 'accept' ? 'incoming' : 'outgoing', counterpartyId: entry.counterpartyId, stageId: entry.stageId, financeEntryId: entry.id, receivedAt: actionKind === 'accept' ? now : undefined, sentAt: actionKind === 'accept' ? undefined : now, storageLocation: `СтройОС / ${state.project.code} / Финансы` } : null;
+    const document: ProjectDocument | null = actionForm.document.trim() ? { id: uid('document'), name: actionForm.document.trim(), type: actionKind === 'accept' ? 'Акт / приёмка' : 'Платёжный документ', category: actionKind === 'accept' ? 'act' : 'other', documentDate: actionForm.date, updatedAt: now, clientVisible: false, status: 'current', direction: actionKind === 'accept' ? 'incoming' : 'outgoing', counterpartyId: entry.counterpartyId, stageId: entry.stageId, financeEntryId: entry.id, receivedAt: actionKind === 'accept' ? now : undefined, sentAt: actionKind === 'accept' ? undefined : now, storageLocation: `ИКИОМА ОС / ${state.project.code} / Финансы` } : null;
     onChange({ ...state, financeEntries, documents: document ? [document, ...state.documents] : state.documents, activity: [{ id: uid('activity'), timestamp: now, actor, text, tone: actionKind === 'accept' ? 'neutral' : 'positive' }, ...state.activity] });
     setActionEntryId(null);
   };
@@ -174,7 +174,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
 
       <section className="panel finance-summary" data-tour="budget-plan">
         <SectionHeader eyebrow={`Смета ${state.budgetMeta.version}`} title="Бюджет по пакетам работ" action={<div className="finance-summary__legend"><span>План</span><span>Прогноз</span><span>Оплачено</span></div>} />
-        <div className="budget-source"><div><small>Откуда берётся план</small><strong>{state.budgetMeta.source}</strong><p>{state.budgetMeta.approvedBy ? `Утвердил: ${state.budgetMeta.approvedBy}` : 'Ещё не утверждена'}{state.budgetMeta.approvedAt ? ` · ${formatDate(state.budgetMeta.approvedAt, true)}` : ''}</p></div><div><small>Откуда берётся проект</small><strong>{state.project.source ?? 'Создан в СтройОС'}</strong><p>{state.project.contractNumber ? `Договор ${state.project.contractNumber}` : state.project.model}</p></div><p>{state.budgetMeta.note}</p></div>
+        <div className="budget-source"><div><small>Откуда берётся план</small><strong>{state.budgetMeta.source}</strong><p>{state.budgetMeta.approvedBy ? `Утвердил: ${state.budgetMeta.approvedBy}` : 'Ещё не утверждена'}{state.budgetMeta.approvedAt ? ` · ${formatDate(state.budgetMeta.approvedAt, true)}` : ''}</p></div><div><small>Откуда берётся проект</small><strong>{state.project.source ?? 'Создан в ИКИОМА ОС'}</strong><p>{state.project.contractNumber ? `Договор ${state.project.contractNumber}` : state.project.model}</p></div><p>{state.budgetMeta.note}</p></div>
         <div className="budget-table" role="table" aria-label="Бюджет проекта">
           <div className="budget-table__head" role="row">
             <span>Пакет работ</span><span>План</span><span>Обязательства</span><span>Принято</span><span>Оплачено</span><span>Прогноз</span><span>Отклонение</span>
@@ -278,3 +278,4 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
     </div>
   );
 }
+
