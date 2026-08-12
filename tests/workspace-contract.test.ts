@@ -67,6 +67,7 @@ test('lead timing and conversational Telegram summaries are visible and supporte
   assert.match(worker, /command\.name === 'stages'/);
   assert.match(worker, /command\.name === 'done'/);
   assert.match(worker, /command\.name === 'finance'/);
+  assert.match(worker, /command: 'finance'/);
   assert.match(worker, /naturalTelegramIntent/);
   assert.match(worker, /repliedToBot/);
 });
