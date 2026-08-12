@@ -170,7 +170,7 @@ export function MarketingPage({ state, actor, focusId, onChange }: { state: AppS
           {visible.map((lead) => (
             <button type="button" className="lead-row" key={lead.id} onClick={() => setSelectedId(lead.id)}>
               <span className="lead-row__avatar"><CircleUserRound size={20} /></span>
-              <div className="lead-row__main"><strong>{lead.name}</strong><small>{lead.phone} · {sourceLabels[lead.source]}{lead.region ? ` · ${lead.region}` : ''}</small></div>
+              <div className="lead-row__main"><strong>{lead.name}</strong><small>{lead.phone} · {sourceLabels[lead.source]}{lead.region ? ` · ${lead.region}` : ''}</small><small>Поступила: {formatDateTime(lead.createdAt)}</small></div>
               <span><StatusBadge label={stageLabels[lead.stage]} tone={stageTone(lead.stage)} /></span>
               <div className="lead-row__next"><small>Следующее действие</small><strong>{lead.nextAction}</strong>{lead.nextActionAt && <span><CalendarClock size={13} /> {formatDateTime(lead.nextActionAt)}</span>}</div>
               <strong className="lead-row__budget">{lead.budget ? money(lead.budget) : 'Бюджет не указан'}</strong>
@@ -213,4 +213,3 @@ export function MarketingPage({ state, actor, focusId, onChange }: { state: AppS
     </div>
   );
 }
-
