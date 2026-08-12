@@ -233,11 +233,10 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
               </button>
             ))}
             {nextDecision && (
-              <button type="button" onClick={() => onNavigate('client')} className="decision-item">
+              <div className="decision-item">
                 <span className="decision-item__icon"><Clock3 size={18} /></span>
                 <span><strong>Ответ клиента</strong><small>{nextDecision.title} · до {formatDate(nextDecision.dueDate)}</small></span>
-                <ChevronRight size={17} />
-              </button>
+              </div>
             )}
             {!reworkCheckpoint && !riskySupply.length && !nextDecision && <div className="overview-task-empty"><CheckCircle2 size={20} /> Решений, требующих внимания, нет</div>}
           </div>
