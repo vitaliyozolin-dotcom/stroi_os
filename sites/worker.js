@@ -642,7 +642,7 @@ const applyBattleAutomations = (previous, next, actor) => {
           {
             id: crypto.randomUUID(),
             timestamp: now,
-            actor: 'СтройОС',
+            actor: 'ИКИОМА ОС',
             kind: 'reopened',
             text: `Автоматически переоткрыта после нового события · ${actor}`,
           },
@@ -659,7 +659,7 @@ const applyBattleAutomations = (previous, next, actor) => {
       priority,
       assigneeId: assignee.id,
       assigneeName: assignee.name,
-      createdBy: 'СтройОС',
+      createdBy: 'ИКИОМА ОС',
       createdAt: now,
       updatedAt: now,
       dueDate: dueDate || tomorrow,
@@ -669,7 +669,7 @@ const applyBattleAutomations = (previous, next, actor) => {
       history: [{
         id: crypto.randomUUID(),
         timestamp: now,
-        actor: 'СтройОС',
+        actor: 'ИКИОМА ОС',
         kind: 'created',
         text: `Создана автоматически после изменения · ${actor}`,
       }],
@@ -756,7 +756,7 @@ const applyBattleAutomations = (previous, next, actor) => {
     next.activity.unshift({
       id: crypto.randomUUID(),
       timestamp: now,
-      actor: 'СтройОС',
+      actor: 'ИКИОМА ОС',
       text: automated.join('. '),
       tone: 'neutral',
     });
@@ -951,7 +951,7 @@ const verifyAndStoreTelegramChat = async (env, chat, bot) => {
     const response = await telegramSend(
       env.TELEGRAM_BOT_TOKEN,
       chat.id,
-      'СтройОС: общий чат подключён.\n\nСюда будут приходить изменения по проектам, этапам, задачам, закупкам и проверкам.',
+      'ИКИОМА ОС: общий чат подключён.\n\nСюда будут приходить изменения по проектам, этапам, задачам, закупкам и проверкам.',
     );
     if (!response.ok) return { ok: false, issue: 'send_failed' };
     await writeTelegramConfig(env.DB, chat, bot);
@@ -1257,7 +1257,7 @@ const renderTaskDraft = (draft, state) => {
       `Срок: ${payload.dueDate}`,
       `Приоритет: ${priorityLabels[payload.priority] ?? payload.priority}`,
       '',
-      'СтройОС ничего не сохранит, пока вы не нажмёте «Создать задачу».',
+      'ИКИОМА ОС ничего не сохранит, пока вы не нажмёте «Создать задачу».',
     ].join('\n'),
     replyMarkup: { inline_keyboard: rows },
     users,
@@ -1285,7 +1285,7 @@ const renderFileDraft = (draft) => {
       `Файл: ${payload.fileName}`,
       isDocument ? `Категория: ${payload.typeLabel}` : `Комментарий: ${payload.note || 'без комментария'}`,
       '',
-      'Файл будет перенесён в защищённое хранилище СтройОС только после подтверждения.',
+      'Файл будет перенесён в защищённое хранилище ИКИОМА ОС только после подтверждения.',
     ].join('\n'),
     replyMarkup: {
       inline_keyboard: [[
@@ -1332,7 +1332,7 @@ const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uplo
 const telegramOrigin = (env) => clean(env.APP_PUBLIC_URL, 500) || 'https://stroios-work-2026.ozolin.chatgpt.site';
 
 const telegramHelp = (role = 'foreman') => [
-  'СтройОС · полевой штаб',
+  'ИКИОМА ОС · полевой штаб',
   '',
   role === 'management' ? '/task текст — поставить задачу' : null,
   '/tasks — мои открытые задачи',
@@ -1430,7 +1430,7 @@ const bindTelegramUser = async (message, code, env) => {
     WHERE code_hash = ?
   `).bind(codeHash).first();
   if (!row || row.used_at || row.expires_at < new Date().toISOString()) {
-    await telegramSend(env.TELEGRAM_BOT_TOKEN, chat.id, 'Ссылка недействительна или уже использована. Попросите руководителя выпустить новую в СтройОС.');
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, chat.id, 'Ссылка недействительна или уже использована. Попросите руководителя выпустить новую в ИКИОМА ОС.');
     return;
   }
   const snapshot = await readSnapshot(env.DB, row.project_id);
@@ -1494,7 +1494,7 @@ const bindTelegramUser = async (message, code, env) => {
         id: `activity-${crypto.randomUUID()}`,
         timestamp: now,
         actor: user.name,
-        text: 'Подключил личный Telegram к СтройОС',
+        text: 'Подключил личный Telegram к ИКИОМА ОС',
         tone: 'neutral',
       }, ...(state.activity ?? [])];
     },
@@ -1681,7 +1681,7 @@ const telegramHandleMessage = async (message, env) => {
   const binding = await bindingForTelegramUser(env.DB, String(message.from.id), String(message.chat.id));
   if (!binding) {
     if (message.chat.type === 'private') {
-      await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Ваш Telegram пока не связан со СтройОС. Руководитель может выпустить персональную ссылку в «Настройки → Доступы».');
+      await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Ваш Telegram пока не связан со ИКИОМА ОС. Руководитель может выпустить персональную ссылку в «Настройки → Доступы».');
     }
     return;
   }
@@ -1789,7 +1789,7 @@ const telegramConfirmFile = async (callback, draft, binding, env) => {
           clientVisible: false,
           status: 'current',
           direction: 'internal',
-          storageLocation: `СтройОС / ${state.project?.code ?? draft.project_id} / Документы`,
+          storageLocation: `ИКИОМА ОС / ${state.project?.code ?? draft.project_id} / Документы`,
           fileKey: attachment.key,
           fileName: attachment.name,
           mimeType: attachment.mimeType,
@@ -1883,7 +1883,7 @@ const telegramHandleCallback = async (callback, env) => {
   const action = parts[0];
   const binding = await bindingForTelegramUser(env.DB, String(callback.from.id), String(callback.message.chat.id));
   if (!binding) {
-    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Сначала подключите личный Telegram в СтройОС.', true);
+    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Сначала подключите личный Telegram в ИКИОМА ОС.', true);
     return;
   }
   if (action === 'ts') {
@@ -2007,7 +2007,7 @@ const dispatchNotifications = async (previous, next, env, actor, origin, summary
   if (!events.length && allActivity && clean(summary, 300)) events = [notificationEvent(clean(summary, 300), 'overview')];
   if (!events.length) return;
   const lines = events.map((event) => `• ${event.text}\n  ${deepLink(origin, next.project.id, event.page, event.entityId)}`);
-  const message = `СтройОС · ${next.project?.code ?? 'проект'}\nИзменил: ${actor}\n\n${lines.join('\n')}`;
+  const message = `ИКИОМА ОС · ${next.project?.code ?? 'проект'}\nИзменил: ${actor}\n\n${lines.join('\n')}`;
   const tasks = [];
   const telegramConnection = channels.telegram && env.TELEGRAM_BOT_TOKEN
     ? await resolveTelegramConnection(env)
@@ -2041,7 +2041,7 @@ const dispatchNotifications = async (previous, next, env, actor, origin, summary
       directByChat.set(chatId, personalEvents);
     }
     for (const [chatId, personalEvents] of directByChat) {
-      const personalText = `СтройОС · ${next.project?.code ?? 'проект'}\nУведомление по вашим задачам\n\n${personalEvents.map((event) => `• ${event.text}\n  ${deepLink(origin, next.project.id, event.page, event.entityId)}`).join('\n')}`;
+      const personalText = `ИКИОМА ОС · ${next.project?.code ?? 'проект'}\nУведомление по вашим задачам\n\n${personalEvents.map((event) => `• ${event.text}\n  ${deepLink(origin, next.project.id, event.page, event.entityId)}`).join('\n')}`;
       const taskEvent = personalEvents.length === 1 && personalEvents[0].page === 'tasks' && personalEvents[0].entityId
         ? personalEvents[0]
         : null;
@@ -2055,7 +2055,7 @@ const dispatchNotifications = async (previous, next, env, actor, origin, summary
   }
   if (channels.email && env.RESEND_API_KEY && env.EMAIL_FROM) {
     const recipients = (next.settings?.users ?? []).filter((user) => user.status === 'active' && user.role === 'management' && /^\S+@\S+\.\S+$/.test(user.email)).map((user) => user.email);
-    if (recipients.length) tasks.push(fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: env.EMAIL_FROM, to: recipients, subject: `СтройОС: требуется внимание · ${next.project?.code ?? ''}`, text: message }) }));
+    if (recipients.length) tasks.push(fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: env.EMAIL_FROM, to: recipients, subject: `ИКИОМА ОС: требуется внимание · ${next.project?.code ?? ''}`, text: message }) }));
   }
   await Promise.allSettled(tasks);
 };
@@ -2280,14 +2280,14 @@ const handleIntegrationTest = async (request, env) => {
   let payload;
   try { payload = await request.json(); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }
   const channel = clean(payload?.channel, 30);
-  const message = clean(payload?.message, 500) || 'Тестовое уведомление СтройОС';
+  const message = clean(payload?.message, 500) || 'Тестовое уведомление ИКИОМА ОС';
   const status = await integrationStatus(env);
   if (channel === 'email') {
     const to = clean(payload?.to, 240);
     if (!status.email) return json({ ok: false, error: 'email_not_configured' }, 409);
     if (!/^\S+@\S+\.\S+$/.test(to)) return json({ ok: false, error: 'invalid_recipient' }, 422);
     try {
-      const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: env.EMAIL_FROM, to: [to], subject: 'СтройОС: тест уведомлений', html: `<p>${message.replace(/[<>&]/g, '')}</p>` }) });
+      const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: env.EMAIL_FROM, to: [to], subject: 'ИКИОМА ОС: тест уведомлений', html: `<p>${message.replace(/[<>&]/g, '')}</p>` }) });
       if (!response.ok) return json({ ok: false, error: 'provider_error' }, 502);
       return json({ ok: true, channel: 'email' });
     } catch { return json({ ok: false, error: 'provider_unavailable' }, 502); }
@@ -2372,10 +2372,10 @@ const sendTelegramFieldHeadquartersGuide = async (connection, env) => {
   const guide = [
     '🏗 ИкиОМА · Telegram-полевой штаб запущен',
     '',
-    'Теперь чат умеет не только получать уведомления, но и работать со СтройОС.',
+    'Теперь чат умеет не только получать уведомления, но и работать со ИКИОМА ОС.',
     '',
     '1. Подключите себя',
-    'СтройОС → Настройки → Доступы → значок ссылки рядом со своим именем. Откройте персональную ссылку и нажмите «Запустить». Без привязки бот не даст менять проект — случайные люди из чата командовать стройкой не смогут.',
+    'ИКИОМА ОС → Настройки → Доступы → значок ссылки рядом со своим именем. Откройте персональную ссылку и нажмите «Запустить». Без привязки бот не даст менять проект — случайные люди из чата командовать стройкой не смогут.',
     '',
     '2. Команды',
     '/task Илья, проверить геометрию свай завтра срочно — создать черновик задачи. Сохранится только после подтверждения.',
@@ -2401,7 +2401,7 @@ const sendTelegramFieldHeadquartersGuide = async (connection, env) => {
     const response = await telegramSend(env.TELEGRAM_BOT_TOKEN, chatId, guide, {
       reply_markup: {
         inline_keyboard: [[{
-          text: 'Открыть СтройОС',
+          text: 'Открыть ИКИОМА ОС',
           url: telegramOrigin(env),
         }]],
       },
@@ -2982,7 +2982,7 @@ export default {
     } catch {
       const url = new URL(request.url);
       if (url.pathname.startsWith('/api/')) return json({ ok: false, error: 'battle_initialization_failed' }, 503);
-      return new Response('СтройОС временно завершает подготовку рабочего пространства. Обновите страницу через минуту.', {
+      return new Response('ИКИОМА ОС временно завершает подготовку рабочего пространства. Обновите страницу через минуту.', {
         status: 503,
         headers: {
           'Content-Type': 'text/plain; charset=utf-8',
