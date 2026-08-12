@@ -11,8 +11,8 @@ const safeEqual = (left, right) => {
 
 const sign = (value, secret) => createHmac('sha256', secret).update(value).digest('base64url');
 
-const parseCookies = (header = '') => Object.fromEntries(
-  header.split(';').map((part) => part.trim()).filter(Boolean).map((part) => {
+const parseCookies = (header) => Object.fromEntries(
+  String(header || '').split(';').map((part) => part.trim()).filter(Boolean).map((part) => {
     const index = part.indexOf('=');
     return index < 0 ? [part, ''] : [part.slice(0, index), part.slice(index + 1)];
   }),
