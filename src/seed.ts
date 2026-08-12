@@ -197,7 +197,7 @@ export const createProjectState = (base: AppState, input: {
       foreman: input.foreman.trim(),
       cameraStatus: 'offline',
       createdAt,
-      source: input.source.trim() || 'Создан вручную в СтройОС',
+      source: input.source.trim() || 'Создан вручную в ИКИОМА ОС',
       status: 'active',
     },
     budgetMeta: {
@@ -230,3 +230,4 @@ export const createProjectState = (base: AppState, input: {
     }],
   };
 };
+
