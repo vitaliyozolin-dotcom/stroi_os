@@ -1,50 +1,35 @@
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
-import { access, readFile, stat } from 'node:fs/promises';
+import { access, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import worker from '../sites/worker.js';
 import { FileBucket } from './file-bucket.js';
 import { PostgresDatabase } from './postgres.js';
 import { isPublicRoute } from './public-routes.js';
+import { createSessionAuth, LoginRateLimiter } from './auth.js';
+import { loginPage } from './login-page.js';
 
 const port = Number(process.env.PORT) || 3000;
 const clientRoot = resolve(process.env.CLIENT_ROOT || 'dist/client');
 const databaseUrl = process.env.DATABASE_URL;
 const ownerEmail = process.env.OWNER_EMAIL || 'vitaliyozolin@gmail.com';
-const basicUser = process.env.APP_USERNAME || 'vitaliy';
-const basicPassword = process.env.APP_PASSWORD;
+const ownerName = process.env.OWNER_NAME || 'Виталий Озолин';
+const appUsername = process.env.APP_USERNAME || 'vitaliy';
+const appPassword = process.env.APP_PASSWORD;
 
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
-if (!basicPassword || basicPassword.length < 10) throw new Error('APP_PASSWORD must contain at least 10 characters');
 
+const auth = createSessionAuth({
+  username: appUsername,
+  password: appPassword,
+  sessionSecret: process.env.SESSION_SECRET || appPassword,
+  email: ownerEmail,
+  name: ownerName,
+});
+const loginLimiter = new LoginRateLimiter();
 const database = new PostgresDatabase(databaseUrl);
 const bucket = new FileBucket(process.env.FILE_STORAGE_PATH || '/data/files');
-const timingSafeEqualText = async (left, right) => {
-  const { timingSafeEqual } = await import('node:crypto');
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
-};
-
-const basicIdentity = async (request) => {
-  const header = request.headers.get('authorization') || '';
-  if (!header.startsWith('Basic ')) return null;
-  let decoded = '';
-  try { decoded = Buffer.from(header.slice(6), 'base64').toString('utf8'); } catch { return null; }
-  const separator = decoded.indexOf(':');
-  if (separator < 0) return null;
-  const user = decoded.slice(0, separator);
-  const password = decoded.slice(separator + 1);
-  const validUser = await timingSafeEqualText(user, basicUser);
-  const validPassword = await timingSafeEqualText(password, basicPassword);
-  return validUser && validPassword ? { email: ownerEmail, name: process.env.OWNER_NAME || 'Виталий Озолин' } : null;
-};
-
-const unauthorized = () => new Response('Требуется вход в СтройОС', {
-  status: 401,
-  headers: { 'Content-Type': 'text/plain; charset=utf-8', 'WWW-Authenticate': 'Basic realm="StroiOS", charset="UTF-8"' },
-});
 
 const mimeTypes = {
   '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -86,6 +71,32 @@ const env = {
   APP_PUBLIC_URL: process.env.APP_PUBLIC_URL || 'http://localhost',
 };
 
+const htmlResponse = (html, status = 200, extraHeaders = {}) => new Response(html, {
+  status,
+  headers: {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    ...extraHeaders,
+  },
+});
+
+const redirect = (location, headers = {}) => new Response(null, {
+  status: 303,
+  headers: { Location: location, 'Cache-Control': 'no-store', ...headers },
+});
+
+const clientKey = (incoming) => String(incoming.headers['x-forwarded-for'] || incoming.socket.remoteAddress || 'unknown')
+  .split(',')[0].trim();
+
+const hasValidOrigin = (request) => {
+  const origin = request.headers.get('origin');
+  if (!origin) return true;
+  try { return new URL(origin).host === new URL(request.url).host; } catch { return false; }
+};
+
 const server = createServer(async (incoming, outgoing) => {
   try {
     const protocol = incoming.headers['x-forwarded-proto'] || 'http';
@@ -103,9 +114,44 @@ const server = createServer(async (incoming, outgoing) => {
       duplex: 'half',
     });
 
+    if (url.pathname === '/login' && request.method === 'GET') {
+      const response = auth.fromRequest(request)
+        ? redirect('/')
+        : htmlResponse(loginPage());
+      return writeResponse(outgoing, response);
+    }
+
+    if (url.pathname === '/api/auth/login' && request.method === 'POST') {
+      if (!hasValidOrigin(request)) return writeResponse(outgoing, new Response('Forbidden', { status: 403 }));
+      const key = clientKey(incoming);
+      if (loginLimiter.isBlocked(key)) {
+        return writeResponse(outgoing, htmlResponse(loginPage({ error: 'blocked', blocked: true }), 429, { 'Retry-After': '900' }));
+      }
+      const form = await request.formData();
+      const username = String(form.get('username') || '').trim();
+      const password = String(form.get('password') || '');
+      if (!auth.verifyCredentials(username, password)) {
+        loginLimiter.fail(key);
+        return writeResponse(outgoing, htmlResponse(loginPage({ username, error: 'invalid' }), 401));
+      }
+      loginLimiter.success(key);
+      return writeResponse(outgoing, redirect('/', { 'Set-Cookie': auth.sessionCookie(request) }));
+    }
+
+    if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
+      if (!hasValidOrigin(request)) return writeResponse(outgoing, new Response('Forbidden', { status: 403 }));
+      return writeResponse(outgoing, redirect('/login', { 'Set-Cookie': auth.clearCookie(request) }));
+    }
+
     if (!isPublicRoute(url)) {
-      const identity = await basicIdentity(request);
-      if (!identity) return writeResponse(outgoing, unauthorized());
+      const identity = auth.fromRequest(request);
+      if (!identity) {
+        const acceptsHtml = request.method === 'GET' && (request.headers.get('accept') || '').includes('text/html');
+        const response = acceptsHtml
+          ? redirect('/login')
+          : Response.json({ ok: false, error: 'authentication_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+        return writeResponse(outgoing, response);
+      }
       headers.set('oai-authenticated-user-email', identity.email);
       headers.set('oai-authenticated-user-full-name', encodeURIComponent(identity.name));
       headers.set('oai-authenticated-user-full-name-encoding', 'percent-encoded-utf-8');
