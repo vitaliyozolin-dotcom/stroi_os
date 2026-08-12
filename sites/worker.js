@@ -822,11 +822,15 @@ const deepLink = (origin, projectId, page, entityId) => {
   return url.toString();
 };
 
-const telegramSend = (token, chatId, text, options = {}) => fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true, ...options }),
-});
+const telegramSend = (token, chatId, text, options = {}) => {
+  const { timeoutMs = 10_000, ...telegramOptions } = options;
+  return fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs),
+    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true, ...telegramOptions }),
+  });
+};
 
 const telegramRequest = (token, method, payload = {}) => fetch(`https://api.telegram.org/bot${token}/${method}`, {
   method: 'POST',
@@ -2864,7 +2868,7 @@ const handlePublicLead = async (request, env) => {
           message ? `Комментарий: ${message}` : '',
           `Открыть воронку: ${deepLink(telegramOrigin(env), PUBLIC_LEAD_PROJECT_ID, 'marketing', id)}`,
         ].filter(Boolean).join('\n');
-        const notification = await telegramSend(env.TELEGRAM_BOT_TOKEN, connection.chat.id, details);
+        const notification = await telegramSend(env.TELEGRAM_BOT_TOKEN, connection.chat.id, details, { timeoutMs: 3_000 });
         telegramNotified = notification.ok;
       }
     } catch {
