@@ -9,6 +9,7 @@ type KeyedCollection = 'stages'
   | 'leads'
   | 'tasks'
   | 'fieldReports'
+  | 'developerRequests'
   | 'checkpoints'
   | 'documents'
   | 'decisions';
@@ -23,6 +24,7 @@ const keyedCollections: KeyedCollection[] = [
   'leads',
   'tasks',
   'fieldReports',
+  'developerRequests',
   'checkpoints',
   'documents',
   'decisions',
@@ -83,9 +85,9 @@ export const mergeProjectStates = (base: AppState, local: AppState, remote: AppS
   for (const collection of keyedCollections) {
     (state[collection] as Array<{ id: string }>) = mergeCollection(
       collection,
-      base[collection] as Array<{ id: string }>,
-      local[collection] as Array<{ id: string }>,
-      remote[collection] as Array<{ id: string }>,
+      (base[collection] ?? []) as Array<{ id: string }>,
+      (local[collection] ?? []) as Array<{ id: string }>,
+      (remote[collection] ?? []) as Array<{ id: string }>,
       conflicts,
     );
   }
