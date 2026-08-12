@@ -247,7 +247,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
               <div className="integration-grid">
                 <article>
                   <span><Globe2 size={21} /></span>
-                  <div><strong>Форма на stroios.online</strong><p>Входящий обработчик готов, но внешний посетитель не увидит форму, пока весь сайт закрыт авторизацией.</p></div>
+                  <div><strong>Формы на ikioma.ru</strong><p>Заявки с публичного сайта поступают в отдельную воронку ИКИОМА и сохраняются с точным временем отправки.</p></div>
                   <StatusBadge label={integrationStatus?.publicWebsiteForm ? 'Принимает заявки' : 'Только внутри'} tone={integrationStatus?.publicWebsiteForm ? 'positive' : 'warning'} />
                 </article>
                 <article>
@@ -302,4 +302,3 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
     </div>
   );
 }
-

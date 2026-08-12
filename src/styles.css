@@ -178,8 +178,8 @@ p {
 .brand-copy small {
   margin-top: 1px;
   color: rgba(235, 243, 237, 0.52);
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-size: 9px;
+  letter-spacing: 0.055em;
   text-transform: uppercase;
 }
 
@@ -6307,7 +6307,7 @@ p {
 .help-fab-wrap {
   position: fixed;
   right: 24px;
-  bottom: 26px;
+  bottom: 118px;
   z-index: 90;
 }
 
@@ -6357,7 +6357,7 @@ p {
 .help-welcome {
   position: fixed;
   right: 24px;
-  bottom: 86px;
+  bottom: 178px;
   z-index: 89;
   width: 280px;
   padding: 16px;
@@ -6469,6 +6469,7 @@ p {
 .developer-feedback__history article span { color: var(--green); font-size: 9px; font-weight: 800; text-transform: uppercase; }
 .developer-feedback__history article strong { margin-top: 4px; font-size: 12px; }
 .developer-feedback__history article p { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.developer-feedback__history article small { display: block; margin-top: 7px; color: var(--soft-muted); font-size: 9px; }
 
 .tour-layer,
 .tour-scrim {
@@ -6582,12 +6583,12 @@ p {
 
   .help-fab-wrap {
     right: 16px;
-    bottom: 88px;
+    bottom: 104px;
   }
 
   .help-welcome {
     right: 16px;
-    bottom: 146px;
+    bottom: 164px;
     width: min(280px, calc(100vw - 32px));
   }
 }

@@ -56,3 +56,17 @@ test('the user-facing product is consistently branded as IKIOMA OS', () => {
   assert.match(source('src/App.tsx'), /ИКИОМА <span>ОС<\/span>/);
   assert.match(source('src/components/HelpCenter.tsx'), /Обучение ИКИОМА ОС/);
 });
+
+test('lead timing and conversational Telegram summaries are visible and supported', () => {
+  const marketing = source('src/pages/MarketingPage.tsx');
+  const settings = source('src/pages/SettingsPage.tsx');
+  const worker = source('sites/worker.js');
+
+  assert.match(marketing, /Поступила: \{formatDateTime\(lead\.createdAt\)\}/);
+  assert.match(settings, /Формы на ikioma\.ru/);
+  assert.match(worker, /command\.name === 'stages'/);
+  assert.match(worker, /command\.name === 'done'/);
+  assert.match(worker, /command\.name === 'finance'/);
+  assert.match(worker, /naturalTelegramIntent/);
+  assert.match(worker, /repliedToBot/);
+});
