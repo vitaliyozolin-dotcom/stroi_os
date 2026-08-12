@@ -1681,7 +1681,7 @@ const telegramHandleMessage = async (message, env) => {
   const binding = await bindingForTelegramUser(env.DB, String(message.from.id), String(message.chat.id));
   if (!binding) {
     if (message.chat.type === 'private') {
-      await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Ваш Telegram пока не связан со ИКИОМА ОС. Руководитель может выпустить персональную ссылку в «Настройки → Доступы».');
+      await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Ваш Telegram пока не связан с ИКИОМА ОС. Руководитель может выпустить персональную ссылку в «Настройки → Доступы».');
     }
     return;
   }
