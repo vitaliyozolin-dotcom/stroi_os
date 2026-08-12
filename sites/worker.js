@@ -1336,12 +1336,17 @@ const telegramHelp = (role = 'foreman') => [
   '',
   role === 'management' ? '/task текст — поставить задачу' : null,
   '/tasks — мои открытые задачи',
+  '/stages — этапы и их состояние',
+  '/done — последние выполненные задачи',
+  role === 'management' ? '/finance — расходы, доходы и баланс' : null,
   '/status — статус объекта',
   '/report — как добавить фотоотчёт',
   '/doc — как сохранить документ',
   '/camera — эфир или свежий кадр',
   '/project — выбрать объект',
   '/help — эта подсказка',
+  '',
+  'Можно спросить обычным текстом: «этапы», «выполненные задачи», «расходы и доходы». В общем чате напишите, например: «@ikioma_bot этапы» — или ответьте на сообщение бота.',
   '',
   'Фото, документ или голосовое сообщение можно прислать боту в личный чат. В общем чате добавьте к файлу подпись /report или /doc. Перед сохранением бот всегда покажет черновик.',
 ].filter(Boolean).join('\n');
@@ -1567,6 +1572,64 @@ const telegramTasks = async (message, binding, env) => {
   await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, text);
 };
 
+const telegramStages = async (message, binding, env) => {
+  const { snapshot } = await projectForBinding(env, binding);
+  const stages = (snapshot.state.stages ?? []).slice().sort((a, b) => clean(a.startDate, 20).localeCompare(clean(b.startDate, 20)));
+  const labels = { planned: 'запланирован', in_progress: 'в работе', blocked: 'заблокирован', awaiting_inspection: 'на проверке', rework: 'доработка', done: 'завершён' };
+  const text = stages.length
+    ? `Этапы · ${snapshot.state.project?.code ?? ''}\n\n${stages.map((item) => `• ${item.name} — ${labels[item.status] ?? item.status}\n  ${item.forecastEndDate ?? item.plannedEndDate ?? 'срок не указан'}`).join('\n\n')}`
+    : 'Этапы проекта пока не созданы.';
+  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, text);
+};
+
+const telegramCompletedTasks = async (message, binding, env) => {
+  const { snapshot, user } = await projectForBinding(env, binding);
+  const tasks = (snapshot.state.tasks ?? [])
+    .filter((item) => item.status === 'done')
+    .filter((item) => user.role === 'management' || item.assigneeId === user.id)
+    .sort((a, b) => clean(b.updatedAt ?? b.createdAt, 40).localeCompare(clean(a.updatedAt ?? a.createdAt, 40)))
+    .slice(0, 10);
+  const text = tasks.length
+    ? `Последние выполненные задачи · ${snapshot.state.project?.code ?? ''}\n\n${tasks.map((item) => `• ${item.title}\n  ${item.assigneeName} · ${new Date(item.updatedAt ?? item.createdAt).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })} МСК`).join('\n\n')}`
+    : 'Выполненных задач пока нет.';
+  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, text);
+};
+
+const telegramFinance = async (message, binding, env) => {
+  const { snapshot, user } = await projectForBinding(env, binding);
+  if (user.role !== 'management') {
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Финансовая сводка доступна только роли «Управление».');
+    return;
+  }
+  const entries = snapshot.state.financeEntries ?? [];
+  const expenses = entries.filter((item) => item.kind === 'expense');
+  const incomes = entries.filter((item) => item.kind === 'income');
+  const committed = expenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  const paid = expenses.reduce((sum, item) => sum + (Number(item.paidAmount) || 0), 0);
+  const expectedIncome = incomes.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  const received = incomes.reduce((sum, item) => sum + (Number(item.paidAmount) || 0), 0);
+  const money = (value) => `${Math.round(value).toLocaleString('ru-RU')} ₽`;
+  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
+    `Финансы · ${snapshot.state.project?.code ?? ''}`,
+    '',
+    `Расходы: обязательства ${money(committed)} · оплачено ${money(paid)}`,
+    `Доходы: ожидается ${money(expectedIncome)} · получено ${money(received)}`,
+    `Денежный баланс: ${money(received - paid)}`,
+    '',
+    deepLink(telegramOrigin(env), binding.project_id, 'finance'),
+  ].join('\n'));
+};
+
+const naturalTelegramIntent = (value) => {
+  const text = clean(value, 3000).toLocaleLowerCase('ru');
+  if (/\b(этап|этапы|стадии|ход работ)\b/u.test(text)) return 'stages';
+  if (/\b(выполненн|завершенн|сделанн).{0,20}\b(задач|работ)|\bчто (сделано|выполнено)\b/u.test(text)) return 'done';
+  if (/\b(расход|доход|финанс|деньг|оплачен|получен)/u.test(text)) return 'finance';
+  if (/\b(задач|дела).{0,20}\b(открыт|текущ|актив)|\bчто делать\b/u.test(text)) return 'tasks';
+  if (/\b(статус|состояние|что на объекте)\b/u.test(text)) return 'status';
+  return '';
+};
+
 const telegramProjectStatus = async (message, binding, env) => {
   const { snapshot } = await projectForBinding(env, binding);
   const state = snapshot.state;
@@ -1656,6 +1719,9 @@ const telegramAttachmentDraft = async (message, binding, env) => {
 const telegramHandleCommand = async (message, binding, command, env) => {
   if (command.name === 'task') return telegramTaskDraft(message, binding, command.body, env);
   if (command.name === 'tasks') return telegramTasks(message, binding, env);
+  if (command.name === 'stages') return telegramStages(message, binding, env);
+  if (command.name === 'done') return telegramCompletedTasks(message, binding, env);
+  if (command.name === 'finance') return telegramFinance(message, binding, env);
   if (command.name === 'status') return telegramProjectStatus(message, binding, env);
   if (command.name === 'camera') return telegramCamera(message, binding, env);
   if (command.name === 'project') return telegramSelectProject(message, binding, env);
@@ -1693,7 +1759,16 @@ const telegramHandleMessage = async (message, env) => {
     await telegramHandleCommand(message, binding, command, env);
     return;
   }
-  if (message.chat.type === 'private') {
+  const botUsername = await telegramBotUsername(env);
+  const rawText = clean(message.text, 3000);
+  const mentioned = botUsername && new RegExp(`@${botUsername}\\b`, 'iu').test(rawText);
+  const repliedToBot = Boolean(message.reply_to_message?.from?.is_bot);
+  if (message.chat.type === 'private' || mentioned || repliedToBot) {
+    const intent = naturalTelegramIntent(rawText.replace(botUsername ? new RegExp(`@${botUsername}\\b`, 'giu') : /$^/, '').trim());
+    if (intent) {
+      await telegramHandleCommand(message, binding, { name: intent, body: '' }, env);
+      return;
+    }
     const { user } = await projectForBinding(env, binding);
     await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, telegramHelp(user.role));
   }
