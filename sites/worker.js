@@ -1574,10 +1574,10 @@ const telegramTasks = async (message, binding, env) => {
 
 const telegramStages = async (message, binding, env) => {
   const { snapshot } = await projectForBinding(env, binding);
-  const stages = (snapshot.state.stages ?? []).slice().sort((a, b) => clean(a.startDate, 20).localeCompare(clean(b.startDate, 20)));
-  const labels = { planned: 'запланирован', in_progress: 'в работе', blocked: 'заблокирован', awaiting_inspection: 'на проверке', rework: 'доработка', done: 'завершён' };
+  const stages = (snapshot.state.stages ?? []).slice().sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  const labels = { not_ready: 'ещё не готов', ready: 'готов к запуску', in_progress: 'в работе', blocked: 'заблокирован', awaiting_inspection: 'на проверке', accepted: 'принят', rework: 'доработка' };
   const text = stages.length
-    ? `Этапы · ${snapshot.state.project?.code ?? ''}\n\n${stages.map((item) => `• ${item.name} — ${labels[item.status] ?? item.status}\n  ${item.forecastEndDate ?? item.plannedEndDate ?? 'срок не указан'}`).join('\n\n')}`
+    ? `Этапы · ${snapshot.state.project?.code ?? ''}\n\n${stages.map((item) => `• ${item.name} — ${labels[item.status] ?? item.status}\n  срок: ${item.forecastEnd ?? item.planEnd ?? 'не указан'}`).join('\n\n')}`
     : 'Этапы проекта пока не созданы.';
   await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, text);
 };
