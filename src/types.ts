@@ -21,6 +21,19 @@ export type PageId =
   | 'client'
   | 'settings';
 
+export type DeveloperRequestStatus = 'new' | 'in_progress' | 'done';
+
+export interface DeveloperRequest {
+  id: string;
+  createdAt: string;
+  createdBy: string;
+  title: string;
+  description: string;
+  page: PageId;
+  priority: 'normal' | 'important' | 'critical';
+  status: DeveloperRequestStatus;
+}
+
 export type StageStatus =
   | 'not_ready'
   | 'ready'
@@ -405,6 +418,7 @@ export interface AppState {
   leads: Lead[];
   tasks: ProjectTask[];
   fieldReports: FieldReport[];
+  developerRequests: DeveloperRequest[];
   settings: AppSettings;
   checkpoints: QualityCheckpoint[];
   documents: ProjectDocument[];

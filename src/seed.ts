@@ -130,6 +130,7 @@ export const seedState: AppState = {
   leads: [],
   tasks: [],
   fieldReports: [],
+  developerRequests: [],
   settings: {
     schemaVersion: 17,
     users: [owner],
@@ -217,6 +218,7 @@ export const createProjectState = (base: AppState, input: {
     leads: [],
     tasks: [],
     fieldReports: [],
+    developerRequests: [],
     settings: JSON.parse(JSON.stringify(base.settings)) as AppState['settings'],
     checkpoints: [],
     documents: [],

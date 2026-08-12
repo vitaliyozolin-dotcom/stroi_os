@@ -93,6 +93,7 @@ export const normalizeAppState = (state: AppState): AppState => {
       history: Array.isArray(task.history) ? task.history : [],
     })),
     fieldReports: Array.isArray(state.fieldReports) ? state.fieldReports : [],
+    developerRequests: Array.isArray(state.developerRequests) ? state.developerRequests : [],
     settings: {
       schemaVersion: 17,
       users: Array.isArray(state.settings?.users) ? state.settings.users : fallback.settings.users,
