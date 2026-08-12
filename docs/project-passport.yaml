@@ -18,7 +18,7 @@ project:
     owner: "Codex + Виталий"
     action: "Развернуть обновление рабочей области и связки ikioma.ru → воронка → Telegram на stroios-prod"
     due: "после слияния проверенных pull request"
-    expected_result: "Владелец выходит через профиль, клиентский кабинет скрыт из управления, тестовая заявка видна в воронке и Telegram"
+    expected_result: "Владелец выходит через профиль, клиентский кабинет скрыт, заявка видна в воронке со временем, Telegram отвечает на этапы, задачи и финансы"
     evidence: "Production-сборки, GitHub PR, ответ /api/health, тестовая заявка и полученное сообщение Telegram"
   infrastructure:
     provider: "Timeweb Cloud"
