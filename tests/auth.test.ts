@@ -34,6 +34,13 @@ test('tampered and expired sessions are rejected', () => {
   assert.equal(expiredAuth.fromRequest(oldRequest), null);
 });
 
+test('requests without a Cookie header are treated as unauthenticated', () => {
+  const auth = createSessionAuth(config);
+  const request = new Request('https://example.com/');
+  assert.equal(request.headers.get('cookie'), null);
+  assert.equal(auth.fromRequest(request), null);
+});
+
 test('rate limiter blocks repeated failures and resets after success', () => {
   const limiter = new LoginRateLimiter({ limit: 2, windowMs: 1_000, blockMs: 2_000 });
   limiter.fail('ip', 0);
