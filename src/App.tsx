@@ -13,13 +13,13 @@ import {
   LayoutDashboard,
   ListTodo,
   LoaderCircle,
+  LogOut,
   Menu,
   Megaphone,
   PackageSearch,
   PanelLeftClose,
   Plus,
   RefreshCw,
-  LogOut,
   Settings2,
   ShieldCheck,
   UserRound,
@@ -39,6 +39,7 @@ import { CounterpartiesPage } from './pages/CounterpartiesPage';
 import { TasksPage } from './pages/TasksPage';
 import { ProjectPage } from './pages/ProjectPage';
 import { HelpCenter } from './components/HelpCenter';
+import { DeveloperFeedback } from './components/DeveloperFeedback';
 import { Field, Modal, StatusBadge } from './components/Ui';
 import type { AuthenticatedUser, PageId, UserRole } from './types';
 import { useProjectState, type SyncPhase } from './useProjectState';
@@ -115,8 +116,10 @@ function App() {
   const [mobileMenu, setMobileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [trainingComplete, setTrainingComplete] = useState(() => window.localStorage.getItem('stroios.help.completed.v1') === 'yes');
+  const [trainingOpenSignal, setTrainingOpenSignal] = useState(0);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [projectForm, setProjectForm] = useState({ code: 'H-001', name: '', address: '', model: '', area: '', clientNames: '', contractValue: '', targetCost: '', startDate: new Date().toISOString().slice(0, 10), targetDate: '', foreman: state.project.foreman, source: '' });
 
@@ -168,7 +171,7 @@ function App() {
   const navigation = useMemo(() => {
     if (role === 'client') return fullNavigation.filter((item) => item.id === 'client');
     if (role === 'foreman') return fullNavigation.filter((item) => ['overview', 'project', 'tasks', 'schedule', 'procurement', 'quality'].includes(item.id));
-    return fullNavigation.filter((item) => item.id !== 'settings' && item.id !== 'client');
+    return fullNavigation.filter((item) => !['settings', 'client'].includes(item.id));
   }, [role]);
 
   const notificationCount = useMemo(() => {
@@ -181,7 +184,6 @@ function App() {
   }, [role, state.checkpoints, state.leads, state.procurement, state.stages, state.tasks]);
 
   const navigate = (nextPage: PageId, entityId?: string) => {
-    setProfileOpen(false);
     setPage(nextPage);
     setFocusEntityId(entityId ?? null);
     setMobileMenu(false);
@@ -222,6 +224,14 @@ function App() {
     await createProject(next);
   };
 
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', headers: { Accept: 'text/html' } });
+    } finally {
+      window.location.assign('/login');
+    }
+  };
+
   if (!session) {
     return <div className="session-gate"><span><ShieldCheck size={28} /></span><h1>{sessionError ? 'Доступ не назначен' : 'Проверяем рабочий доступ'}</h1><p>{sessionError || 'СтройОС определяет ваш аккаунт и роль в проектах.'}</p>{sessionError && <button type="button" className="button button--primary" onClick={() => window.location.reload()}>Повторить</button>}</div>;
   }
@@ -247,7 +257,7 @@ function App() {
           {navigation.map((item) => {
             const Icon = item.icon;
             return (
-              <button type="button" key={item.id} data-tour={`nav-${item.id}`} className={page === item.id ? 'active' : ''} onClick={() => navigate(item.id)} title={item.label}>
+              <button type="button" key={item.id} className={page === item.id ? 'active' : ''} onClick={() => navigate(item.id)} title={item.label}>
                 <Icon size={19} /><span>{item.label}</span>
                 {item.id === 'quality' && state.checkpoints.some((checkpoint) => checkpoint.status === 'rework') && <i className="nav-alert" />}
                 {item.id === 'tasks' && state.tasks.some((task) => isTaskOverdue(task)) && <i className="nav-alert" />}
@@ -263,7 +273,7 @@ function App() {
             <div><strong>Стандарт стройки v1.0</strong><small>13 этапов · 7 кадров</small></div>
           </div>
         )}
-        {role === 'management' && <div className="sidebar__footer"><button type="button" data-tour="nav-settings" title="Настройки" className={page === 'settings' ? 'active' : ''} onClick={() => navigate('settings')}><Settings2 size={18} /><span>Настройки</span></button></div>}
+        {role === 'management' && <div className="sidebar__footer"><button type="button" title="Настройки" className={page === 'settings' ? 'active' : ''} onClick={() => navigate('settings')}><Settings2 size={18} /><span>Настройки</span></button></div>}
         <button type="button" className="sidebar-collapse" onClick={() => setSidebarCollapsed((value) => !value)} aria-label="Свернуть боковую панель"><PanelLeftClose size={17} /></button>
       </aside>
 
@@ -293,14 +303,8 @@ function App() {
             <span className="session-role"><ShieldCheck size={15} /> {roleLabels[role]}</span>
             <button type="button" className="notification-button" aria-label={`Уведомления: ${notificationCount}`} onClick={() => setNotificationsOpen(true)}><Bell size={19} />{notificationCount > 0 && <i />}</button>
             <div className="profile-menu">
-              <button type="button" className="user-chip" data-tour="profile-menu" aria-haspopup="menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((value) => !value)}>
-                <span>{initials(session.name)}</span><div><strong>{session.name}</strong><small>{session.email}</small></div><ChevronDown size={15} />
-              </button>
-              {profileOpen && <div className="profile-menu__dropdown" role="menu">
-                <div><strong>{session.name}</strong><small>{session.email}</small><span>{roleLabels[role]}</span></div>
-                {role === 'management' && <button type="button" role="menuitem" onClick={() => navigate('settings')}><Settings2 size={17} /> Настройки</button>}
-                <form action="/api/auth/logout" method="post"><button type="submit" role="menuitem"><LogOut size={17} /> Выйти из аккаунта</button></form>
-              </div>}
+              <button type="button" className="user-chip" aria-haspopup="menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((value) => !value)}><span>{initials(session.name)}</span><div><strong>{session.name}</strong><small>{session.email}</small></div><ChevronDown size={14} /></button>
+              {profileOpen && <div className="profile-menu__popover" role="menu"><div><strong>{session.name}</strong><small>{roleLabels[role]} · {session.email}</small></div><button type="button" role="menuitem" onClick={() => void logout()}><LogOut size={17} /> Выйти из аккаунта</button></div>}
             </div>
           </div>
         </header>
@@ -368,7 +372,8 @@ function App() {
 
       {createProjectOpen && <Modal wide title="Новый строительный проект" subtitle="Сначала основные параметры и сроки. Неизвестные финансовые цифры можно оставить пустыми и заполнить после сметы." onClose={() => setCreateProjectOpen(false)}><form className="modal-form" onSubmit={submitProject}><div className="form-grid"><Field label="Код проекта"><input required value={projectForm.code} onChange={(event) => setProjectForm({ ...projectForm, code: event.target.value })} placeholder="H-001" /></Field><Field label="Название"><input required value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} placeholder="Рабочее название объекта" /></Field><Field label="Клиент"><input value={projectForm.clientNames} onChange={(event) => setProjectForm({ ...projectForm, clientNames: event.target.value })} /></Field><Field label="Адрес"><input value={projectForm.address} onChange={(event) => setProjectForm({ ...projectForm, address: event.target.value })} /></Field></div><div className="form-grid"><Field label="Модель / технология"><input value={projectForm.model} onChange={(event) => setProjectForm({ ...projectForm, model: event.target.value })} /></Field><Field label="Площадь, м²"><input required min="1" type="number" inputMode="decimal" value={projectForm.area} onChange={(event) => setProjectForm({ ...projectForm, area: event.target.value })} /></Field><Field label="Стоимость договора, ₽" hint="Можно заполнить позже"><input min="0" type="number" inputMode="numeric" value={projectForm.contractValue} onChange={(event) => setProjectForm({ ...projectForm, contractValue: event.target.value })} /></Field><Field label="Плановая себестоимость, ₽" hint="Можно заполнить после сметы"><input min="0" type="number" inputMode="numeric" value={projectForm.targetCost} onChange={(event) => setProjectForm({ ...projectForm, targetCost: event.target.value })} /></Field></div><div className="form-grid"><Field label="Начало"><input required type="date" value={projectForm.startDate} onChange={(event) => setProjectForm({ ...projectForm, startDate: event.target.value })} /></Field><Field label="Плановая сдача"><input required type="date" value={projectForm.targetDate} onChange={(event) => setProjectForm({ ...projectForm, targetDate: event.target.value })} /></Field><Field label="Прораб"><input value={projectForm.foreman} onChange={(event) => setProjectForm({ ...projectForm, foreman: event.target.value })} /></Field><Field label="Основание проекта"><input value={projectForm.source} onChange={(event) => setProjectForm({ ...projectForm, source: event.target.value })} placeholder="Договор, заявка или внутреннее решение" /></Field></div><div className="form-warning"><ClipboardCheck size={18} /><span>СтройОС создаст 13 этапов. Если указана плановая себестоимость, она предварительно распределится по пакетам; до подтверждения это будет черновик.</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setCreateProjectOpen(false)}>Отмена</button><button type="submit" className="button button--primary"><Plus size={17} /> Создать проект</button></div></form></Modal>}
 
-      {role === 'management' && <HelpCenter projectId={state.project.id} currentPage={page} onNavigate={navigate} onOpenProjects={() => setProjectOpen(true)} />}
+      {role === 'management' && !trainingComplete && <HelpCenter onNavigate={navigate} onOpenProjects={() => setProjectOpen(true)} openSignal={trainingOpenSignal} onComplete={() => setTrainingComplete(true)} />}
+      {role === 'management' && trainingComplete && <DeveloperFeedback state={state} actor={session.name} page={page} onChange={updateState} onOpenTraining={() => { window.localStorage.removeItem('stroios.help.completed.v1'); setTrainingComplete(false); setTrainingOpenSignal((value) => value + 1); }} />}
     </div>
   );
 }
