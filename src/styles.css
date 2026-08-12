@@ -1464,6 +1464,10 @@ p {
   cursor: pointer;
 }
 
+.decision-item--static {
+  cursor: default;
+}
+
 .decision-item__icon {
   display: grid;
   width: 34px;
@@ -4320,9 +4324,21 @@ p {
 
   .role-switcher button span,
   .session-role,
-  .user-chip,
   .breadcrumbs span,
   .breadcrumbs i {
+    display: none;
+  }
+
+  .user-chip {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    padding: 0;
+  }
+
+  .user-chip > div,
+  .user-chip > svg {
     display: none;
   }
 

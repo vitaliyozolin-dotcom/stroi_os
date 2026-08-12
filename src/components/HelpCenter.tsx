@@ -48,7 +48,7 @@ const topics: Topic[] = [
   ] },
 ];
 
-export function HelpCenter({ projectId, currentPage, onNavigate, onOpenProjects }: { projectId: string; currentPage: PageId; onNavigate: (page: PageId) => void; onOpenProjects: () => void }) {
+export function HelpCenter({ projectId, currentPage, onNavigate, onOpenProjects, onCloseProjects }: { projectId: string; currentPage: PageId; onNavigate: (page: PageId) => void; onOpenProjects: () => void; onCloseProjects: () => void }) {
   const [open, setOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [welcome, setWelcome] = useState(() => window.localStorage.getItem('stroios.help.seen.v1') !== 'yes');
@@ -71,8 +71,9 @@ export function HelpCenter({ projectId, currentPage, onNavigate, onOpenProjects 
     setOpen(false);
     setTour(topic);
     setStepIndex(index);
-    if (next.page) onNavigate(next.page);
     if (next.openProjects) onOpenProjects();
+    else onCloseProjects();
+    if (next.page) onNavigate(next.page);
   };
 
   useEffect(() => {
