@@ -76,19 +76,6 @@ const ensureSchema = async (db) => {
         )
       `).run(),
       db.prepare(`
-        CREATE TABLE IF NOT EXISTS developer_feedback (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          created_by TEXT NOT NULL,
-          page TEXT NOT NULL,
-          category TEXT NOT NULL,
-          title TEXT NOT NULL,
-          details TEXT NOT NULL,
-          status TEXT NOT NULL
-        )
-      `).run(),
-      db.prepare(`
         CREATE TABLE IF NOT EXISTS telegram_link_codes (
           code_hash TEXT PRIMARY KEY,
           project_id TEXT NOT NULL,
@@ -2293,7 +2280,8 @@ const handleIntegrationTest = async (request, env) => {
     try {
       const connection = await resolveTelegramConnection(env, { discover: false });
       const response = await telegramSend(env.TELEGRAM_BOT_TOKEN, connection.chat?.id, message);
-      if (!response.ok) return json({ ok: false, error: 'provider_error' }, 502);
+      const provider = await parseTelegramBody(response);
+      if (!response.ok || !provider?.ok) return json({ ok: false, error: 'provider_error' }, 502);
       return json({ ok: true, channel: 'telegram' });
     } catch { return json({ ok: false, error: 'provider_unavailable' }, 502); }
   }
@@ -2851,73 +2839,32 @@ const handlePublicLead = async (request, env) => {
       INSERT INTO lead_inbox (id, project_id, created_at, name, phone, email, source, message, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')
     `).bind(id, PUBLIC_LEAD_PROJECT_ID, createdAt, name, phone, email || null, source, message || null).run();
-    let telegramNotified = false;
-    try {
-      const connection = await resolveTelegramConnection(env, { discover: false });
-      if (env.TELEGRAM_BOT_TOKEN && connection.chat?.id) {
-        const details = [
-          '🏠 Новая заявка с ikioma.ru',
-          `Имя: ${name}`,
-          `Телефон: ${phone}`,
-          email ? `Email: ${email}` : '',
-          `Источник: ${source}`,
-          message ? `Комментарий: ${message}` : '',
-          `Открыть воронку: ${deepLink(telegramOrigin(env), PUBLIC_LEAD_PROJECT_ID, 'marketing', id)}`,
-        ].filter(Boolean).join('\n');
-        const notification = await telegramSend(env.TELEGRAM_BOT_TOKEN, connection.chat.id, details);
-        telegramNotified = notification.ok;
+    if (env.TELEGRAM_BOT_TOKEN) {
+      try {
+        const connection = await resolveTelegramConnection(env, { discover: false });
+        const chatId = clean(connection.chat?.id, 120);
+        if (chatId) {
+          const details = [
+            'ИКИОМА ОС · новая заявка с сайта',
+            '',
+            `Клиент: ${name}`,
+            `Телефон: ${phone}`,
+            email ? `Email: ${email}` : '',
+            message ? `Запрос: ${message}` : '',
+            '',
+            deepLink(telegramOrigin(env), PUBLIC_LEAD_PROJECT_ID, 'marketing', id),
+          ].filter(Boolean).join('\n');
+          await telegramSend(env.TELEGRAM_BOT_TOKEN, chatId, details);
+        }
+      } catch {
+        // Заявка уже сохранена. Сбой Telegram не должен заставлять клиента отправлять форму повторно.
       }
-    } catch {
-      telegramNotified = false;
     }
-    return publicLeadResponse({ ok: true, leadId: id, telegramNotified }, 201, origin);
+    return publicLeadResponse({ ok: true, leadId: id }, 201, origin);
   } catch {
     return publicLeadResponse({ ok: false, error: 'storage_error' }, 500, origin);
   }
 };
-
-const handleDeveloperFeedback = async (request, env) => {
-  if (!env.DB) return json({ ok: false, error: 'storage_unavailable' }, 503);
-  const url = new URL(request.url);
-  let projectId = clean(url.searchParams.get('projectId'), 120);
-  let payload = null;
-  if (request.method === 'POST') {
-    try { payload = await request.json(); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }
-    projectId = clean(payload?.projectId, 120);
-  }
-  if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
-  try {
-    await ensureSchema(env.DB);
-    const snapshot = await readSnapshot(env.DB, projectId);
-    const identity = snapshot ? projectIdentity(request, env, snapshot.state) : authenticatedIdentity(request, env);
-    if (!identity || identity.role !== 'management') return json({ ok: false, error: 'project_access_denied' }, 403);
-    if (request.method === 'GET') {
-      const result = await env.DB.prepare(`
-        SELECT id, project_id, created_at, created_by, page, category, title, details, status
-        FROM developer_feedback WHERE project_id = ? ORDER BY created_at DESC LIMIT 50
-      `).bind(projectId).all();
-      return json({ ok: true, items: (result.results ?? []).map((row) => ({
-        id: row.id, projectId: row.project_id, createdAt: row.created_at, createdBy: row.created_by,
-        page: row.page, category: row.category, title: row.title, details: row.details, status: row.status,
-      })) });
-    }
-    if (request.method !== 'POST') return json({ ok: false, error: 'method_not_allowed' }, 405);
-    const page = clean(payload?.page, 60);
-    const category = clean(payload?.category, 60);
-    const title = clean(payload?.title, 160);
-    const details = clean(payload?.details, 3000);
-    if (!page || !category || !title || !details) return json({ ok: false, error: 'invalid_feedback' }, 422);
-    const item = { id: crypto.randomUUID(), projectId, createdAt: new Date().toISOString(), createdBy: clean(identity.name || identity.email, 160) || 'Пользователь', page, category, title, details, status: 'new' };
-    await env.DB.prepare(`
-      INSERT INTO developer_feedback (id, project_id, created_at, created_by, page, category, title, details, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(item.id, item.projectId, item.createdAt, item.createdBy, item.page, item.category, item.title, item.details, item.status).run();
-    return json({ ok: true, item }, 201);
-  } catch {
-    return json({ ok: false, error: 'storage_error' }, 500);
-  }
-};
-
 
 const handleApi = async (request, env, context) => {
   const url = new URL(request.url);
@@ -2952,7 +2899,6 @@ const handleApi = async (request, env, context) => {
   if (url.pathname === '/api/documents/file' && request.method === 'GET') return handleDocumentFile(request, env);
   if (url.pathname === '/api/field-reports/file' && request.method === 'GET') return handleFieldReportFile(request, env);
   if (url.pathname === '/api/leads' && (request.method === 'GET' || request.method === 'POST')) return handleLeadInbox(request, env);
-  if (url.pathname === '/api/developer-feedback' && (request.method === 'GET' || request.method === 'POST')) return handleDeveloperFeedback(request, env);
   if (url.pathname === '/api/audit' && request.method === 'GET') return handleAudit(request, env);
   return json({ ok: false, error: 'not_found' }, 404);
 };
