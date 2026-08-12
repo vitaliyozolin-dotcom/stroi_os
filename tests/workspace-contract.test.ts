@@ -36,3 +36,23 @@ test('IKIOMA lead ingress is public only for the dedicated endpoint and protecte
   assert.match(worker, /duplicateAfter/);
   assert.match(worker, /timeoutMs: 3_000/);
 });
+
+test('the user-facing product is consistently branded as IKIOMA OS', () => {
+  const userFacingFiles = [
+    'index.html',
+    'src/App.tsx',
+    'src/components/CounterpartyModal.tsx',
+    'src/components/HelpCenter.tsx',
+    'src/pages/ClientPage.tsx',
+    'src/pages/FinancePage.tsx',
+    'src/pages/MarketingPage.tsx',
+    'src/pages/ProjectPage.tsx',
+    'src/pages/SettingsPage.tsx',
+    'src/seed.ts',
+    'sites/worker.js',
+  ].map(source).join('\n');
+
+  assert.doesNotMatch(userFacingFiles, /СтройОС|СТРОЙОС/);
+  assert.match(source('src/App.tsx'), /ИКИОМА <span>ОС<\/span>/);
+  assert.match(source('src/components/HelpCenter.tsx'), /Обучение ИКИОМА ОС/);
+});

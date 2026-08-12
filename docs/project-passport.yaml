@@ -1,5 +1,5 @@
 project:
-  name: "СтройОС"
+  name: "ИКИОМА ОС"
   owner: "Виталий Озолин"
   scope: "Операционная система управления строительством частных домов ИКИОМА"
   passport_status: approved
@@ -48,7 +48,7 @@ project:
     - date: "2026-08-05"
       decision: "Timeweb Cloud выбран вместо Beget для единой панели с Agro"
     - date: "2026-08-05"
-      decision: "Agro и СтройОС размещаются на разных VPS"
+      decision: "Agro и ИКИОМА ОС размещаются на разных VPS"
     - date: "2026-08-05"
       decision: "Sites остаётся резервным стендом на время миграции"
     - date: "2026-08-05"

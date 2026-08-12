@@ -121,7 +121,8 @@ export function CounterpartyModal({ state, counterpartyId, name, onClose, onOpen
         </div>
       </section>
 
-      <div className="counterparty-footnote"><CircleAlert size={16} /><span>Надёжность считается только по зафиксированным фактам: завершённым этапам и поставкам с датой доставки. Чем больше данных пройдёт через СтройОС, тем точнее будет история.</span>{ordered > 0 && <strong>Объём заказов: {money(ordered)}</strong>}</div>
+      <div className="counterparty-footnote"><CircleAlert size={16} /><span>Надёжность считается только по зафиксированным фактам: завершённым этапам и поставкам с датой доставки. Чем больше данных пройдёт через ИКИОМА ОС, тем точнее будет история.</span>{ordered > 0 && <strong>Объём заказов: {money(ordered)}</strong>}</div>
     </Modal>
   );
 }
+
