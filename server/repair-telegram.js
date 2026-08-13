@@ -70,13 +70,25 @@ const requiredEnv = (name) => {
   return value;
 };
 
+const networkErrorDetails = (error) => {
+  const cause = error?.cause;
+  const code = String(cause?.code ?? error?.code ?? '').trim();
+  const detail = String(cause?.message ?? error?.message ?? error ?? 'неизвестная сетевая ошибка').trim();
+  return [code, detail].filter(Boolean).join(': ').slice(0, 400);
+};
+
 const telegramApi = async (token, method, payload = {}, timeoutMs = 25_000) => {
-  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  let response;
+  try {
+    response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    throw new Error(`Telegram ${method}: сеть контейнера недоступна (${networkErrorDetails(error)})`);
+  }
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.ok) {
     const description = String(body?.description ?? `HTTP ${response.status}`).slice(0, 300);
