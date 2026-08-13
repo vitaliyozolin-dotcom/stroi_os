@@ -93,20 +93,25 @@ const setWebhook = (token, webhookUrl, webhookSecret) => telegramApi(token, 'set
 });
 
 const collectGroupUpdate = async (token, botUsername) => {
-  let updates = [];
+  const updatesById = new Map();
+  let offset;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const timeout = attempt === 0 ? 0 : 12;
-    const batch = await telegramApi(token, 'getUpdates', {
+    const payload = {
       timeout,
       allowed_updates: ['message', 'edited_message', 'channel_post', 'edited_channel_post', 'my_chat_member', 'chat_member'],
-    }, (timeout + 10) * 1000);
-    updates = batch ?? [];
+    };
+    if (Number.isInteger(offset)) payload.offset = offset;
+    const batch = await telegramApi(token, 'getUpdates', payload, (timeout + 10) * 1000);
+    for (const update of batch ?? []) updatesById.set(String(update?.update_id ?? crypto.randomUUID()), update);
+    const updates = [...updatesById.values()];
     if (telegramGroupCandidates(updates).length) return updates;
+    if (batch?.length) offset = Math.max(...batch.map((update) => Number(update?.update_id ?? -1))) + 1;
     if (attempt === 0) {
       console.log(`Ожидаю команду /start@${botUsername} в группе «ИкиОМА» (до 48 секунд)…`);
     }
   }
-  return updates;
+  return [...updatesById.values()];
 };
 
 const saveTelegramChat = async (databaseUrl, chat, bot) => {
@@ -211,8 +216,10 @@ export const runTelegramRepair = async () => {
 
     await setWebhook(token, webhookUrl, webhookSecret);
     webhookRestored = true;
-    await replayUpdateThroughWebhook(webhookUrl, webhookSecret, selected.update);
-    console.log('4/5 Входящий webhook принят ИКИОМА ОС');
+    for (const update of updates) {
+      await replayUpdateThroughWebhook(webhookUrl, webhookSecret, update);
+    }
+    console.log(`4/5 Входящий webhook принят ИКИОМА ОС; восстановлено обновлений: ${updates.length}`);
 
     const confirmation = await telegramApi(token, 'sendMessage', {
       chat_id: selected.id,
