@@ -88,12 +88,27 @@ test('Telegram common chat recheck is webhook-backed, observable and honestly la
 });
 
 
-test('Telegram container uses IPv4-first DNS and reports the real network failure', () => {
+test('Telegram container uses IPv6 egress and reports the real network failure', () => {
   const compose = source('compose.yaml');
   const repair = source('server/repair-telegram.js');
 
-  assert.match(compose, /NODE_OPTIONS: --dns-result-order=ipv4first/);
-  assert.match(compose, /dns:\n\s+- 1\.1\.1\.1\n\s+- 8\.8\.8\.8/);
+  assert.match(compose, /NODE_OPTIONS: --dns-result-order=ipv6first/);
+  assert.match(compose, /telegram_ipv6:/);
+  assert.match(compose, /enable_ipv6: true/);
   assert.match(repair, /networkErrorDetails/);
   assert.match(repair, /сеть контейнера недоступна/);
+});
+
+test('Telegram explains exactly what is read, drafted, saved or ignored', () => {
+  const worker = source('sites/worker.js');
+
+  assert.match(worker, /command\.name === 'note'/);
+  assert.match(worker, /action === 'nc'/);
+  assert.match(worker, /state\.fieldReports = \[report/);
+  assert.match(worker, /Ничего не записано в ИКИОМА ОС/);
+  assert.match(worker, /Молчание никогда не означает сохранение/);
+  assert.match(worker, /telegramCommandSuggestion/);
+  assert.match(worker, /command: 'note'/);
+  assert.match(worker, /naturalTelegramCommand/);
+  assert.match(worker, /addressedToBot/);
 });
