@@ -6,7 +6,9 @@ const script = readFileSync(new URL('../scripts/setup-telegram.sh', import.meta.
 
 test('Telegram setup interpolates runtime values instead of sending shell placeholders', () => {
   assert.doesNotMatch(script, /\\\$\{/)
+  assert.doesNotMatch(script, /\bnode\s+-e\b/)
   assert.match(script, /bot\$\{IKIOMA_TELEGRAM_TOKEN\}\/getMe/)
+  assert.match(script, /sed -n 's\/\.\*"username"/)
   assert.match(script, /\$\{IKIOMA_PUBLIC_URL%\/\}\/api\/integrations\/telegram\/update/)
   assert.match(script, /test "\$\{STATUS:-\}" = "healthy"/)
 })
