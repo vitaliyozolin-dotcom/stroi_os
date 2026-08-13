@@ -8,7 +8,7 @@ read -rsp "Вставьте токен @ikioma_bot из BotFather: " IKIOMA_TELE
 echo
 test -n "$IKIOMA_TELEGRAM_TOKEN" || { echo "Токен не введён"; exit 1; }
 
-BOT_INFO="$(curl -fsS --max-time 10 "https://api.telegram.org/bot\${IKIOMA_TELEGRAM_TOKEN}/getMe")" || {
+BOT_INFO="$(curl -fsS --max-time 10 "https://api.telegram.org/bot${IKIOMA_TELEGRAM_TOKEN}/getMe")" || {
   unset IKIOMA_TELEGRAM_TOKEN
   echo "Telegram не принял токен"
   exit 1
@@ -38,16 +38,16 @@ test "$BOT_USERNAME" = "ikioma_bot" || {
 IKIOMA_TELEGRAM_SETUP_KEY="$(openssl rand -hex 24)"
 IKIOMA_TELEGRAM_WEBHOOK_SECRET="$(openssl rand -hex 24)"
 IKIOMA_PUBLIC_URL="$(sed -n 's/^APP_PUBLIC_URL=//p' .env | tail -1 | tr -d '"')"
-IKIOMA_PUBLIC_URL="\${IKIOMA_PUBLIC_URL:-https://stroios-188-225-38-55.sslip.io}"
-IKIOMA_TELEGRAM_WEBHOOK_URL="\${IKIOMA_PUBLIC_URL%/}/api/integrations/telegram/update"
+IKIOMA_PUBLIC_URL="${IKIOMA_PUBLIC_URL:-https://stroios-188-225-38-55.sslip.io}"
+IKIOMA_TELEGRAM_WEBHOOK_URL="${IKIOMA_PUBLIC_URL%/}/api/integrations/telegram/update"
 
 cp -a .env ".env.backup-telegram-$(date +%Y%m%d-%H%M%S)"
 
 update_env() {
   local key="$1"
   local value="$2"
-  if grep -q "^\${key}=" .env; then
-    sed -i "s|^\${key}=.*|\${key}=\${value}|" .env
+  if grep -q "^${key}=" .env; then
+    sed -i "s|^${key}=.*|${key}=${value}|" .env
   else
     printf '%s=%s\n' "$key" "$value" >> .env
   fi
@@ -67,7 +67,7 @@ for _ in $(seq 1 30); do
   [ "$STATUS" = "healthy" ] && break
   sleep 2
 done
-test "\${STATUS:-}" = "healthy" || { echo "Приложение не прошло healthcheck"; exit 1; }
+test "${STATUS:-}" = "healthy" || { echo "Приложение не прошло healthcheck"; exit 1; }
 
 HTTP_STATUS="$(curl -sS -o /tmp/ikioma-telegram-bootstrap.json -w '%{http_code}' \
   -X POST -H "x-stroios-setup-key: $IKIOMA_TELEGRAM_SETUP_KEY" \
