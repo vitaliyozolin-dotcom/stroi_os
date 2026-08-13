@@ -2,6 +2,12 @@ import { pathToFileURL } from 'node:url';
 
 const TELEGRAM_CONFIG_PROJECT_ID = '__integration__:telegram';
 const GROUP_TYPES = new Set(['group', 'supergroup']);
+const TELEGRAM_API_BASE = String(process.env.TELEGRAM_API_BASE ?? 'https://api.telegram.org').trim().replace(/\/+$/u, '');
+const TELEGRAM_RELAY_SECRET = String(process.env.TELEGRAM_RELAY_SECRET ?? '').trim();
+const telegramHeaders = () => ({
+  'Content-Type': 'application/json',
+  ...(TELEGRAM_RELAY_SECRET ? { 'X-Telegram-Relay-Secret': TELEGRAM_RELAY_SECRET } : {}),
+});
 
 const messageChat = (update) => (
   update?.message?.chat
@@ -80,9 +86,9 @@ const networkErrorDetails = (error) => {
 const telegramApi = async (token, method, payload = {}, timeoutMs = 25_000) => {
   let response;
   try {
-    response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/${method}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: telegramHeaders(),
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(timeoutMs),
     });

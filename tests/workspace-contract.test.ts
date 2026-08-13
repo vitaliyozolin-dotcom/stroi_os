@@ -88,15 +88,25 @@ test('Telegram common chat recheck is webhook-backed, observable and honestly la
 });
 
 
-test('Telegram container uses IPv6 egress and reports the real network failure', () => {
+test('Telegram uses the VPS host network relay and reports real upstream failures', () => {
   const compose = source('compose.yaml');
+  const relay = source('server/telegram-relay.js');
   const repair = source('server/repair-telegram.js');
+  const worker = source('sites/worker.js');
 
-  assert.match(compose, /NODE_OPTIONS: --dns-result-order=ipv6first/);
-  assert.match(compose, /telegram_ipv6:/);
-  assert.match(compose, /enable_ipv6: true/);
+  assert.match(compose, /telegram-relay:/);
+  assert.match(compose, /network_mode: host/);
+  assert.match(compose, /TELEGRAM_API_BASE: http:\/\/host\.docker\.internal:18787/);
+  assert.match(compose, /TELEGRAM_RELAY_SECRET:/);
+  assert.doesNotMatch(compose, /telegram_ipv6:/);
+  assert.match(relay, /family: 6/);
+  assert.match(relay, /isPrivateRelayClient/);
+  assert.match(relay, /relay_secret_invalid/);
+  assert.match(repair, /TELEGRAM_API_BASE/);
   assert.match(repair, /networkErrorDetails/);
   assert.match(repair, /сеть контейнера недоступна/);
+  assert.match(worker, /telegramApiUrl/);
+  assert.match(worker, /telegramTransportHeaders/);
 });
 
 test('Telegram explains exactly what is read, drafted, saved or ignored', () => {

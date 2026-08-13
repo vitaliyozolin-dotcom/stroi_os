@@ -660,19 +660,30 @@ const deepLink = (origin, projectId, page, entityId) => {
   return url.toString();
 };
 
+const telegramRuntimeEnv = () => globalThis.process?.env ?? {};
+const telegramApiBase = () => clean(telegramRuntimeEnv().TELEGRAM_API_BASE, 500).replace(/\/+$/u, '')
+  || 'https://api.telegram.org';
+const telegramTransportHeaders = (headers = {}) => {
+  const relaySecret = clean(telegramRuntimeEnv().TELEGRAM_RELAY_SECRET, 512);
+  return relaySecret
+    ? { ...headers, 'X-Telegram-Relay-Secret': relaySecret }
+    : headers;
+};
+const telegramApiUrl = (path) => `${telegramApiBase()}${path}`;
+
 const telegramSend = (token, chatId, text, options = {}) => {
   const { timeoutMs = 10_000, ...telegramOptions } = options;
-  return fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  return fetch(telegramApiUrl(`/bot${token}/sendMessage`), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: telegramTransportHeaders({ 'Content-Type': 'application/json' }),
     signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true, ...telegramOptions }),
   });
 };
 
-const telegramRequest = (token, method, payload = {}) => fetch(`https://api.telegram.org/bot${token}/${method}`, {
+const telegramRequest = (token, method, payload = {}) => fetch(telegramApiUrl(`/bot${token}/${method}`), {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: telegramTransportHeaders({ 'Content-Type': 'application/json' }),
   body: JSON.stringify(payload),
 });
 
@@ -1245,7 +1256,7 @@ const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uplo
   if (!metadataResponse.ok || !metadataBody?.ok || !metadataBody.result?.file_path) throw new Error('telegram_file_unavailable');
   const declaredSize = Number(metadataBody.result.file_size) || 0;
   if (declaredSize > MAX_FILE_BYTES) throw new Error('telegram_file_too_large');
-  const sourceResponse = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${metadataBody.result.file_path}`);
+  const sourceResponse = await fetch(telegramApiUrl(`/file/bot${env.TELEGRAM_BOT_TOKEN}/${metadataBody.result.file_path}`), { headers: telegramTransportHeaders() });
   if (!sourceResponse.ok || !sourceResponse.body) throw new Error('telegram_file_unavailable');
   const safeName = safeFileName(fileName);
   const key = `${projectId}/telegram/${crypto.randomUUID()}-${safeName}`;
