@@ -6,12 +6,25 @@ services:
     volumes:
       - stroios_files:/data/files
 
+  telegram-relay:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TELEGRAM_RELAY_PORT: 18787
+      TELEGRAM_RELAY_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+    command: ["node", "server/telegram-relay.js"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18787/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   app:
     build: .
     restart: unless-stopped
     environment:
       PORT: 3000
-      NODE_OPTIONS: --dns-result-order=ipv6first
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       FILE_STORAGE_PATH: /data/files
       OWNER_EMAIL: ${OWNER_EMAIL}
@@ -23,16 +36,15 @@ services:
       TELEGRAM_SETUP_KEY: ${TELEGRAM_SETUP_KEY:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
       TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
+      TELEGRAM_API_BASE: http://host.docker.internal:18787
+      TELEGRAM_RELAY_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - stroios_files:/data/files
-    networks:
-      default:
-      telegram_ipv6:
-        gw_priority: 1
     depends_on:
+      telegram-relay:
+        condition: service_healthy
       storage-init:
         condition: service_completed_successfully
       db:
@@ -74,11 +86,6 @@ services:
     depends_on:
       app:
         condition: service_healthy
-
-networks:
-  default:
-  telegram_ipv6:
-    enable_ipv6: true
 
 volumes:
   stroios_files:
