@@ -71,3 +71,18 @@ test('lead timing and conversational Telegram summaries are visible and supporte
   assert.match(worker, /naturalTelegramIntent/);
   assert.match(worker, /repliedToBot/);
 });
+
+
+test('Telegram common chat recheck is webhook-backed, observable and honestly labelled', () => {
+  const settings = source('src/pages/SettingsPage.tsx');
+  const worker = source('sites/worker.js');
+
+  assert.match(worker, /CREATE TABLE IF NOT EXISTS telegram_chat_candidates/);
+  assert.match(worker, /rememberTelegramChatCandidates\(env\.DB, update\)/);
+  assert.match(worker, /readObservedTelegramChats/);
+  assert.match(worker, /verifyAndStoreTelegramChat\(env, chat, bot\)/);
+  assert.match(settings, /const recheckTelegram = async/);
+  assert.match(settings, /integrationChecking \? 'Проверяем…'/);
+  assert.match(settings, /telegramHeadquartersReady = Boolean\(integrationStatus\?\.telegramCommon && integrationStatus\?\.telegramInbound\)/);
+  assert.match(settings, /aria-live="polite"/);
+});

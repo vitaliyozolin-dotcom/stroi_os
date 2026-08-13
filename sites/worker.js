@@ -108,6 +108,14 @@ const ensureSchema = async (db) => {
         )
       `).run(),
       db.prepare(`
+        CREATE TABLE IF NOT EXISTS telegram_chat_candidates (
+          chat_id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          type TEXT NOT NULL,
+          observed_at TEXT NOT NULL
+        )
+      `).run(),
+      db.prepare(`
         CREATE TABLE IF NOT EXISTS telegram_drafts (
           id TEXT PRIMARY KEY,
           telegram_user_id TEXT NOT NULL,
@@ -354,6 +362,7 @@ const runBattleReset = async (env) => {
       env.DB.prepare(`DELETE FROM telegram_link_codes`),
       env.DB.prepare(`DELETE FROM telegram_bindings`),
       env.DB.prepare(`DELETE FROM telegram_chat_projects`),
+      env.DB.prepare(`DELETE FROM telegram_chat_candidates`),
       env.DB.prepare(`DELETE FROM telegram_drafts`),
       env.DB.prepare(`DELETE FROM telegram_updates`),
       env.DB.prepare(`
@@ -699,6 +708,52 @@ const telegramChatCandidates = (updates) => {
   return [...chats.values()];
 };
 
+const rememberTelegramChatCandidates = async (db, update) => {
+  if (!db) return;
+  const candidates = telegramChatCandidates([update]);
+  if (!candidates.length) return;
+  await ensureSchema(db);
+  const observedAt = new Date().toISOString();
+  for (const chat of candidates) {
+    await db.prepare(`
+      INSERT INTO telegram_chat_candidates (chat_id, title, type, observed_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(chat_id) DO UPDATE SET
+        title = excluded.title,
+        type = excluded.type,
+        observed_at = excluded.observed_at
+    `).bind(chat.id, chat.title, chat.type, observedAt).run();
+  }
+};
+
+const readObservedTelegramChats = async (db) => {
+  if (!db) return [];
+  await ensureSchema(db);
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const result = await db.prepare(`
+    SELECT chat_id, title, type
+    FROM telegram_chat_candidates
+    WHERE observed_at >= ?
+    ORDER BY observed_at DESC
+    LIMIT 20
+  `).bind(cutoff).all();
+  return (result?.results ?? []).map((row) => ({
+    id: clean(row.chat_id, 120),
+    title: clean(row.title, 160) || 'Общий Telegram-чат',
+    type: clean(row.type, 40) || 'group',
+  })).filter((chat) => chat.id);
+};
+
+const readTelegramBot = async (token) => {
+  try {
+    const response = await telegramRequest(token, 'getMe');
+    const body = await parseTelegramBody(response);
+    return response.ok && body?.ok ? body.result : null;
+  } catch {
+    return null;
+  }
+};
+
 const discoverTelegramChats = async (token) => {
   try {
     const [botResponse, updatesResponse] = await Promise.all([
@@ -807,6 +862,32 @@ const resolveTelegramConnection = async (env, { discover = true } = {}) => {
   const stored = await readTelegramConfig(env.DB);
   if (stored?.chat) return { tokenConfigured: true, ...stored, candidates: [], issue: '' };
   if (!discover) return { tokenConfigured: true, chat: null, bot: null, candidates: [], issue: 'chat_missing' };
+
+  const observedCandidates = await readObservedTelegramChats(env.DB);
+  if (observedCandidates.length) {
+    const bot = await readTelegramBot(env.TELEGRAM_BOT_TOKEN);
+    if (observedCandidates.length !== 1) {
+      return {
+        tokenConfigured: true,
+        chat: null,
+        bot,
+        candidates: observedCandidates,
+        issue: 'chat_ambiguous',
+      };
+    }
+    const chat = observedCandidates[0];
+    const verification = await verifyAndStoreTelegramChat(env, chat, bot);
+    if (!verification.ok) {
+      return {
+        tokenConfigured: true,
+        chat: null,
+        bot,
+        candidates: observedCandidates,
+        issue: verification.issue,
+      };
+    }
+    return { tokenConfigured: true, chat, bot, candidates: [], issue: '', verifiedAt: new Date().toISOString() };
+  }
 
   const discovered = await discoverTelegramChats(env.TELEGRAM_BOT_TOKEN);
   if (!discovered.ok) return { tokenConfigured: true, chat: null, ...discovered };
@@ -1877,6 +1958,7 @@ const handleTelegramUpdate = async (request, env, context) => {
   const updateId = clean(String(update?.update_id ?? ''), 80);
   if (!updateId) return json({ ok: false, error: 'invalid_update' }, 422);
   await ensureSchema(env.DB);
+  await rememberTelegramChatCandidates(env.DB, update);
   const existing = await env.DB.prepare(`SELECT status FROM telegram_updates WHERE update_id = ?`).bind(updateId).first();
   if (existing?.status === 'done' || existing?.status === 'processing') return json({ ok: true, duplicate: true });
   const now = new Date().toISOString();
@@ -2210,12 +2292,18 @@ const handleTelegramChatSelect = async (request, env) => {
   const chatId = clean(payload?.chatId, 120);
   if (!chatId) return json({ ok: false, error: 'invalid_chat' }, 422);
 
-  const discovered = await discoverTelegramChats(env.TELEGRAM_BOT_TOKEN);
-  if (!discovered.ok) return json({ ok: false, error: discovered.issue || 'provider_unavailable' }, 502);
-  const chat = discovered.candidates.find((candidate) => candidate.id === chatId);
+  const observedCandidates = await readObservedTelegramChats(env.DB);
+  let chat = observedCandidates.find((candidate) => candidate.id === chatId);
+  let bot = await readTelegramBot(env.TELEGRAM_BOT_TOKEN);
+  if (!chat) {
+    const discovered = await discoverTelegramChats(env.TELEGRAM_BOT_TOKEN);
+    if (!discovered.ok) return json({ ok: false, error: discovered.issue || 'provider_unavailable' }, 502);
+    chat = discovered.candidates.find((candidate) => candidate.id === chatId);
+    bot = discovered.bot;
+  }
   if (!chat) return json({ ok: false, error: 'chat_not_found' }, 404);
 
-  const verification = await verifyAndStoreTelegramChat(env, chat, discovered.bot);
+  const verification = await verifyAndStoreTelegramChat(env, chat, bot);
   if (!verification.ok) return json({ ok: false, error: verification.issue || 'provider_error' }, 502);
   return json({ ok: true, chat: { title: chat.title, type: chat.type } });
 };

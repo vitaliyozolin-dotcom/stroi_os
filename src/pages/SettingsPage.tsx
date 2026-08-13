@@ -72,16 +72,37 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
   const [integrationMessage, setIntegrationMessage] = useState('');
+  const [integrationChecking, setIntegrationChecking] = useState(false);
   const [telegramLink, setTelegramLink] = useState<{ userName: string; url: string; expiresAt: string } | null>(null);
 
-  const refreshIntegrationStatus = async () => {
+  const refreshIntegrationStatus = async (): Promise<IntegrationStatus | null> => {
     try {
       const response = await fetch('/api/integrations/status', { cache: 'no-store' });
-      const body = await response.json();
-      setIntegrationStatus(body.integrations ?? null);
+      const body = await response.json() as { integrations?: IntegrationStatus };
+      const nextStatus = response.ok ? body.integrations ?? null : null;
+      setIntegrationStatus(nextStatus);
+      return nextStatus;
     } catch {
       setIntegrationStatus(null);
+      return null;
     }
+  };
+
+  const recheckTelegram = async () => {
+    setIntegrationChecking(true);
+    setIntegrationMessage('Ищем сообщение от бота в Telegram-группе…');
+    const status = await refreshIntegrationStatus();
+    const command = status?.telegramBotUsername ? `/start@${status.telegramBotUsername}` : '/start@ikioma_bot';
+    if (!status) {
+      setIntegrationMessage('Не удалось связаться с сервером ИКИОМА ОС. Обновите страницу и повторите.');
+    } else if (status.telegramCommon) {
+      setIntegrationMessage(`Общий чат «${status.telegramCommonTitle || 'ИкиОМА'}» подключён. Проверочное сообщение отправлено ботом.`);
+    } else if (status.telegramCandidates?.length) {
+      setIntegrationMessage('Бот увидел несколько групп. Выберите нужный чат в карточке Telegram.');
+    } else {
+      setIntegrationMessage(`Группа пока не найдена. Отправьте ${command} в группе «ИкиОМА», затем нажмите кнопку ещё раз.`);
+    }
+    setIntegrationChecking(false);
   };
 
   useEffect(() => {
@@ -191,6 +212,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
   };
 
   const telegramCommand = integrationStatus?.telegramBotUsername ? `/start@${integrationStatus.telegramBotUsername}` : '/start';
+  const telegramHeadquartersReady = Boolean(integrationStatus?.telegramCommon && integrationStatus?.telegramInbound);
   const telegramStatusLabel = integrationStatus?.telegramCommon
     ? integrationStatus.telegramCommonTitle || 'Общий чат подключён'
     : integrationStatus?.telegramIssue === 'invalid_token'
@@ -221,7 +243,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
             <>
               <section className="panel settings-panel"><SectionHeader eyebrow="Команда" title="Пользователи и роли" action={<button type="button" className="button button--primary button--compact" onClick={() => setShowInvite(true)}><Plus size={16} /> Добавить</button>} />
                 <div className="user-list">{state.settings.users.map((user) => <article key={user.id} className="user-row"><span className="user-row__avatar">{user.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><div className="user-row__identity"><strong>{user.name}</strong><small>{user.email}{user.telegram ? ` · ${user.telegram}` : ''}</small></div><span className="user-row__role"><StatusBadge label={roleLabels[user.role]} tone={user.role === 'management' ? 'blue' : 'neutral'} /></span><span className="user-row__status"><StatusBadge label={user.telegramBoundAt ? 'Telegram подключён' : user.status === 'active' ? 'Активен' : user.inviteDelivery === 'sent' ? 'Приглашение отправлено' : user.status === 'invited' ? 'Доступ не выдан' : 'Отключён'} tone={user.telegramBoundAt || user.status === 'active' ? 'positive' : user.status === 'invited' ? 'warning' : 'neutral'} /></span><small className="user-row__last">{user.lastActiveAt ? formatDateTime(user.lastActiveAt) : 'Ещё не входил'}</small><span className="user-row__actions"><button type="button" aria-label={`Подключить Telegram для ${user.name}`} title="Персональная Telegram-ссылка" disabled={user.status === 'disabled'} onClick={() => void createTelegramLink(user)}><Link2 size={16} /></button><button type="button" aria-label={`Редактировать ${user.name}`} onClick={() => setEditingUser({ ...user })}><Pencil size={16} /></button></span></article>)}</div>
-                {integrationMessage && <div className="integration-result">{integrationMessage}</div>}
+                {integrationMessage && <div className="integration-result" role="status" aria-live="polite">{integrationMessage}</div>}
               </section>
               <section className="panel settings-panel"><SectionHeader eyebrow="Матрица" title="Что видит каждая роль" />
                 <div className="permission-table"><div className="permission-table__head"><strong>Раздел</strong><strong>Управление</strong><strong>Прораб</strong><strong>Клиент</strong></div>{[
@@ -260,7 +282,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
                         : `Исходящие уведомления работают; входящие команды ещё не подключены.`
                       : `Добавьте бота в общий чат, отправьте там ${telegramCommand} — ИКИОМА ОС найдёт группу автоматически.`}</p>
                   </div>
-                  <StatusBadge label={integrationStatus?.telegramInbound ? 'Полевой штаб готов' : telegramStatusLabel} tone={integrationStatus?.telegramInbound ? 'positive' : integrationStatus?.telegramIssue === 'invalid_token' ? 'warning' : 'neutral'} />
+                  <StatusBadge label={telegramHeadquartersReady ? 'Полевой штаб готов' : telegramStatusLabel} tone={telegramHeadquartersReady ? 'positive' : integrationStatus?.telegramIssue === 'invalid_token' ? 'warning' : 'neutral'} />
                   {integrationStatus?.telegramCandidates?.length ? (
                     <div className="telegram-chat-options">
                       <small>Бот видит несколько групп. Какая из них общая?</small>
@@ -274,7 +296,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
                   {integrationStatus?.telegramCommon
                     ? <button type="button" className="text-button integration-action" onClick={() => void testIntegration('telegram')}>Отправить тест в общий чат</button>
                     : integrationStatus?.telegramBot
-                      ? <button type="button" className="text-button integration-action" onClick={() => void refreshIntegrationStatus()}>Проверить ещё раз</button>
+                      ? <button type="button" className="text-button integration-action" disabled={integrationChecking} onClick={() => void recheckTelegram()}>{integrationChecking ? 'Проверяем…' : 'Проверить ещё раз'}</button>
                       : null}
                 </article>
                 <article>
@@ -289,7 +311,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
                   {integrationStatus?.email && <button type="button" className="text-button integration-action" onClick={() => void testIntegration('email')}>Отправить тест</button>}
                 </article>
               </div>
-              {integrationMessage && <div className="integration-result">{integrationMessage}</div>}
+              {integrationMessage && <div className="integration-result" role="status" aria-live="polite">{integrationMessage}</div>}
               <div className="settings-note"><ShieldCheck size={18} /><span>Токен бота хранится как закрытый серверный секрет. Общий чат фиксируется только после успешного проверочного сообщения; личный chat ID используется только для адресных задач.</span></div>
             </section>
           )}
