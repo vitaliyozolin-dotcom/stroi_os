@@ -14,20 +14,12 @@ BOT_INFO="$(curl -fsS --max-time 10 "https://api.telegram.org/bot${IKIOMA_TELEGR
   exit 1
 }
 
-BOT_USERNAME="$(printf '%s' "$BOT_INFO" | node -e '
-  let body = "";
-  process.stdin.setEncoding("utf8");
-  process.stdin.on("data", chunk => body += chunk);
-  process.stdin.on("end", () => {
-    const value = JSON.parse(body);
-    if (!value.ok || !value.result || !value.result.username) process.exit(1);
-    process.stdout.write(value.result.username);
-  });
-')" || {
+BOT_USERNAME="$(printf '%s' "$BOT_INFO" | sed -n 's/.*"username"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+if [ -z "$BOT_USERNAME" ]; then
   unset IKIOMA_TELEGRAM_TOKEN BOT_INFO
   echo "Не удалось определить имя бота"
   exit 1
-}
+fi
 
 test "$BOT_USERNAME" = "ikioma_bot" || {
   unset IKIOMA_TELEGRAM_TOKEN BOT_INFO
