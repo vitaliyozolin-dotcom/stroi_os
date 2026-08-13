@@ -4,3 +4,4 @@ dist/
 *.log
 backups/
 secure/
+compose.override.yaml
