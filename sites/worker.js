@@ -1112,6 +1112,47 @@ const telegramDisplayName = (from) => clean([from?.first_name, from?.last_name].
   || clean(from?.username, 120)
   || `Telegram ${String(from?.id ?? '')}`;
 
+const TELEGRAM_COMMAND_NAMES = [
+  'task', 'tasks', 'stages', 'done', 'finance', 'status',
+  'note', 'report', 'doc', 'camera', 'project', 'help',
+];
+
+const telegramCommandDistance = (left, right) => {
+  const a = clean(left, 40).toLocaleLowerCase('en-US');
+  const b = clean(right, 40).toLocaleLowerCase('en-US');
+  const matrix = Array.from({ length: a.length + 1 }, (_, row) => (
+    Array.from({ length: b.length + 1 }, (_, column) => row ? (column ? 0 : row) : column)
+  ));
+  for (let row = 1; row <= a.length; row += 1) {
+    for (let column = 1; column <= b.length; column += 1) {
+      const cost = a[row - 1] === b[column - 1] ? 0 : 1;
+      matrix[row][column] = Math.min(
+        matrix[row - 1][column] + 1,
+        matrix[row][column - 1] + 1,
+        matrix[row - 1][column - 1] + cost,
+      );
+      if (
+        row > 1
+        && column > 1
+        && a[row - 1] === b[column - 2]
+        && a[row - 2] === b[column - 1]
+      ) {
+        matrix[row][column] = Math.min(matrix[row][column], matrix[row - 2][column - 2] + 1);
+      }
+    }
+  }
+  return matrix[a.length][b.length];
+};
+
+const telegramCommandSuggestion = (value) => {
+  const name = clean(value, 40).toLocaleLowerCase('en-US');
+  if (!name) return '';
+  const ranked = TELEGRAM_COMMAND_NAMES
+    .map((candidate) => ({ candidate, distance: telegramCommandDistance(name, candidate) }))
+    .sort((left, right) => left.distance - right.distance || left.candidate.localeCompare(right.candidate));
+  return ranked[0]?.distance <= 1 ? ranked[0].candidate : '';
+};
+
 const commandFromText = (value) => {
   const text = clean(value, 3000);
   const match = text.match(/^\/([a-z_]+)(?:@[a-z0-9_]+)?(?:\s+([\s\S]*))?$/i);
@@ -1234,23 +1275,32 @@ const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uplo
 const telegramOrigin = (env) => clean(env.APP_PUBLIC_URL, 500) || 'https://stroios-work-2026.ozolin.chatgpt.site';
 
 const telegramHelp = (role = 'foreman') => [
-  'ИКИОМА ОС · полевой штаб',
+  'ИКИОМА ОС · что понимает бот',
   '',
-  role === 'management' ? '/task текст — поставить задачу' : null,
-  '/tasks — мои открытые задачи',
-  '/stages — этапы и их состояние',
-  '/done — последние выполненные задачи',
+  '🟢 ТОЛЬКО ПОКАЗЫВАЕТ — в ОС ничего не меняет',
+  '/status — сводка по объекту',
+  '/tasks — открытые задачи',
+  '/stages — этапы и сроки',
+  '/done — выполненные задачи',
   role === 'management' ? '/finance — расходы, доходы и баланс' : null,
-  '/status — статус объекта',
-  '/report — как добавить фотоотчёт',
-  '/doc — как сохранить документ',
-  '/camera — эфир или свежий кадр',
-  '/project — выбрать объект',
-  '/help — эта подсказка',
+  '/camera — камера объекта',
+  '/project — выбранный объект',
   '',
-  'Можно спросить обычным текстом: «этапы», «выполненные задачи», «расходы и доходы». В общем чате напишите, например: «@ikioma_bot этапы» — или ответьте на сообщение бота.',
+  '🟡 ЗАПИШЕТ ТОЛЬКО ПОСЛЕ ВАШЕГО ПОДТВЕРЖДЕНИЯ',
+  role === 'management' ? '/task текст — черновик новой задачи' : null,
+  '/note текст — черновик записи в дневник объекта',
+  'Фото или голос + подпись /report — черновик фотоотчёта',
+  'Документ + подпись /doc — черновик документа',
   '',
-  'Фото, документ или голосовое сообщение можно прислать боту в личный чат. В общем чате добавьте к файлу подпись /report или /doc. Перед сохранением бот всегда покажет черновик.',
+  '⚪ НЕ ЗАПИСЫВАЕТ',
+  '• обычную переписку в общем чате;',
+  '• сообщения непривязанных участников;',
+  '• текст, который бот не смог понять.',
+  '',
+  'В общем чате обращайтесь к @ikioma_bot, отвечайте на сообщение бота или используйте команду. В личном чате можно писать без упоминания.',
+  'Если команда написана с ошибкой или смысл неясен, бот ответит «ничего не записано» и предложит подсказку. Молчание никогда не означает сохранение.',
+  '',
+  '/help — показать эту памятку',
 ].filter(Boolean).join('\n');
 
 const taskStatusLabel = (status) => ({
@@ -1522,15 +1572,20 @@ const telegramFinance = async (message, binding, env) => {
   ].join('\n'));
 };
 
-const naturalTelegramIntent = (value) => {
-  const text = clean(value, 3000).toLocaleLowerCase('ru');
-  if (/\b(этап|этапы|стадии|ход работ)\b/u.test(text)) return 'stages';
-  if (/\b(выполненн|завершенн|сделанн).{0,20}\b(задач|работ)|\bчто (сделано|выполнено)\b/u.test(text)) return 'done';
-  if (/\b(расход|доход|финанс|деньг|оплачен|получен)/u.test(text)) return 'finance';
-  if (/\b(задач|дела).{0,20}\b(открыт|текущ|актив)|\bчто делать\b/u.test(text)) return 'tasks';
-  if (/\b(статус|состояние|что на объекте)\b/u.test(text)) return 'status';
-  return '';
+const naturalTelegramCommand = (value) => {
+  const source = clean(value, 3000).trim();
+  const text = source.toLocaleLowerCase('ru').replace(/ё/g, 'е');
+  const note = source.match(/^(?:запомни|зафиксируй|запиши(?:\s+в\s+ос)?|добавь\s+заметку)\s*[:—-]?\s*([\s\S]+)$/iu);
+  if (note?.[1]) return { name: 'note', body: clean(note[1], 2400) };
+  if (/(этап|этапы|стадии|ход работ)/u.test(text)) return { name: 'stages', body: '' };
+  if (/(выполненн|завершенн|сделанн).{0,20}(задач|работ)|что (сделано|выполнено)/u.test(text)) return { name: 'done', body: '' };
+  if (/(расход|доход|финанс|деньг|оплачен|получен)/u.test(text)) return { name: 'finance', body: '' };
+  if (/(задач|дела).{0,20}(открыт|текущ|актив)|что делать/u.test(text)) return { name: 'tasks', body: '' };
+  if (/(статус|состояние|что на объекте)/u.test(text)) return { name: 'status', body: '' };
+  return null;
 };
+
+const naturalTelegramIntent = (value) => naturalTelegramCommand(value)?.name ?? '';
 
 const telegramProjectStatus = async (message, binding, env) => {
   const { snapshot } = await projectForBinding(env, binding);
@@ -1589,6 +1644,43 @@ const telegramSelectProject = async (message, binding, env) => {
   });
 };
 
+const telegramNoteDraft = async (message, binding, body, env) => {
+  const { snapshot, user } = await projectForBinding(env, binding);
+  const note = clean(body, 2400);
+  if (!note) {
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Напишите после команды, что нужно запомнить. Например:\n/note Панели привезут в пятницу после 14:00');
+    return;
+  }
+  const draft = await createTelegramDraft(
+    env.DB,
+    String(message.from.id),
+    String(message.chat.id),
+    binding.project_id,
+    'note',
+    {
+      note,
+      telegramMessageId: String(message.message_id ?? ''),
+    },
+  );
+  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
+    'Черновик записи в дневник объекта',
+    '',
+    note,
+    '',
+    `Проект: ${snapshot.state.project?.name ?? snapshot.state.project?.code}`,
+    `Автор: ${user.name}`,
+    '',
+    'Пока вы не нажмёте «Сохранить запись», в ИКИОМА ОС ничего не изменится.',
+  ].join('\n'), {
+    reply_markup: {
+      inline_keyboard: [[
+        { text: 'Сохранить запись', callback_data: `nc|${draft.id}` },
+        { text: 'Отмена', callback_data: `nx|${draft.id}` },
+      ]],
+    },
+  });
+};
+
 const telegramAttachmentDraft = async (message, binding, env) => {
   const caption = clean(message.caption, 1200);
   const captionCommand = commandFromText(caption);
@@ -1625,6 +1717,7 @@ const telegramHandleCommand = async (message, binding, command, env) => {
   if (command.name === 'done') return telegramCompletedTasks(message, binding, env);
   if (command.name === 'finance') return telegramFinance(message, binding, env);
   if (command.name === 'status') return telegramProjectStatus(message, binding, env);
+  if (command.name === 'note') return telegramNoteDraft(message, binding, command.body, env);
   if (command.name === 'camera') return telegramCamera(message, binding, env);
   if (command.name === 'project') return telegramSelectProject(message, binding, env);
   if (command.name === 'doc') {
@@ -1636,7 +1729,18 @@ const telegramHandleCommand = async (message, binding, command, env) => {
     return;
   }
   const { user } = await projectForBinding(env, binding);
-  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, telegramHelp(user.role));
+  if (command.name === 'help') {
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, telegramHelp(user.role));
+    return;
+  }
+  const suggestion = telegramCommandSuggestion(command.name);
+  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
+    `Команда /${command.name} не распознана.`,
+    suggestion ? `Возможно, вы имели в виду /${suggestion}.` : null,
+    'Ничего не записано в ИКИОМА ОС.',
+    '',
+    'Отправьте /help, чтобы увидеть все команды.',
+  ].filter(Boolean).join('\n'));
 };
 
 const telegramHandleMessage = async (message, env) => {
@@ -1646,13 +1750,33 @@ const telegramHandleMessage = async (message, env) => {
     await bindTelegramUser(message, command.body, env);
     return;
   }
+
+  const rawText = clean(message.text, 3000);
+  let botUsername = '';
+  let mentioned = false;
+  if (!command && message.chat.type !== 'private') {
+    botUsername = await telegramBotUsername(env);
+    mentioned = Boolean(botUsername && new RegExp(`@${botUsername}\\b`, 'iu').test(rawText));
+  }
+  const repliedToBot = Boolean(message.reply_to_message?.from?.is_bot);
+  const addressedToBot = message.chat.type === 'private' || Boolean(command) || mentioned || repliedToBot;
   const binding = await bindingForTelegramUser(env.DB, String(message.from.id), String(message.chat.id));
+
   if (!binding) {
-    if (message.chat.type === 'private') {
-      await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Ваш Telegram пока не связан с ИКИОМА ОС. Руководитель может выпустить персональную ссылку в «Настройки → Доступы».');
+    if (command?.name === 'help') {
+      await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, telegramHelp('management'));
+    } else if (addressedToBot) {
+      await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
+        'Сообщение не записано в ИКИОМА ОС.',
+        'Ваш Telegram ещё не связан с пользователем системы.',
+        '',
+        'Руководитель может выпустить персональную ссылку: ИКИОМА ОС → Настройки → Доступы.',
+        'Справка по доступным действиям: /help',
+      ].join('\n'));
     }
     return;
   }
+
   if (message.document || message.photo || message.voice) {
     await telegramAttachmentDraft(message, binding, env);
     return;
@@ -1661,18 +1785,21 @@ const telegramHandleMessage = async (message, env) => {
     await telegramHandleCommand(message, binding, command, env);
     return;
   }
-  const botUsername = await telegramBotUsername(env);
-  const rawText = clean(message.text, 3000);
-  const mentioned = botUsername && new RegExp(`@${botUsername}\\b`, 'iu').test(rawText);
-  const repliedToBot = Boolean(message.reply_to_message?.from?.is_bot);
-  if (message.chat.type === 'private' || mentioned || repliedToBot) {
-    const intent = naturalTelegramIntent(rawText.replace(botUsername ? new RegExp(`@${botUsername}\\b`, 'giu') : /$^/, '').trim());
-    if (intent) {
-      await telegramHandleCommand(message, binding, { name: intent, body: '' }, env);
+  if (addressedToBot) {
+    const addressedText = rawText
+      .replace(botUsername ? new RegExp(`@${botUsername}\\b`, 'giu') : /$^/, '')
+      .trim();
+    const naturalCommand = naturalTelegramCommand(addressedText);
+    if (naturalCommand) {
+      await telegramHandleCommand(message, binding, naturalCommand, env);
       return;
     }
-    const { user } = await projectForBinding(env, binding);
-    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, telegramHelp(user.role));
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
+      'Я не понял, что нужно сделать.',
+      'Ничего не записано в ИКИОМА ОС.',
+      '',
+      'Переформулируйте сообщение или отправьте /help.',
+    ].join('\n'));
   }
 };
 
@@ -1731,6 +1858,50 @@ const telegramConfirmTask = async (callback, draft, binding, env) => {
     `Задача создана\n\n${task.title}\nОтветственный: ${assignee.name}\nСрок: ${task.dueDate}\n\n${deepLink(telegramOrigin(env), draft.project_id, 'tasks', task.id)}`,
   );
   await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), `Создана задача «${task.title}»`);
+};
+
+const telegramConfirmNote = async (callback, draft, binding, env) => {
+  const { user } = await projectForBinding(env, binding);
+  if (draft.kind !== 'note') throw new Error('action_denied');
+  const note = clean(draft.payload.note, 2400);
+  if (!note) throw new Error('invalid_note');
+  const now = new Date().toISOString();
+  const report = {
+    id: `field-report-${crypto.randomUUID()}`,
+    createdAt: now,
+    author: user.name,
+    note,
+    source: 'telegram',
+    clientVisible: false,
+    telegramMessageId: draft.payload.telegramMessageId,
+    attachments: [],
+  };
+  const mutation = await mutateProjectFromTelegram(
+    env,
+    draft.project_id,
+    user.name,
+    user.role,
+    'telegram.note.create',
+    `Добавлена запись в дневник объекта · ${user.name}`,
+    (state) => {
+      state.fieldReports = [report, ...(state.fieldReports ?? [])];
+      state.activity = [{
+        id: `activity-${crypto.randomUUID()}`,
+        timestamp: now,
+        actor: user.name,
+        text: 'Добавил запись в дневник объекта через Telegram',
+        tone: 'neutral',
+      }, ...(state.activity ?? [])];
+    },
+  );
+  await updateTelegramDraft(env.DB, draft, draft.payload, 'confirmed');
+  await telegramEditMessage(
+    env.TELEGRAM_BOT_TOKEN,
+    callback.message.chat.id,
+    callback.message.message_id,
+    `Запись сохранена в дневнике объекта\n\n${note}\n\n${deepLink(telegramOrigin(env), draft.project_id, 'project')}`,
+  );
+  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), 'Добавлена запись в дневник объекта');
 };
 
 const telegramConfirmFile = async (callback, draft, binding, env) => {
@@ -1872,7 +2043,7 @@ const telegramHandleCallback = async (callback, env) => {
     await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Черновик уже закрыт или устарел.', true);
     return;
   }
-  if (action === 'tx' || action === 'fx') {
+  if (action === 'tx' || action === 'fx' || action === 'nx') {
     await updateTelegramDraft(env.DB, draft, draft.payload, 'canceled');
     await telegramEditMessage(env.TELEGRAM_BOT_TOKEN, callback.message.chat.id, callback.message.message_id, 'Черновик отменён.');
     await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id);
@@ -1886,6 +2057,11 @@ const telegramHandleCallback = async (callback, env) => {
   if (action === 'fc') {
     await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Сохраняю файл…');
     await telegramConfirmFile(callback, draft, binding, env);
+    return;
+  }
+  if (action === 'nc') {
+    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Сохраняю запись…');
+    await telegramConfirmNote(callback, draft, binding, env);
     return;
   }
   if (action === 'ta' || action === 'td') {
@@ -2365,6 +2541,7 @@ const sendTelegramFieldHeadquartersGuide = async (connection, env) => {
     '/task Илья, проверить геометрию свай завтра срочно — создать черновик задачи. Сохранится только после подтверждения.',
     '/tasks — открытые задачи: руководитель видит все, сотрудник только свои.',
     '/status — этапы, просрочки, снабжение и принятые/оплаченные суммы.',
+    '/note текст — создать черновик записи в дневник; сохранится только после подтверждения.',
     '/camera — свежий кадр или ссылка на эфир после установки камеры.',
     '/project — выбрать объект, если их несколько.',
     '/help — короткая памятка.',
@@ -2378,7 +2555,8 @@ const sendTelegramFieldHeadquartersGuide = async (connection, env) => {
     '4. Задачи',
     'Исполнитель получает личное уведомление и может нажать «Принял», «На проверку» или «Есть проблема». Изменения проекта продолжают приходить в этот общий чат.',
     '',
-    'Важно: камера пока не установлена, поэтому /camera честно сообщит, что оборудование ожидается. Голосовые отчёты сохраняются как аудио; автоматическую расшифровку подключим отдельным этапом.',
+    'Важно: обычная переписка общего чата не переносится в ОС. Бот обрабатывает команды, обращения с @ikioma_bot и ответы на его сообщения. Если смысл не распознан, бот прямо напишет, что ничего не сохранено.',
+    'Камера пока не установлена, поэтому /camera честно сообщит, что оборудование ожидается. Голосовые отчёты сохраняются как аудио; автоматическую расшифровку подключим отдельным этапом.',
   ].join('\n');
 
   try {
@@ -2440,6 +2618,7 @@ const handleTelegramBootstrap = async (request, env) => {
             { command: 'done', description: 'Выполненные задачи' },
             { command: 'finance', description: 'Расходы, доходы и баланс' },
             { command: 'status', description: 'Статус объекта' },
+            { command: 'note', description: 'Запись в дневник объекта' },
             { command: 'report', description: 'Добавить фотоотчёт' },
             { command: 'doc', description: 'Сохранить документ' },
             { command: 'camera', description: 'Камера объекта' },
