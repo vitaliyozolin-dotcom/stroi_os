@@ -160,6 +160,8 @@ p {
 
 .brand-copy {
   display: flex;
+  min-width: 0;
+  flex: 1;
   flex-direction: column;
   overflow: hidden;
   white-space: nowrap;
@@ -185,12 +187,25 @@ p {
 
 .sidebar__mobile-close {
   display: none;
+  flex: 0 0 auto;
   margin-left: auto;
   padding: 6px;
   color: white;
   border: 0;
   background: transparent;
 }
+
+.sidebar--open .brand-copy {
+ overflow: visible;
+ white-space: normal;
+}
+
+.sidebar--open .brand-copy strong,
+.sidebar--open .brand-copy small {
+ overflow-wrap: anywhere;
+ white-space: normal;
+}
+
 
 .project-switcher {
   display: grid;
