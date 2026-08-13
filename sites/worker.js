@@ -5,6 +5,9 @@ import {
   projectIdentity,
   stateForRole,
 } from './access-control.js';
+import { addCalendarDays, addDays, dateKey, isoDate } from './lib/date.js';
+import { json, publicLeadResponse } from './lib/http.js';
+import { clean, safeFileName, supportedDocument, validProjectId } from './lib/validation.js';
 
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
@@ -16,29 +19,6 @@ const PUBLIC_LEAD_PROJECT_ID = 'ikioma-sales';
 const PUBLIC_LEAD_ORIGINS = new Set(['https://ikioma.ru', 'https://www.ikioma.ru']);
 let schemaPromise;
 let battleResetPromise;
-
-const json = (body, status = 200) => Response.json(body, {
-  status,
-  headers: {
-    'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff',
-  },
-});
-
-const publicLeadResponse = (body, status, origin) => Response.json(body, {
-  status,
-  headers: {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400',
-    'Cache-Control': 'no-store',
-    'Vary': 'Origin',
-    'X-Content-Type-Options': 'nosniff',
-  },
-});
-
-const clean = (value, max = 240) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 
 const changes = (result) => Number(result?.meta?.changes ?? result?.changes ?? 0);
 
@@ -187,14 +167,6 @@ const ensureSchema = async (db) => {
   }
   await schemaPromise;
 };
-
-const addCalendarDays = (date, days) => {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-};
-
-const isoDate = (date = new Date()) => date.toISOString().slice(0, 10);
 
 const cleanWorkspaceState = (env) => {
   const today = isoDate();
@@ -437,8 +409,6 @@ const readSnapshot = async (db, projectId) => {
     updatedRole: row.updated_role,
   };
 };
-
-const validProjectId = (value) => /^[a-zA-Z0-9._:-]{1,100}$/.test(value);
 
 const handleGetState = async (request, env) => {
   if (!env.DB) return json({ ok: false, error: 'storage_unavailable' }, 503);
@@ -892,14 +862,6 @@ const sha256 = async (value) => {
 };
 
 const shortId = () => crypto.randomUUID().replaceAll('-', '').slice(0, 16);
-
-const addDays = (date, days) => {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-};
-
-const dateKey = (date = new Date()) => date.toISOString().slice(0, 10);
 
 const parseTaskDate = (text) => {
   const source = clean(text, 2000).toLocaleLowerCase('ru');
@@ -2510,16 +2472,6 @@ const handleCameraView = async (request, env) => {
   } catch {
     return json({ ok: false, error: 'camera_unavailable' }, 503);
   }
-};
-
-const supportedDocument = (file) => {
-  const extension = clean(file?.name, 240).toLocaleLowerCase('en-US').split('.').pop();
-  return ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'doc', 'docx', 'xls', 'xlsx'].includes(extension);
-};
-
-const safeFileName = (value) => {
-  const normalized = clean(value, 180).replace(/[^\p{L}\p{N}._ -]+/gu, '_').replace(/\s+/g, ' ').trim();
-  return normalized || 'document';
 };
 
 const handleQualityPhotoUpload = async (request, env) => {

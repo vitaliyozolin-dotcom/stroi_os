@@ -15,5 +15,6 @@ COPY --from=build /app/server ./server
 COPY --from=build /app/sites/worker.js ./sites/worker.js
 COPY --from=build /app/sites/access-control.js ./sites/access-control.js
 USER node
+COPY --from=build /app/sites/lib ./sites/lib
 EXPOSE 3000
 CMD ["node", "server/index.js"]
