@@ -86,3 +86,14 @@ test('Telegram common chat recheck is webhook-backed, observable and honestly la
   assert.match(settings, /telegramHeadquartersReady = Boolean\(integrationStatus\?\.telegramCommon && integrationStatus\?\.telegramInbound\)/);
   assert.match(settings, /aria-live="polite"/);
 });
+
+
+test('Telegram container uses IPv4-first DNS and reports the real network failure', () => {
+  const compose = source('compose.yaml');
+  const repair = source('server/repair-telegram.js');
+
+  assert.match(compose, /NODE_OPTIONS: --dns-result-order=ipv4first/);
+  assert.match(compose, /dns:\n\s+- 1\.1\.1\.1\n\s+- 8\.8\.8\.8/);
+  assert.match(repair, /networkErrorDetails/);
+  assert.match(repair, /сеть контейнера недоступна/);
+});
