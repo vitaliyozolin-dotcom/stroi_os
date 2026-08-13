@@ -9,6 +9,7 @@ import { PostgresDatabase } from './postgres.js';
 import { isPublicRoute } from './public-routes.js';
 import { createSessionAuth, LoginRateLimiter } from './auth.js';
 import { loginPage } from './login-page.js';
+import { ensureTelegramWebhook } from './telegram-webhook.js';
 
 const port = Number(process.env.PORT) || 3000;
 const clientRoot = resolve(process.env.CLIENT_ROOT || 'dist/client');
@@ -182,4 +183,12 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 
 await access(clientRoot);
-server.listen(port, '0.0.0.0', () => console.log(`stroios listening on ${port}`));
+server.listen(port, '0.0.0.0', () => {
+  console.log(`stroios listening on ${port}`);
+  ensureTelegramWebhook(process.env)
+    .then((status) => {
+      if (status.skipped) console.warn(`telegram webhook skipped: ${status.reason}`);
+      else console.log(`telegram webhook ready: changed=${Boolean(status.changed)} pending=${status.pendingUpdateCount}`);
+    })
+    .catch((error) => console.error(`telegram webhook restore failed: ${error instanceof Error ? error.message : String(error)}`));
+});

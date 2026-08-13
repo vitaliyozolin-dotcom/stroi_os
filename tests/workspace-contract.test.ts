@@ -109,6 +109,20 @@ test('Telegram uses the VPS host network relay and reports real upstream failure
   assert.match(worker, /telegramTransportHeaders/);
 });
 
+test('Telegram webhook is restored safely when the app starts', () => {
+  const server = source('server/index.js');
+  const webhook = source('server/telegram-webhook.js');
+  const repair = source('server/repair-telegram.js');
+
+  assert.match(server, /ensureTelegramWebhook\(process\.env\)/);
+  assert.match(webhook, /getWebhookInfo/);
+  assert.match(webhook, /setWebhook/);
+  assert.match(webhook, /drop_pending_updates: false/);
+  assert.doesNotMatch(webhook, /deleteWebhook/);
+  assert.match(repair, /TELEGRAM_REPAIR_DISCOVER/);
+  assert.match(repair, /TELEGRAM_WEBHOOK_READY pending=preserved/);
+});
+
 test('Telegram explains exactly what is read, drafted, saved or ignored', () => {
   const worker = source('sites/worker.js');
 
