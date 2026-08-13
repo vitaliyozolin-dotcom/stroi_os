@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url';
+import { ensureTelegramWebhook } from './telegram-webhook.js';
 
 const TELEGRAM_CONFIG_PROJECT_ID = '__integration__:telegram';
 const GROUP_TYPES = new Set(['group', 'supergroup']);
@@ -204,15 +205,35 @@ export const runTelegramRepair = async () => {
   const webhookUrl = requiredEnv('TELEGRAM_WEBHOOK_URL');
   const webhookSecret = requiredEnv('TELEGRAM_WEBHOOK_SECRET');
   const databaseUrl = requiredEnv('DATABASE_URL');
-  let webhookRestored = false;
 
   const bot = await telegramApi(token, 'getMe');
   const botUsername = String(bot?.username ?? '').trim();
   if (botUsername !== 'ikioma_bot') throw new Error(`Подключён @${botUsername || 'неизвестный бот'}, нужен @ikioma_bot`);
 
   console.log('1/5 Бот подтверждён: @ikioma_bot');
+  const webhookStatus = await ensureTelegramWebhook(process.env);
+  console.log(`2/5 Входящий webhook готов без удаления очереди Telegram; pending=${webhookStatus.pendingUpdateCount ?? 0}`);
+
+  if (String(process.env.TELEGRAM_REPAIR_DISCOVER ?? '').trim() !== '1') {
+    console.log('TELEGRAM_WEBHOOK_READY pending=preserved');
+    return;
+  }
+
+  const configuredChatId = String(process.env.TELEGRAM_REPAIR_CHAT_ID ?? '').trim();
+  if (configuredChatId) {
+    const confirmation = await telegramApi(token, 'sendMessage', {
+      chat_id: configuredChatId,
+      text: '✅ ИКИОМА ОС: входящий webhook восстановлен. Отправьте /help для проверки.',
+      disable_web_page_preview: true,
+    });
+    if (!confirmation?.message_id) throw new Error('Telegram не подтвердил отправку проверочного сообщения');
+    console.log('TELEGRAM_WEBHOOK_READY pending=preserved');
+    return;
+  }
+
+  console.log('3/5 Включено явное повторное обнаружение группы…');
   await telegramApi(token, 'deleteWebhook', { drop_pending_updates: false });
-  console.log('2/5 Забираю уже отправленную команду из очереди Telegram…');
+  console.log('Забираю уже отправленную команду из очереди Telegram…');
 
   try {
     const updates = await collectGroupUpdate(token, botUsername);
@@ -233,7 +254,6 @@ export const runTelegramRepair = async () => {
     console.log(`3/5 Группа сохранена: «${selected.title}»`);
 
     await setWebhook(token, webhookUrl, webhookSecret);
-    webhookRestored = true;
     for (const update of updates) {
       await replayUpdateThroughWebhook(webhookUrl, webhookSecret, update);
     }
@@ -251,11 +271,9 @@ export const runTelegramRepair = async () => {
     console.log('5/5 Проверочное сообщение отправлено в группу');
     console.log(`TELEGRAM_READY group="${selected.title}" pending=${Number(webhookInfo?.pending_update_count ?? 0)}`);
   } finally {
-    if (!webhookRestored) {
-      await setWebhook(token, webhookUrl, webhookSecret).catch((error) => {
-        console.error(`Не удалось автоматически вернуть webhook: ${error.message}`);
-      });
-    }
+    await setWebhook(token, webhookUrl, webhookSecret).catch((error) => {
+      console.error(`Не удалось автоматически вернуть webhook: ${error.message}`);
+    });
   }
 };
 
