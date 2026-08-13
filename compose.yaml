@@ -29,8 +29,9 @@ services:
     volumes:
       - stroios_files:/data/files
     networks:
-      - default
-      - telegram_ipv6
+      default:
+      telegram_ipv6:
+        gw_priority: 1
     depends_on:
       storage-init:
         condition: service_completed_successfully
