@@ -37,6 +37,13 @@ import {
   saveClaimedTelegramDraftPayload,
   updateTelegramDraft as updateTelegramDraftModule,
 } from './telegram/drafts.js';
+import {
+  bindingForTelegramProject as bindingForTelegramProjectModule,
+  bindingsForTelegramUser as bindingsForTelegramUserModule,
+  bindingForTelegramUser as bindingForTelegramUserModule,
+  saveTelegramProjectSelection,
+  selectTelegramBinding,
+} from './telegram/bindings.js';
 
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
@@ -1138,59 +1145,19 @@ const mutateProjectFromTelegram = async (env, projectId, actor, role, action, su
   throw new Error('revision_conflict');
 };
 
-const bindingForTelegramProject = async (db, telegramUserId, projectId) => {
-  await ensureSchema(db);
-  return db.prepare(`
-    SELECT telegram_user_id, project_id, system_user_id, private_chat_id, username, display_name, role, bound_at, updated_at
-    FROM telegram_bindings
-    WHERE telegram_user_id = ? AND project_id = ?
-  `).bind(telegramUserId, projectId).first();
-};
+const bindingForTelegramProject = (db, telegramUserId, projectId) => (
+  bindingForTelegramProjectModule(db, telegramUserId, projectId, ensureSchema)
+);
 
-const bindingsForTelegramUser = async (db, telegramUserId) => {
-  await ensureSchema(db);
-  const result = await db.prepare(`
-    SELECT telegram_user_id, project_id, system_user_id, private_chat_id, username, display_name, role, bound_at, updated_at
-    FROM telegram_bindings
-    WHERE telegram_user_id = ?
-    ORDER BY updated_at DESC
-  `).bind(telegramUserId).all();
-  return result?.results ?? [];
-};
+const bindingsForTelegramUser = (db, telegramUserId) => (
+  bindingsForTelegramUserModule(db, telegramUserId, ensureSchema)
+);
 
-export const selectTelegramBinding = (bindings, selectedProjectId = '') => {
-  if (selectedProjectId) {
-    const selected = bindings.find((item) => item.project_id === selectedProjectId);
-    if (selected) return selected;
-  }
-  return bindings.length === 1 ? bindings[0] : null;
-};
+const bindingForTelegramUser = (db, telegramUserId, chatId = '') => (
+  bindingForTelegramUserModule(db, telegramUserId, chatId, ensureSchema)
+);
 
-const bindingForTelegramUser = async (db, telegramUserId, chatId = '') => {
-  const bindings = await bindingsForTelegramUser(db, telegramUserId);
-  if (!bindings.length) return null;
-  if (chatId) {
-    const mapped = await db.prepare(`
-      SELECT project_id
-      FROM telegram_user_chat_projects
-      WHERE telegram_user_id = ? AND chat_id = ?
-    `).bind(telegramUserId, chatId).first();
-    const selected = selectTelegramBinding(bindings, mapped?.project_id);
-    if (selected) return selected;
-  }
-  return selectTelegramBinding(bindings);
-};
-
-const saveTelegramProjectSelection = async (db, telegramUserId, chatId, projectId) => {
-  const now = new Date().toISOString();
-  await db.prepare(`
-    INSERT INTO telegram_user_chat_projects (telegram_user_id, chat_id, project_id, updated_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(telegram_user_id, chat_id) DO UPDATE SET
-      project_id = excluded.project_id,
-      updated_at = excluded.updated_at
-  `).bind(telegramUserId, chatId, projectId, now).run();
-};
+export { selectTelegramBinding };
 
 export const createTelegramDraft = createTelegramDraftModule;
 export const updateTelegramDraft = updateTelegramDraftModule;
