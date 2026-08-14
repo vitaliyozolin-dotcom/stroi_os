@@ -44,6 +44,7 @@ import type { AuthenticatedUser, PageId, UserRole } from './types';
 import { useProjectState, type SyncPhase } from './useProjectState';
 import { createProjectState } from './seed';
 import { isTaskOverdue } from './domain';
+import { clearProjectCache } from './storage';
 
 const roleLabels: Record<UserRole, string> = {
   management: 'Управление',
@@ -108,10 +109,11 @@ function App() {
     retry,
     useServerVersion,
     keepLocalVersion,
+    applyServerSnapshot,
     projects,
     switchProject,
     createProject,
-  } = useProjectState(role, session?.name ?? 'Виталий Озолин');
+  } = useProjectState(role, session?.name ?? 'Виталий Озолин', session ? `${session.email}|${session.role}` : '');
   const [mobileMenu, setMobileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -165,6 +167,34 @@ function App() {
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    if (!session) return undefined;
+    const verifySession = async () => {
+      try {
+        const response = await fetch('/api/session', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+        if (response.ok) return;
+        if (response.status !== 401 && response.status !== 403) return;
+      } catch {
+        return;
+      }
+      clearProjectCache();
+      window.location.assign('/login');
+    };
+    const verifyVisibleSession = () => {
+      if (document.visibilityState === 'visible') void verifySession();
+    };
+    const timer = window.setInterval(() => void verifySession(), 30_000);
+    window.addEventListener('focus', verifyVisibleSession);
+    window.addEventListener('pageshow', verifyVisibleSession);
+    document.addEventListener('visibilitychange', verifyVisibleSession);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', verifyVisibleSession);
+      window.removeEventListener('pageshow', verifyVisibleSession);
+      document.removeEventListener('visibilitychange', verifyVisibleSession);
+    };
+  }, [session]);
+
   const navigation = useMemo(() => {
     if (role === 'client') return fullNavigation.filter((item) => item.id === 'client');
     if (role === 'foreman') return fullNavigation.filter((item) => ['overview', 'project', 'tasks', 'schedule', 'procurement', 'quality'].includes(item.id));
@@ -204,7 +234,7 @@ function App() {
       case 'procurement': return <ProcurementPage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'quality': return <QualityPage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'client': return <ClientPage state={state} onChange={updateState} />;
-      case 'settings': return <SettingsPage state={state} actor={session?.name ?? 'Владелец'} onChange={updateState} />;
+      case 'settings': return <SettingsPage state={state} actor={session?.name ?? 'Владелец'} canManageAccess={Boolean(session?.isOwner)} onChange={updateState} onServerSnapshot={applyServerSnapshot} />;
       default: return <OverviewPage state={state} role={role} onNavigate={navigate} onOpenProjects={() => setCreateProjectOpen(true)} />;
     }
   })();

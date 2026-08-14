@@ -1,8 +1,38 @@
 import { seedState } from './seed';
 import type { AppState, UserRole } from './types';
 
-const CACHE_PREFIX = 'stroios.work.project.v17.';
-const ACTIVE_PROJECT_KEY = 'stroios.work.active-project.v17';
+const CACHE_ROOT = 'stroios.work.v17.';
+let identityScope = '';
+
+const scopeHash = (value: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+export const setStorageIdentityScope = (identity: string) => {
+  identityScope = identity ? scopeHash(identity.trim().toLocaleLowerCase('en-US')) : '';
+};
+
+const cachePrefix = () => `${CACHE_ROOT}${identityScope}.project.`;
+const activeProjectKey = () => `${CACHE_ROOT}${identityScope}.active-project`;
+
+export const clearProjectCache = () => {
+  try {
+    Object.keys(window.localStorage).filter((key) => key.startsWith(CACHE_ROOT)).forEach((key) => window.localStorage.removeItem(key));
+  } catch {
+    // Серверная сессия всё равно остаётся источником истины.
+  }
+};
+
+const redirectAfterAuthenticationFailure = (response: Response) => {
+  if (response.status !== 401) return;
+  clearProjectCache();
+  window.location.assign('/login');
+};
 
 export interface ProjectListItem {
   id: string;
@@ -117,9 +147,10 @@ const isAppState = (value: unknown): value is AppState => {
 };
 
 export const loadCachedProject = (projectId?: string): CachedProject => {
+  if (!identityScope) return { state: cloneSeed(), revision: 0, dirty: false };
   try {
-    const activeProjectId = projectId ?? window.localStorage.getItem(ACTIVE_PROJECT_KEY) ?? seedState.project.id;
-    const raw = window.localStorage.getItem(`${CACHE_PREFIX}${activeProjectId}`);
+    const activeProjectId = projectId ?? window.localStorage.getItem(activeProjectKey()) ?? seedState.project.id;
+    const raw = window.localStorage.getItem(`${cachePrefix()}${activeProjectId}`);
     if (!raw) return { state: cloneSeed(), revision: 0, dirty: false };
     const parsed = JSON.parse(raw) as Partial<CachedProject>;
     if (!isAppState(parsed.state)) return { state: cloneSeed(), revision: 0, dirty: false };
@@ -135,9 +166,10 @@ export const loadCachedProject = (projectId?: string): CachedProject => {
 };
 
 export const saveCachedProject = (project: CachedProject) => {
+  if (!identityScope) return;
   try {
-    window.localStorage.setItem(`${CACHE_PREFIX}${project.state.project.id}`, JSON.stringify(project));
-    window.localStorage.setItem(ACTIVE_PROJECT_KEY, project.state.project.id);
+    window.localStorage.setItem(`${cachePrefix()}${project.state.project.id}`, JSON.stringify(project));
+    window.localStorage.setItem(activeProjectKey(), project.state.project.id);
   } catch {
     // Сервер остаётся источником истины. Переполнение локального кэша не блокирует работу.
   }
@@ -151,6 +183,7 @@ export const fetchRemoteProjects = async (): Promise<ProjectListItem[]> => {
     throw new StorageRequestError('network_error');
   }
   if (!response.ok) {
+    redirectAfterAuthenticationFailure(response);
     const body = await readError(response);
     throw new StorageRequestError(body.error ?? `http_${response.status}`);
   }
@@ -180,6 +213,7 @@ export const fetchRemoteProject = async (projectId: string): Promise<RemoteSnaps
 
   if (response.status === 404) return null;
   if (!response.ok) {
+    redirectAfterAuthenticationFailure(response);
     const body = await readError(response);
     throw new StorageRequestError(body.error ?? `http_${response.status}`);
   }
@@ -206,7 +240,7 @@ export const saveRemoteProject = async ({
 }): Promise<SaveResult> => {
   let response: Response;
   try {
-    response = await fetch('/api/state', {
+    response = await fetch(`/api/state?projectId=${encodeURIComponent(state.project.id)}`, {
       method: 'PUT',
       headers: {
         Accept: 'application/json',
@@ -232,6 +266,7 @@ export const saveRemoteProject = async ({
     throw new StorageRequestError('revision_conflict');
   }
   if (!response.ok) {
+    redirectAfterAuthenticationFailure(response);
     const body = await readError(response);
     throw new StorageRequestError(body.error ?? `http_${response.status}`);
   }

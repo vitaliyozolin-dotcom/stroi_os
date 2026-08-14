@@ -1,5 +1,27 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
+
+secure_replace_login_env() {
+  local target=$1
+  local target_dir temporary
+  target_dir="$(dirname "$target")"
+  temporary="$(mktemp "$target_dir/.env.login-reset.XXXXXX")"
+  trap 'rm -f -- "$temporary"' RETURN
+
+  cp --preserve=mode,ownership "$target" "$temporary"
+  cat >"$temporary"
+  sync -f "$temporary"
+  mv -f -- "$temporary" "$target"
+  temporary=""
+  sync -f "$target"
+  sync -f "$target_dir"
+  trap - RETURN
+}
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -19,13 +41,19 @@ if [[ "$password" != "$password_confirmation" ]]; then
   exit 1
 fi
 
-if (( ${#password} < 10 )); then
-  echo "ERROR: пароль должен содержать минимум 10 символов"
+if (( ${#password} < 16 )); then
+  echo "ERROR: пароль должен содержать минимум 16 символов"
   exit 1
 fi
 
-backup=".env.before-login-reset-$(date +%Y%m%d-%H%M%S)"
+backup="$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/stroios-env-before-login-reset.XXXXXX")"
 cp -a .env "$backup"
+
+cleanup_login_reset() {
+  rm -f -- "$backup"
+  unset password password_confirmation password_line
+}
+trap cleanup_login_reset EXIT
 
 restore_previous_config() {
   local exit_code=$?
@@ -47,17 +75,19 @@ escape_dotenv_single_quote() {
 
 password_line="APP_PASSWORD=$(escape_dotenv_single_quote "$password")"
 
-awk -v username_line="APP_USERNAME=${username}" -v password_line="$password_line" '
-  BEGIN { have_username = 0; have_password = 0 }
-  /^APP_USERNAME=/ { print username_line; have_username = 1; next }
-  /^APP_PASSWORD=/ { print password_line; have_password = 1; next }
-  { print }
-  END {
-    if (!have_username) print username_line
-    if (!have_password) print password_line
-  }
-' .env > .env.login-reset.tmp
-mv .env.login-reset.tmp .env
+{
+  have_username=0
+  have_password=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      APP_USERNAME=*) printf 'APP_USERNAME=%s\n' "$username"; have_username=1 ;;
+      APP_PASSWORD=*) printf '%s\n' "$password_line"; have_password=1 ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done < .env
+  (( have_username )) || printf 'APP_USERNAME=%s\n' "$username"
+  (( have_password )) || printf '%s\n' "$password_line"
+} | secure_replace_login_env .env
 
 docker compose up -d --no-deps --force-recreate app >/dev/null
 
@@ -67,6 +97,13 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 [[ "${status:-}" == "healthy" ]]
+
+# Ротация break-glass пароля немедленно отзывает все ранее выданные сессии
+# владельца. Персональные сессии сотрудников не затрагиваются.
+docker compose exec -T db sh -ceu '
+  psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -c "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW()::text) WHERE is_owner = TRUE"
+' >/dev/null
 
 printf '%s\n%s' "$username" "$password" | docker compose exec -T app node -e '
   let input = "";
@@ -98,9 +135,8 @@ printf '%s\n%s' "$username" "$password" | docker compose exec -T app node -e '
     }
     console.log("LOGIN_TEST_OK");
   });
-' 
+'
 
 trap - ERR
-unset password password_confirmation
 echo "IKIOMA_LOGIN_READY"
 echo "Логин: ${username}"

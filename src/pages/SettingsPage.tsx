@@ -18,9 +18,17 @@ import {
 } from 'lucide-react';
 import { formatDateTime, uid } from '../domain';
 import type { AppState, DashboardWidget, NotificationSettings, SystemUser, UserRole } from '../types';
+import type { RemoteSnapshot } from '../storage';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 
 type SettingsTab = 'access' | 'dashboard' | 'notifications' | 'integrations';
+type WebAccessStatus = 'not_issued' | 'pending' | 'active' | 'expired' | 'blocked';
+type AccessUser = {
+  userId: string;
+  web: { status: WebAccessStatus; invitedAt?: string; expiresAt?: string; activatedAt?: string; lastLoginAt?: string };
+  telegram: { status: 'connected' | 'not_connected'; boundAt?: string; username?: string };
+};
+type AccessSnapshot = { authMode: 'local_password' | 'sites_sso'; users: AccessUser[] };
 type TelegramCandidate = { id: string; title: string; type: string };
 type IntegrationStatus = {
   email: boolean;
@@ -68,7 +76,7 @@ function Toggle({ checked, onChange, label, disabled = false }: { checked: boole
   return <button type="button" role="switch" disabled={disabled} aria-checked={checked} aria-label={label} className={checked ? 'toggle toggle--on' : 'toggle'} onClick={onChange}><span /></button>;
 }
 
-export function SettingsPage({ state, actor, onChange }: { state: AppState; actor: string; onChange: (next: AppState) => void }) {
+export function SettingsPage({ state, actor, canManageAccess, onChange, onServerSnapshot }: { state: AppState; actor: string; canManageAccess: boolean; onChange: (next: AppState) => void; onServerSnapshot: (snapshot: RemoteSnapshot) => void }) {
   const [tab, setTab] = useState<SettingsTab>('access');
   const [showInvite, setShowInvite] = useState(false);
   const [invite, setInvite] = useState({ name: '', email: '', role: 'foreman' as UserRole, telegram: '' });
@@ -77,6 +85,38 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
   const [integrationMessage, setIntegrationMessage] = useState('');
   const [integrationChecking, setIntegrationChecking] = useState(false);
   const [telegramLink, setTelegramLink] = useState<{ userName: string; url: string; expiresAt: string } | null>(null);
+  const [accessSnapshot, setAccessSnapshot] = useState<AccessSnapshot | null>(null);
+  const [accessBusy, setAccessBusy] = useState<{ userId: string; action: string } | null>(null);
+  const [accessErrors, setAccessErrors] = useState<Record<string, string>>({});
+  const [accessLink, setAccessLink] = useState<{ userName: string; login: string; url: string; expiresAt?: string; purpose: 'activate' | 'reset' | 'existing' } | null>(null);
+
+  const accessErrorText = (code?: string) => ({
+    profile_not_saved: 'Профиль ещё сохраняется. Повторите через несколько секунд.',
+    project_not_found: 'Проект ещё не сохранён на сервере.',
+    user_not_found: 'Профиль ещё не сохранён. Повторите через несколько секунд.',
+    duplicate_email: 'Этот email уже назначен другому пользователю проекта.',
+    owner_account_reserved: 'Email владельца нельзя использовать для приглашения.',
+    user_disabled: 'Сначала разблокируйте пользователя.',
+    access_not_active: 'Сначала выдайте и активируйте доступ.',
+    owner_required: 'Выдавать и отзывать веб-доступ может только владелец.',
+    invalid_user_profile: 'Проверьте имя, email и роль пользователя.',
+    revision_conflict: 'Профиль уже изменён. Обновите страницу и повторите.',
+  }[code ?? ''] ?? 'Не удалось изменить веб-доступ. Обновите страницу и повторите.');
+
+  const refreshAccess = async () => {
+    try {
+      const response = await fetch(`/api/access/users?projectId=${encodeURIComponent(state.project.id)}`, { cache: 'no-store' });
+      if (response.status === 404) {
+        setAccessSnapshot({ authMode: 'sites_sso', users: [] });
+        return;
+      }
+      const body = await response.json() as AccessSnapshot & { ok?: boolean };
+      if (!response.ok || !body.ok) throw new Error('access_unavailable');
+      setAccessSnapshot({ authMode: body.authMode, users: body.users ?? [] });
+    } catch {
+      setAccessSnapshot(null);
+    }
+  };
 
   const refreshIntegrationStatus = async (): Promise<IntegrationStatus | null> => {
     try {
@@ -113,6 +153,11 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
     void refreshIntegrationStatus();
   }, [tab]);
 
+  useEffect(() => {
+    if (tab !== 'access') return;
+    void refreshAccess();
+  }, [tab, state.project.id, state.settings.users.length]);
+
   const saveSettings = (settings: AppState['settings'], text: string) => onChange({
     ...state,
     settings,
@@ -135,20 +180,164 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
     notifications: { ...state.settings.notifications, events: { ...state.settings.notifications.events, [event]: !state.settings.notifications.events[event] } },
   }, `Правило уведомлений «${eventLabels[event].title}» обновлено`);
 
-  const inviteUser = (event: FormEvent) => {
+  const inviteUser = async (event: FormEvent) => {
     event.preventDefault();
     if (!invite.name.trim() || !invite.email.trim()) return;
-    const user: SystemUser = { id: uid('user'), name: invite.name.trim(), email: invite.email.trim(), role: invite.role, telegram: invite.telegram.trim() || undefined, status: 'invited', invitedAt: new Date().toISOString(), inviteDelivery: 'draft' };
+    const normalizedEmail = invite.email.trim().toLocaleLowerCase('en-US');
+    if (state.settings.users.some((item) => item.email.trim().toLocaleLowerCase('en-US') === normalizedEmail)) {
+      setAccessErrors((current) => ({ ...current, new: 'Пользователь с таким email уже есть в проекте.' }));
+      return;
+    }
+    if (canManageAccess && accessSnapshot?.authMode !== 'sites_sso') {
+      setAccessBusy({ userId: 'new', action: 'create' });
+      try {
+        const response = await fetch('/api/access/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: state.project.id,
+            user: { name: invite.name, email: invite.email, role: invite.role, telegram: invite.telegram },
+          }),
+        });
+        const body = await response.json() as { ok?: boolean; error?: string; user?: SystemUser; snapshot?: RemoteSnapshot };
+        if (!(response.status === 404 && body.error === 'not_found')) {
+          if (!response.ok || !body.ok || !body.user || !body.snapshot) throw new Error(body.error || 'access_error');
+          onServerSnapshot(body.snapshot);
+          setShowInvite(false);
+          setInvite({ name: '', email: '', role: 'foreman', telegram: '' });
+          setAccessErrors((current) => ({ ...current, new: '' }));
+          await issueWebLink(body.user);
+          return;
+        }
+      } catch (error) {
+        setAccessErrors((current) => ({ ...current, new: accessErrorText(error instanceof Error ? error.message : '') }));
+        return;
+      } finally {
+        setAccessBusy(null);
+      }
+    }
+    const user: SystemUser = { id: uid('user'), name: invite.name.trim(), email: invite.email.trim(), role: invite.role, telegram: invite.telegram.trim() || undefined, status: 'active', invitedAt: new Date().toISOString(), inviteDelivery: 'draft' };
     saveSettings({ ...state.settings, users: [...state.settings.users, user] }, `Добавлен участник ${user.name} · ${roleLabels[user.role]}. Доступ ещё не отправлен`);
     setShowInvite(false);
     setInvite({ name: '', email: '', role: 'foreman', telegram: '' });
+    setAccessErrors((current) => ({ ...current, new: '' }));
   };
 
-  const saveUser = (event: FormEvent) => {
+  const saveUser = async (event: FormEvent) => {
     event.preventDefault();
     if (!editingUser?.name.trim() || !editingUser.email.trim()) return;
+    if (canManageAccess && accessSnapshot?.authMode !== 'sites_sso') {
+      setAccessBusy({ userId: editingUser.id, action: 'profile' });
+      try {
+        const response = await fetch(`/api/access/users/${encodeURIComponent(editingUser.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: state.project.id,
+            user: {
+              name: editingUser.name,
+              email: editingUser.email,
+              role: editingUser.role,
+              telegram: editingUser.telegram ?? '',
+            },
+          }),
+        });
+        const body = await response.json() as { ok?: boolean; error?: string; snapshot?: RemoteSnapshot };
+        if (!(response.status === 404 && body.error === 'not_found')) {
+          if (!response.ok || !body.ok || !body.snapshot) throw new Error(body.error || 'access_error');
+          onServerSnapshot(body.snapshot);
+          setEditingUser(null);
+          await refreshAccess();
+          return;
+        }
+      } catch (error) {
+        setAccessErrors((current) => ({ ...current, [editingUser.id]: accessErrorText(error instanceof Error ? error.message : '') }));
+        return;
+      } finally {
+        setAccessBusy(null);
+      }
+    }
     saveSettings({ ...state.settings, users: state.settings.users.map((user) => user.id === editingUser.id ? { ...editingUser, name: editingUser.name.trim(), email: editingUser.email.trim(), telegram: editingUser.telegram?.trim() || undefined } : user) }, `Обновлены роль и доступ пользователя ${editingUser.name}`);
     setEditingUser(null);
+    window.setTimeout(() => void refreshAccess(), 1_000);
+  };
+
+  const webAccessFor = (user: SystemUser): AccessUser['web'] => {
+    if (user.id === 'user-owner') return { status: 'active', lastLoginAt: user.lastActiveAt };
+    return accessSnapshot?.users.find((item) => item.userId === user.id)?.web
+      ?? { status: user.status === 'disabled' ? 'blocked' : 'not_issued' };
+  };
+
+  const telegramAccessFor = (user: SystemUser): AccessUser['telegram'] => accessSnapshot?.users
+    .find((item) => item.userId === user.id)?.telegram
+    ?? { status: 'not_connected' };
+
+  const issueWebLink = async (user: SystemUser, reset = false, retryOnce = false) => {
+    setAccessBusy({ userId: user.id, action: reset ? 'reset' : 'invite' });
+    setAccessErrors((current) => ({ ...current, [user.id]: '' }));
+    try {
+      const request = async () => {
+        const response = await fetch(reset ? '/api/access/web/reset' : '/api/access/web/invitations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: state.project.id, userId: user.id }),
+        });
+        const body = await response.json() as { ok?: boolean; url?: string; expiresAt?: string | null; login?: string; purpose?: 'activate' | 'reset' | 'existing'; existingAccount?: boolean; error?: string };
+        return { response, body };
+      };
+      let result = await request();
+      if (retryOnce && result.body.error === 'user_not_found') {
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+        result = await request();
+      }
+      if (!result.response.ok || !result.body.ok || !result.body.url || !result.body.login || (!result.body.existingAccount && !result.body.expiresAt)) {
+        throw new Error(result.body.error || 'access_error');
+      }
+      setAccessLink({
+        userName: user.name,
+        login: result.body.login,
+        url: result.body.url,
+        expiresAt: result.body.expiresAt ?? undefined,
+        purpose: result.body.purpose ?? (reset ? 'reset' : 'activate'),
+      });
+      await refreshAccess();
+    } catch (error) {
+      setAccessErrors((current) => ({
+        ...current,
+        [user.id]: accessErrorText(error instanceof Error ? error.message : ''),
+      }));
+    } finally {
+      setAccessBusy(null);
+    }
+  };
+
+  const changeWebAccess = async (user: SystemUser, action: 'block' | 'unblock' | 'sessions/revoke') => {
+    const question = action === 'block'
+      ? `Заблокировать ${user.name}? Все веб-сессии завершатся сразу, Telegram-привязка сохранится.`
+      : action === 'unblock'
+        ? `Разблокировать веб-доступ для ${user.name}?`
+        : `Завершить все веб-сессии пользователя ${user.name}?`;
+    if (!window.confirm(question)) return;
+    setAccessBusy({ userId: user.id, action });
+    setAccessErrors((current) => ({ ...current, [user.id]: '' }));
+    try {
+      const response = await fetch(`/api/access/users/${encodeURIComponent(user.id)}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: state.project.id }),
+      });
+      const body = await response.json() as { ok?: boolean; error?: string; status?: WebAccessStatus };
+      if (!response.ok || !body.ok) throw new Error(body.error || 'access_error');
+      await refreshAccess();
+      if (action !== 'sessions/revoke') window.location.reload();
+    } catch (error) {
+      setAccessErrors((current) => ({
+        ...current,
+        [user.id]: accessErrorText(error instanceof Error ? error.message : ''),
+      }));
+    } finally {
+      setAccessBusy(null);
+    }
   };
 
   const testIntegration = async (channel: 'email' | 'telegram') => {
@@ -214,6 +403,27 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
     }
   };
 
+  const disconnectTelegram = async (user: SystemUser) => {
+    if (!window.confirm(`Отключить Telegram пользователя ${user.name}? Веб-доступ и пароль не изменятся.`)) return;
+    setAccessBusy({ userId: user.id, action: 'telegram-unlink' });
+    setIntegrationMessage(`Отключаем Telegram пользователя ${user.name}…`);
+    try {
+      const response = await fetch('/api/integrations/telegram/unlink', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: state.project.id, userId: user.id }),
+      });
+      const body = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !body.ok) throw new Error(body.error || 'telegram_unlink_failed');
+      setIntegrationMessage(`Telegram пользователя ${user.name} отключён. Веб-доступ сохранён.`);
+      await refreshAccess();
+    } catch {
+      setIntegrationMessage('Не удалось отключить Telegram. Обновите страницу и повторите.');
+    } finally {
+      setAccessBusy(null);
+    }
+  };
+
   const telegramCommand = integrationStatus?.telegramBotUsername ? `/start@${integrationStatus.telegramBotUsername}` : '/start';
   const telegramHeadquartersReady = Boolean(integrationStatus?.telegramCommon && integrationStatus?.telegramInbound);
   const telegramStatusLabel = integrationStatus?.telegramCommon
@@ -225,6 +435,17 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
         : integrationStatus?.telegramBot
           ? 'Бот подключён, ждём чат'
           : 'Нужен токен бота';
+
+  const webStatusView = (user: SystemUser) => {
+    if (user.id === 'user-owner') return { label: 'Владелец', tone: 'blue' as const };
+    if (accessSnapshot?.authMode === 'sites_sso') return { label: 'Через ChatGPT', tone: 'blue' as const };
+    const web = webAccessFor(user);
+    if (web.status === 'active') return { label: 'Активен', tone: 'positive' as const };
+    if (web.status === 'pending') return { label: web.expiresAt ? `До ${new Date(web.expiresAt).toLocaleDateString('ru-RU')}` : 'Ожидает активации', tone: 'warning' as const };
+    if (web.status === 'expired') return { label: 'Ссылка истекла', tone: 'warning' as const };
+    if (web.status === 'blocked') return { label: 'Заблокирован', tone: 'danger' as const };
+    return { label: 'Не выдан', tone: 'neutral' as const };
+  };
 
   const tabs: Array<{ id: SettingsTab; label: string; icon: typeof Settings2 }> = [
     { id: 'access', label: 'Доступы', icon: UserCog },
@@ -244,15 +465,45 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
         <div className="settings-content">
           {tab === 'access' && (
             <>
-              <section className="panel settings-panel"><SectionHeader eyebrow="Команда" title="Пользователи и роли" action={<button type="button" className="button button--primary button--compact" onClick={() => setShowInvite(true)}><Plus size={16} /> Добавить</button>} />
-                <div className="user-list">{state.settings.users.map((user) => <article key={user.id} className="user-row"><span className="user-row__avatar">{user.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><div className="user-row__identity"><strong>{user.name}</strong><small>{user.email}{user.telegram ? ` · ${user.telegram}` : ''}</small></div><span className="user-row__role"><StatusBadge label={roleLabels[user.role]} tone={user.role === 'management' ? 'blue' : 'neutral'} /></span><span className="user-row__status"><StatusBadge label={user.telegramBoundAt ? 'Telegram подключён' : user.status === 'active' ? 'Активен' : user.inviteDelivery === 'sent' ? 'Приглашение отправлено' : user.status === 'invited' ? 'Доступ не выдан' : 'Отключён'} tone={user.telegramBoundAt || user.status === 'active' ? 'positive' : user.status === 'invited' ? 'warning' : 'neutral'} /></span><small className="user-row__last">{user.lastActiveAt ? formatDateTime(user.lastActiveAt) : 'Ещё не входил'}</small><span className="user-row__actions"><button type="button" aria-label={`Подключить Telegram для ${user.name}`} title="Персональная Telegram-ссылка" disabled={user.status === 'disabled'} onClick={() => void createTelegramLink(user)}><Link2 size={16} /></button><button type="button" aria-label={`Редактировать ${user.name}`} onClick={() => setEditingUser({ ...user })}><Pencil size={16} /></button></span></article>)}</div>
+              <section className="panel settings-panel"><SectionHeader eyebrow="Команда" title="Пользователи и роли" action={<button type="button" className="button button--primary button--compact" disabled={!canManageAccess} title={canManageAccess ? '' : 'Добавлять пользователей может только владелец'} onClick={() => setShowInvite(true)}><Plus size={16} /> Добавить</button>} />
+                <div className="user-list">
+                  <div className="user-list__head"><span>Пользователь</span><span>Роль</span><span>Веб-доступ</span><span>Telegram</span><span>Последний вход</span><span>Действия</span></div>
+                  {state.settings.users.map((user) => {
+                    const web = webAccessFor(user);
+                    const telegram = telegramAccessFor(user);
+                    const webView = webStatusView(user);
+                    const busy = accessBusy?.userId === user.id;
+                    const localAccess = canManageAccess && accessSnapshot?.authMode !== 'sites_sso' && user.id !== 'user-owner';
+                    return <article key={user.id} className="user-row">
+                      <span className="user-row__avatar">{user.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span>
+                      <div className="user-row__identity"><strong>{user.name}</strong><small>{user.email}</small></div>
+                      <span className="user-row__role"><StatusBadge label={roleLabels[user.role]} tone={user.role === 'management' ? 'blue' : 'neutral'} /></span>
+                      <span className="user-row__web"><StatusBadge label={webView.label} tone={webView.tone} /></span>
+                      <span className="user-row__telegram"><StatusBadge label={telegram.status === 'connected' ? 'Подключён' : 'Не подключён'} tone={telegram.status === 'connected' ? 'positive' : 'neutral'} /></span>
+                      <small className="user-row__last">{web.lastLoginAt ? formatDateTime(web.lastLoginAt) : 'Ещё не входил'}</small>
+                      <span className="user-row__actions access-actions">
+                        {localAccess && ['not_issued', 'expired'].includes(web.status) && <button type="button" disabled={busy} onClick={() => void issueWebLink(user)}>{web.status === 'expired' ? 'Новая ссылка' : 'Выдать доступ'}</button>}
+                        {localAccess && web.status === 'pending' && <button type="button" disabled={busy} onClick={() => void issueWebLink(user)}>Перевыпустить</button>}
+                        {localAccess && web.status === 'active' && <button type="button" disabled={busy} onClick={() => void issueWebLink(user, true)}>Сбросить пароль</button>}
+                        {localAccess && web.status === 'active' && <button type="button" disabled={busy} onClick={() => void changeWebAccess(user, 'sessions/revoke')}>Завершить сессии</button>}
+                        {localAccess && web.status === 'active' && <button type="button" className="danger" disabled={busy} onClick={() => void changeWebAccess(user, 'block')}>Заблокировать</button>}
+                        {localAccess && web.status === 'blocked' && <button type="button" disabled={busy} onClick={() => void changeWebAccess(user, 'unblock')}>Разблокировать</button>}
+                        {canManageAccess && telegram.status === 'not_connected' && <button type="button" disabled={busy || user.status === 'disabled'} onClick={() => void createTelegramLink(user)}>Подключить Telegram</button>}
+                        {canManageAccess && telegram.status === 'connected' && <button type="button" className="danger" disabled={busy} onClick={() => void disconnectTelegram(user)}>Отключить Telegram</button>}
+                        <button type="button" aria-label={`Редактировать ${user.name}`} disabled={!canManageAccess || busy || user.id === 'user-owner'} onClick={() => setEditingUser({ ...user })}><Pencil size={15} /></button>
+                      </span>
+                      {accessErrors[user.id] && <small className="access-inline-error" role="status" aria-live="polite">{accessErrors[user.id]}</small>}
+                    </article>;
+                  })}
+                </div>
                 {integrationMessage && <div className="integration-result" role="status" aria-live="polite">{integrationMessage}</div>}
+                {!canManageAccess && <div className="settings-note"><ShieldCheck size={18} /><span>Выдавать, блокировать и сбрасывать веб-доступ может только владелец системы.</span></div>}
               </section>
               <section className="panel settings-panel"><SectionHeader eyebrow="Матрица" title="Что видит каждая роль" />
                 <div className="permission-table"><div className="permission-table__head"><strong>Раздел</strong><strong>Управление</strong><strong>Прораб</strong><strong>Клиент</strong></div>{[
                   ['Финансы и маржа', true, false, false], ['Маркетинг и заявки', true, false, false], ['Все задачи / только свои', true, true, false], ['Этапы и график', true, true, true], ['Снабжение', true, true, false], ['Контроль качества', true, true, true], ['Настройки и доступы', true, false, false],
                 ].map(([label, management, foreman, client]) => <div className="permission-table__row" key={String(label)}><span>{String(label)}</span>{[management, foreman, client].map((allowed, index) => <span key={index}>{allowed ? <Check size={17} /> : '—'}</span>)}</div>)}</div>
-                <div className="settings-note"><LockKeyhole size={18} /><span>Роль теперь определяется сервером по реальному аккаунту — переключить её в интерфейсе нельзя. После добавления участника владелец включает его email в защищённый список сайта, и человек входит через свой аккаунт ChatGPT.</span></div>
+                <div className="settings-note"><LockKeyhole size={18} /><span>{accessSnapshot?.authMode === 'sites_sso' ? 'На резервном стенде вход выполняется через аккаунт ChatGPT, а список разрешённых email управляется владельцем сайта.' : 'Email — это логин сотрудника. Владелец выдаёт одноразовую ссылку на 7 дней; человек сам задаёт пароль. Telegram подключается отдельно и не даёт веб-доступ.'}</span></div>
               </section>
             </>
           )}
@@ -321,8 +572,9 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
         </div>
       </div>
 
-      {showInvite && <Modal title="Добавить пользователя" subtitle="Создадим профиль и назначим роль. Доступ к закрытому сайту выдаётся владельцем отдельно — система не будет притворяться, что приглашение уже отправлено." onClose={() => setShowInvite(false)}><form className="modal-form" onSubmit={inviteUser}><div className="form-grid"><Field label="Имя"><input required value={invite.name} onChange={(event) => setInvite({ ...invite, name: event.target.value })} /></Field><Field label="Email аккаунта ChatGPT"><input required type="email" value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} /></Field></div><div className="form-grid"><Field label="Роль"><select value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Telegram"><input value={invite.telegram} onChange={(event) => setInvite({ ...invite, telegram: event.target.value })} placeholder="@username, необязательно" /></Field></div><div className="settings-note"><Link2 size={18} /><span>Личный Telegram связывается безопасной одноразовой ссылкой после создания профиля. Chat ID вручную вводить не нужно.</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowInvite(false)}>Отмена</button><button type="submit" className="button button--primary"><Plus size={17} /> Сохранить профиль</button></div></form></Modal>}
-      {editingUser && <Modal title={`Редактировать: ${editingUser.name}`} subtitle="Изменения роли и статуса сразу сохранятся в настройках проекта." onClose={() => setEditingUser(null)}><form className="modal-form" onSubmit={saveUser}><div className="form-grid"><Field label="Имя"><input required value={editingUser.name} onChange={(event) => setEditingUser({ ...editingUser, name: event.target.value })} /></Field><Field label="Email"><input required type="email" value={editingUser.email} onChange={(event) => setEditingUser({ ...editingUser, email: event.target.value })} /></Field><Field label="Роль"><select value={editingUser.role} onChange={(event) => setEditingUser({ ...editingUser, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Статус"><select value={editingUser.status} onChange={(event) => setEditingUser({ ...editingUser, status: event.target.value as SystemUser['status'] })}><option value="active">Активен</option><option value="invited">Доступ не выдан</option><option value="disabled">Отключён</option></select></Field><Field label="Telegram"><input value={editingUser.telegram ?? ''} onChange={(event) => setEditingUser({ ...editingUser, telegram: event.target.value })} placeholder="@username" /></Field></div><div className="settings-note"><Link2 size={18} /><span>{editingUser.telegramBoundAt ? 'Telegram уже связан с этим профилем.' : 'Для связи Telegram используйте кнопку с цепочкой в списке пользователей.'}</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingUser(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить</button></div></form></Modal>}
+      {showInvite && <Modal title="Добавить пользователя" subtitle={accessSnapshot?.authMode === 'sites_sso' ? 'Создадим профиль. Вход на резервный стенд управляется защищённым списком сайта.' : 'Email станет логином. После сохранения система выпустит одноразовую ссылку для установки пароля.'} onClose={() => setShowInvite(false)}><form className="modal-form" onSubmit={inviteUser}><div className="form-grid"><Field label="Имя"><input required value={invite.name} onChange={(event) => setInvite({ ...invite, name: event.target.value })} /></Field><Field label="Email — логин"><input required type="email" value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} /></Field></div><div className="form-grid"><Field label="Роль"><select value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Telegram"><input value={invite.telegram} onChange={(event) => setInvite({ ...invite, telegram: event.target.value })} placeholder="@username, необязательно" /></Field></div>{accessErrors.new && <div className="access-inline-error" role="alert">{accessErrors.new}</div>}<div className="settings-note"><Link2 size={18} /><span>{accessSnapshot?.authMode === 'sites_sso' ? 'Веб-доступ и Telegram — разные подключения. Добавьте email в защищённый доступ сайта; Telegram можно связать после создания профиля.' : 'Веб-доступ и Telegram — разные подключения. Сотрудник сам задаст пароль по ссылке; Telegram можно связать после создания профиля.'}</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowInvite(false)}>Отмена</button><button type="submit" className="button button--primary" disabled={accessBusy?.userId === 'new'}><Plus size={17} /> {accessSnapshot?.authMode === 'sites_sso' ? 'Создать профиль' : 'Создать и выдать доступ'}</button></div></form></Modal>}
+      {editingUser && <Modal title={`Редактировать: ${editingUser.name}`} subtitle="Email является логином. При его смене потребуется выпустить новую ссылку активации." onClose={() => setEditingUser(null)}><form className="modal-form" onSubmit={saveUser}><div className="form-grid"><Field label="Имя"><input required value={editingUser.name} onChange={(event) => setEditingUser({ ...editingUser, name: event.target.value })} /></Field><Field label="Email — логин"><input required type="email" value={editingUser.email} onChange={(event) => setEditingUser({ ...editingUser, email: event.target.value })} /></Field><Field label="Роль"><select value={editingUser.role} onChange={(event) => setEditingUser({ ...editingUser, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Telegram"><input value={editingUser.telegram ?? ''} onChange={(event) => setEditingUser({ ...editingUser, telegram: event.target.value })} placeholder="@username" /></Field></div><div className="settings-note"><Link2 size={18} /><span>Блокировка и разблокировка выполняются отдельными кнопками в списке, чтобы веб-сессии отзывались на сервере.</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingUser(null)}>Отмена</button><button type="submit" className="button button--primary" disabled={accessBusy?.userId === editingUser.id}>Сохранить</button></div></form></Modal>}
+      {accessLink && <Modal title={`${accessLink.purpose === 'reset' ? 'Сброс пароля' : 'Доступ'} для ${accessLink.userName}`} subtitle={accessLink.purpose === 'existing' ? 'У пользователя уже есть пароль ИКИОМА ОС; доступ к этому проекту добавлен.' : `Одноразовая ссылка действует до ${formatDateTime(accessLink.expiresAt ?? '')}.`} onClose={() => setAccessLink(null)}><div className="telegram-link-card access-link-card"><p>{accessLink.purpose === 'existing' ? 'Отправьте человеку ссылку на вход. Он использует прежний пароль и свой email.' : 'Отправьте ссылку именно выбранному человеку. Он задаст пароль и войдёт в ИКИОМА ОС по своему email.'}</p><Field label="Логин"><input readOnly value={accessLink.login} onFocus={(event) => event.currentTarget.select()} /></Field><Field label={accessLink.purpose === 'existing' ? 'Ссылка на вход' : 'Ссылка активации'}><input readOnly value={accessLink.url} onFocus={(event) => event.currentTarget.select()} /></Field><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setAccessLink(null)}>Закрыть</button><button type="button" className="button button--primary" onClick={() => { void navigator.clipboard.writeText(accessLink.url); }}><Link2 size={16} /> Скопировать ссылку</button></div></div></Modal>}
       {telegramLink && <Modal title={`Telegram для ${telegramLink.userName}`} subtitle={`Персональная одноразовая ссылка действует до ${formatDateTime(telegramLink.expiresAt)}.`} onClose={() => setTelegramLink(null)}><div className="telegram-link-card"><p>Отправьте эту ссылку именно выбранному сотруднику. После нажатия «Запустить» его Telegram автоматически свяжется с профилем в ИКИОМА ОС.</p><input readOnly value={telegramLink.url} onFocus={(event) => event.currentTarget.select()} /><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setTelegramLink(null)}>Закрыть</button><button type="button" className="button button--primary" onClick={() => { void navigator.clipboard.writeText(telegramLink.url); setIntegrationMessage('Ссылка скопирована.'); }}><Link2 size={16} /> Скопировать ссылку</button></div></div></Modal>}
     </div>
   );

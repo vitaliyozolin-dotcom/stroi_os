@@ -1,23 +1,16 @@
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { link, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
-const bodyToBuffer = async (body) => {
-  if (body instanceof ArrayBuffer) return Buffer.from(body);
-  if (ArrayBuffer.isView(body)) return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
-  if (body && typeof body.getReader === 'function') {
-    const chunks = [];
-    for await (const chunk of Readable.fromWeb(body)) chunks.push(Buffer.from(chunk));
-    return Buffer.concat(chunks);
-  }
-  if (body && typeof body.pipe === 'function') {
-    const chunks = [];
-    for await (const chunk of body) chunks.push(Buffer.from(chunk));
-    return Buffer.concat(chunks);
-  }
-  return Buffer.from(body ?? '');
+const bodyToReadable = (body) => {
+  if (body instanceof ArrayBuffer) return Readable.from([Buffer.from(body)]);
+  if (ArrayBuffer.isView(body)) return Readable.from([Buffer.from(body.buffer, body.byteOffset, body.byteLength)]);
+  if (body && typeof body.getReader === 'function') return Readable.fromWeb(body);
+  if (body && typeof body.pipe === 'function') return body;
+  return Readable.from([Buffer.from(body ?? '')]);
 };
 
 export class FileBucket {
@@ -33,14 +26,48 @@ export class FileBucket {
 
   async put(key, body, options = {}) {
     const target = this.pathFor(key);
-    const buffer = await bodyToBuffer(body);
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, buffer, { flag: 'wx' });
-    await writeFile(`${target}.meta.json`, JSON.stringify({
-      httpMetadata: options.httpMetadata ?? {},
-      customMetadata: options.customMetadata ?? {},
-      httpEtag: `\"${createHash('sha256').update(buffer).digest('hex')}\"`,
-    }));
+    const directory = dirname(target);
+    const temporary = `${target}.upload-${randomUUID()}.tmp`;
+    const metadataTarget = `${target}.meta.json`;
+    const metadataTemporary = `${metadataTarget}.upload-${randomUUID()}.tmp`;
+    const digest = createHash('sha256');
+    const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : Number.POSITIVE_INFINITY;
+    let size = 0;
+    const inspect = new Transform({
+      transform(chunk, encoding, callback) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
+        size += buffer.byteLength;
+        if (size > maxBytes) return callback(new Error('payload_too_large'));
+        digest.update(buffer);
+        callback(null, buffer);
+      },
+    });
+    await mkdir(directory, { recursive: true });
+    let dataLinked = false;
+    let metadataLinked = false;
+    try {
+      await pipeline(bodyToReadable(body), inspect, createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
+      const metadata = JSON.stringify({
+        httpMetadata: options.httpMetadata ?? {},
+        customMetadata: options.customMetadata ?? {},
+        httpEtag: `\"${digest.digest('hex')}\"`,
+        sizeBytes: size,
+      });
+      await writeFile(metadataTemporary, metadata, { flag: 'wx', mode: 0o600 });
+      await link(temporary, target);
+      dataLinked = true;
+      await link(metadataTemporary, metadataTarget);
+      metadataLinked = true;
+      await Promise.allSettled([unlink(temporary), unlink(metadataTemporary)]);
+    } catch (error) {
+      await Promise.allSettled([
+        unlink(temporary),
+        unlink(metadataTemporary),
+        ...(metadataLinked ? [unlink(metadataTarget)] : []),
+        ...(dataLinked ? [unlink(target)] : []),
+      ]);
+      throw error;
+    }
   }
 
   async get(key) {

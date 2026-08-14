@@ -6,7 +6,15 @@ import {
 } from './access-control.js';
 import { addCalendarDays, addDays, dateKey, isoDate } from './lib/date.js';
 import { json, publicLeadResponse } from './lib/http.js';
-import { clean, safeFileName, supportedDocument, validProjectId } from './lib/validation.js';
+import {
+  clean,
+  detectRasterImageType,
+  documentMimeType,
+  normalizeClientAddress,
+  rasterImageMimeType,
+  safeFileName,
+  validProjectId,
+} from './lib/validation.js';
 import {
   flushTelegramOutbox as flushTelegramOutboxModule,
   reviveTelegramOutbox,
@@ -40,27 +48,170 @@ import {
   bindingForTelegramProject as bindingForTelegramProjectModule,
   bindingsForTelegramUser as bindingsForTelegramUserModule,
   bindingForTelegramUser as bindingForTelegramUserModule,
+  claimTelegramBinding,
   saveTelegramProjectSelection,
   selectTelegramBinding,
+  unlinkTelegramBinding,
 } from './telegram/bindings.js';
 
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_QUALITY_PHOTO_BYTES = 12 * 1024 * 1024;
+const MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024;
+const MAX_JSON_BODY_BYTES = 32 * 1024;
+const MAX_TELEGRAM_UPDATE_BYTES = 1024 * 1024;
+const MAX_CONCURRENT_UPLOADS = 2;
 const TELEGRAM_CONFIG_PROJECT_ID = '__integration__:telegram';
 const BATTLE_SCHEMA_VERSION = 17;
 const BATTLE_RESET_KEY = 'battle_v17_reset';
 const BATTLE_SCHEMA_KEY = 'battle_schema_version';
 const PUBLIC_LEAD_PROJECT_ID = 'ikioma-sales';
 const PUBLIC_LEAD_ORIGINS = new Set(['https://ikioma.ru', 'https://www.ikioma.ru']);
-const PUBLIC_LEAD_GLOBAL_LIMIT = 30;
 const PUBLIC_LEAD_CLIENT_LIMIT = 5;
 const PUBLIC_LEAD_RATE_WINDOW_MS = 60_000;
+const PUBLIC_LEAD_BODY_LIMIT = 32 * 1024;
 const TELEGRAM_MUTATION_NOOP = Symbol('telegram_mutation_noop');
 let schemaPromise;
 let battleReadyPromise;
+let activeUploads = 0;
 
 const changes = (result) => Number(result?.meta?.changes ?? result?.changes ?? 0);
+
+const readStreamPrefix = async (stream, limit = 512) => {
+  const reader = stream.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (size < limit) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+      const kept = chunk.subarray(0, Math.max(0, limit - size));
+      chunks.push(kept);
+      size += kept.byteLength;
+    }
+  } finally {
+    void reader.cancel().catch(() => undefined);
+  }
+  const prefix = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    prefix.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return prefix;
+};
+
+const drainReader = async (reader) => {
+  try {
+    while (!(await reader.read()).done) { /* Отбрасываем остаток без буферизации. */ }
+  } catch {
+    // Соединение могло закрыться после раннего ответа 413.
+  }
+};
+
+const readJsonBodyLimited = async (request, limit) => {
+  const declared = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > limit) throw new Error('payload_too_large');
+  if (!request.body) throw new Error('invalid_json');
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+    size += chunk.byteLength;
+    if (size > limit) {
+      void drainReader(reader);
+      throw new Error('payload_too_large');
+    }
+    chunks.push(chunk);
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    throw new Error('invalid_json');
+  }
+};
+
+export const requestWithBodyLimit = (request, limit) => {
+  const declared = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > limit) throw new Error('payload_too_large');
+  if (!request.body) return request;
+  const reader = request.body.getReader();
+  let size = 0;
+  const body = new ReadableStream({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) return controller.close();
+        const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+        size += chunk.byteLength;
+        if (size > limit) {
+          void drainReader(reader);
+          controller.error(new Error('payload_too_large'));
+          return;
+        }
+        controller.enqueue(chunk);
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel() {
+      void drainReader(reader);
+      return undefined;
+    },
+  });
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body,
+    duplex: 'half',
+  });
+};
+
+const readFormDataLimited = async (request, limit) => requestWithBodyLimit(request, limit).formData();
+
+export const claimUploadAdmission = () => {
+  if (activeUploads >= MAX_CONCURRENT_UPLOADS) return null;
+  activeUploads += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeUploads = Math.max(0, activeUploads - 1);
+  };
+};
+
+const protectedFileHeaders = (filename, fallbackName, { inlineMime = '' } = {}) => {
+  const safeName = safeFileName(filename || fallbackName);
+  const fallback = safeName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || fallbackName;
+  const disposition = inlineMime ? 'inline' : 'attachment';
+  return new Headers({
+    'Cache-Control': 'private, no-store',
+    'Content-Type': inlineMime || 'application/octet-stream',
+    'Content-Disposition': `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
+    'Content-Security-Policy': "sandbox; default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    'Cross-Origin-Resource-Policy': 'same-origin',
+    'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff',
+  });
+};
+
+const ensureTelegramClaimColumn = async (db) => {
+  try {
+    await db.prepare('ALTER TABLE telegram_link_codes ADD COLUMN claim_id TEXT').run();
+  } catch (error) {
+    if (!/duplicate column|already exists/i.test(String(error?.message || error))) throw error;
+  }
+};
 
 const ensureSchema = async (db) => {
   if (!schemaPromise) {
@@ -131,7 +282,8 @@ const ensureSchema = async (db) => {
           system_user_id TEXT NOT NULL,
           created_at TEXT NOT NULL,
           expires_at TEXT NOT NULL,
-          used_at TEXT
+          used_at TEXT,
+          claim_id TEXT
         )
       `).run(),
       db.prepare(`
@@ -226,7 +378,7 @@ const ensureSchema = async (db) => {
           reason TEXT NOT NULL
         )
       `).run(),
-    ]).then(() => Promise.all([
+    ]).then(() => ensureTelegramClaimColumn(db)).then(() => Promise.all([
       db.prepare(`
         CREATE INDEX IF NOT EXISTS audit_log_project_revision
         ON audit_log (project_id, revision DESC)
@@ -1178,35 +1330,42 @@ const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uplo
   if (!metadataResponse.ok || !metadataBody?.ok || !metadataBody.result?.file_path) throw new Error('telegram_file_unavailable');
   const declaredSize = Number(metadataBody.result.file_size) || 0;
   if (declaredSize > MAX_FILE_BYTES) throw new Error('telegram_file_too_large');
-  const sourceResponse = await fetch(telegramApiUrl(`/file/bot${env.TELEGRAM_BOT_TOKEN}/${metadataBody.result.file_path}`), {
-    headers: telegramTransportHeaders(),
-    signal: AbortSignal.timeout(60_000),
-  });
-  if (!sourceResponse.ok || !sourceResponse.body) throw new Error('telegram_file_unavailable');
-  const safeName = safeFileName(fileName);
-  const stableDraftId = clean(draftId, 80) || crypto.randomUUID();
-  const key = `${projectId}/telegram/${stableDraftId}-${safeName}`;
-  const uploadedAt = new Date().toISOString();
-  await env.BUCKET.put(key, sourceResponse.body, {
-    httpMetadata: { contentType: clean(mimeType, 120) || sourceResponse.headers.get('content-type') || 'application/octet-stream' },
-    customMetadata: {
-      projectId,
-      originalName: safeName,
-      uploadedBy: clean(uploadedBy, 160),
+  const releaseUpload = claimUploadAdmission();
+  if (!releaseUpload) throw new Error('upload_busy');
+  try {
+    const sourceResponse = await fetch(telegramApiUrl(`/file/bot${env.TELEGRAM_BOT_TOKEN}/${metadataBody.result.file_path}`), {
+      headers: telegramTransportHeaders(),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!sourceResponse.ok || !sourceResponse.body) throw new Error('telegram_file_unavailable');
+    const safeName = safeFileName(fileName);
+    const stableDraftId = clean(draftId, 80) || crypto.randomUUID();
+    const key = `${projectId}/telegram/${stableDraftId}-${safeName}`;
+    const uploadedAt = new Date().toISOString();
+    await env.BUCKET.put(key, sourceResponse.body, {
+      maxBytes: MAX_FILE_BYTES,
+      httpMetadata: { contentType: clean(mimeType, 120) || sourceResponse.headers.get('content-type') || 'application/octet-stream' },
+      customMetadata: {
+        projectId,
+        originalName: safeName,
+        uploadedBy: clean(uploadedBy, 160),
+        uploadedAt,
+        source: 'telegram',
+      },
+    });
+    return {
+      id: `attachment-telegram-${stableDraftId}`,
+      key,
+      name: safeName,
+      mimeType: clean(mimeType, 120) || sourceResponse.headers.get('content-type') || 'application/octet-stream',
+      sizeBytes: declaredSize || Number(sourceResponse.headers.get('content-length')) || 0,
       uploadedAt,
+      uploadedBy: clean(uploadedBy, 160),
       source: 'telegram',
-    },
-  });
-  return {
-    id: `attachment-telegram-${stableDraftId}`,
-    key,
-    name: safeName,
-    mimeType: clean(mimeType, 120) || sourceResponse.headers.get('content-type') || 'application/octet-stream',
-    sizeBytes: declaredSize || Number(sourceResponse.headers.get('content-length')) || 0,
-    uploadedAt,
-    uploadedBy: clean(uploadedBy, 160),
-    source: 'telegram',
-  };
+    };
+  } finally {
+    releaseUpload();
+  }
 };
 
 export const resolveTelegramDraftFile = async (state, draft, loadAttachment) => {
@@ -1335,7 +1494,9 @@ export const telegramMessageMentionsBot = (message, botUsername) => {
 const handleTelegramLink = async (request, env) => {
   if (!env.DB || !env.TELEGRAM_BOT_TOKEN) return json({ ok: false, error: 'telegram_not_configured' }, 409);
   let payload;
-  try { payload = await request.json(); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }
+  try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
+    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
+  }
   const projectId = clean(payload?.projectId, 100);
   const userId = clean(payload?.userId, 100);
   if (!validProjectId(projectId) || !userId) return json({ ok: false, error: 'invalid_link_target' }, 422);
@@ -1344,7 +1505,7 @@ const handleTelegramLink = async (request, env) => {
     await ensureSchema(env.DB);
     const snapshot = await readSnapshot(env.DB, projectId);
     const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
-    if (!identity || identity.role !== 'management') return json({ ok: false, error: 'project_access_denied' }, 403);
+    if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
     const user = (snapshot.state.settings?.users ?? []).find((item) => clean(item.id, 100) === userId && item.status !== 'disabled');
     if (!user) return json({ ok: false, error: 'user_not_found' }, 404);
     const username = await telegramBotUsername(env);
@@ -1354,11 +1515,17 @@ const handleTelegramLink = async (request, env) => {
     const codeHash = await sha256(code);
     const now = new Date();
     const expiresAt = addDays(now, 1).toISOString();
-    await env.DB.prepare(`
-      INSERT INTO telegram_link_codes (
-        code_hash, project_id, system_user_id, created_at, expires_at, used_at
-      ) VALUES (?, ?, ?, ?, ?, NULL)
-    `).bind(codeHash, projectId, userId, now.toISOString(), expiresAt).run();
+    await env.DB.batch([
+      env.DB.prepare(`
+        DELETE FROM telegram_link_codes
+        WHERE project_id = ? AND system_user_id = ? AND used_at IS NULL
+      `).bind(projectId, userId),
+      env.DB.prepare(`
+        INSERT INTO telegram_link_codes (
+          code_hash, project_id, system_user_id, created_at, expires_at, used_at, claim_id
+        ) VALUES (?, ?, ?, ?, ?, NULL, NULL)
+      `).bind(codeHash, projectId, userId, now.toISOString(), expiresAt),
+    ]);
     return json({
       ok: true,
       url: `https://t.me/${username}?start=${code}`,
@@ -1370,6 +1537,117 @@ const handleTelegramLink = async (request, env) => {
   }
 };
 
+const handleAccessUsers = async (request, env) => {
+  const projectId = clean(new URL(request.url).searchParams.get('projectId'), 100);
+  if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
+  try {
+    await ensureSchema(env.DB);
+    const snapshot = await readSnapshot(env.DB, projectId);
+    const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
+    if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
+    const result = await env.DB.prepare(`
+      SELECT system_user_id,bound_at,username,updated_at
+      FROM telegram_bindings WHERE project_id = ? ORDER BY updated_at DESC
+    `).bind(projectId).all();
+    const telegramByUser = new Map();
+    for (const binding of result?.results ?? []) {
+      if (!telegramByUser.has(binding.system_user_id)) telegramByUser.set(binding.system_user_id, binding);
+    }
+    const users = (snapshot.state.settings?.users ?? []).map((user) => {
+      const binding = telegramByUser.get(user.id);
+      return {
+        userId: user.id,
+        web: { status: 'not_issued' },
+        telegram: binding ? {
+          status: 'connected', boundAt: binding.bound_at, username: clean(binding.username, 120) || undefined,
+        } : { status: 'not_connected' },
+      };
+    });
+    return json({ ok: true, authMode: 'sites_sso', users });
+  } catch {
+    return json({ ok: false, error: 'access_storage_error' }, 500);
+  }
+};
+
+const handleTelegramUnlink = async (request, env) => {
+  if (!env.DB) return json({ ok: false, error: 'telegram_not_configured' }, 409);
+  let payload;
+  try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
+    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
+  }
+  const projectId = clean(payload?.projectId, 100);
+  const userId = clean(payload?.userId, 100);
+  if (!validProjectId(projectId) || !userId) return json({ ok: false, error: 'invalid_link_target' }, 422);
+
+  try {
+    await ensureSchema(env.DB);
+    const snapshot = await readSnapshot(env.DB, projectId);
+    const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
+    if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
+    const user = (snapshot.state.settings?.users ?? []).find((item) => clean(item.id, 100) === userId);
+    if (!user) return json({ ok: false, error: 'user_not_found' }, 404);
+
+    const removed = await unlinkTelegramBinding(env.DB, projectId, userId);
+    try {
+      await mutateProjectFromTelegram(
+        env,
+        projectId,
+        identity.name,
+        'management',
+        'telegram.unlink',
+        `Telegram отключён: ${user.name}`,
+        (state) => {
+          state.settings.users = (state.settings?.users ?? []).map((item) => item.id === user.id ? {
+            ...item,
+            telegramChatId: undefined,
+            telegramBoundAt: undefined,
+          } : item);
+          state.activity = [{
+            id: `activity-${crypto.randomUUID()}`,
+            timestamp: new Date().toISOString(),
+            actor: identity.name,
+            text: `Отключил Telegram пользователя ${user.name}`,
+            tone: 'neutral',
+          }, ...(state.activity ?? [])];
+        },
+      );
+    } catch {
+      // Таблица привязок уже атомарно очищена и остаётся источником истины для UI и команд.
+    }
+    return json({ ok: true, removed: removed.removed, telegram: { status: 'not_connected' } });
+  } catch {
+    return json({ ok: false, error: 'telegram_unlink_failed' }, 500);
+  }
+};
+
+const reconcileTelegramUserState = async (env, projectId, user, from, privateChatId, now) => mutateProjectFromTelegram(
+  env,
+  projectId,
+  user.name,
+  user.role,
+  'telegram.bind',
+  `Telegram подключён: ${user.name}`,
+  (state) => {
+    state.settings.users = (state.settings?.users ?? []).map((item) => item.id === user.id ? {
+      ...item,
+      telegram: from.username ? `@${clean(from.username, 120)}` : item.telegram,
+      telegramChatId: privateChatId,
+      telegramBoundAt: now,
+    } : item);
+    const alreadyRecorded = (state.activity ?? []).some((item) => item.text === 'Подключил личный Telegram к ИКИОМА ОС'
+      && item.actor === user.name && item.timestamp === now);
+    if (!alreadyRecorded) {
+      state.activity = [{
+        id: `activity-${crypto.randomUUID()}`,
+        timestamp: now,
+        actor: user.name,
+        text: 'Подключил личный Telegram к ИКИОМА ОС',
+        tone: 'neutral',
+      }, ...(state.activity ?? [])];
+    }
+  },
+);
+
 const bindTelegramUser = async (message, code, env) => {
   const chat = message?.chat;
   const from = message?.from;
@@ -1379,11 +1657,11 @@ const bindTelegramUser = async (message, code, env) => {
   }
   const codeHash = await sha256(code);
   const row = await env.DB.prepare(`
-    SELECT code_hash, project_id, system_user_id, expires_at, used_at
+    SELECT code_hash, project_id, system_user_id, expires_at, used_at, claim_id
     FROM telegram_link_codes
     WHERE code_hash = ?
   `).bind(codeHash).first();
-  if (!row || row.used_at || row.expires_at < new Date().toISOString()) {
+  if (!row || row.expires_at < new Date().toISOString()) {
     await telegramSend(env.TELEGRAM_BOT_TOKEN, chat.id, 'Ссылка недействительна или уже использована. Попросите руководителя выпустить новую в ИКИОМА ОС.');
     return;
   }
@@ -1394,67 +1672,43 @@ const bindTelegramUser = async (message, code, env) => {
     return;
   }
 
-  const now = new Date().toISOString();
-  const linkClaim = await env.DB.prepare(`
-    UPDATE telegram_link_codes
-    SET used_at = ?
-    WHERE code_hash = ? AND used_at IS NULL AND expires_at >= ?
-  `).bind(now, codeHash, now).run();
-  if (changes(linkClaim) !== 1) {
+  const telegramUserId = String(from.id);
+  const privateChatId = String(chat.id);
+  const existingBinding = row.used_at ? await env.DB.prepare(`
+    SELECT telegram_user_id,private_chat_id,bound_at
+    FROM telegram_bindings
+    WHERE project_id = ? AND system_user_id = ? AND telegram_user_id = ?
+  `).bind(row.project_id, row.system_user_id, telegramUserId).first() : null;
+  if (row.used_at && !existingBinding) {
     await telegramSend(env.TELEGRAM_BOT_TOKEN, chat.id, 'Ссылка уже использована другим подключением. Попросите руководителя выпустить новую в ИКИОМА ОС.');
     return;
   }
-  const telegramUserId = String(from.id);
-  const privateChatId = String(chat.id);
-  await env.DB.prepare(`
-    INSERT INTO telegram_bindings (
-      telegram_user_id, project_id, system_user_id, private_chat_id,
-      username, display_name, role, bound_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(telegram_user_id, project_id) DO UPDATE SET
-      system_user_id = excluded.system_user_id,
-      private_chat_id = excluded.private_chat_id,
-      username = excluded.username,
-      display_name = excluded.display_name,
-      role = excluded.role,
-      updated_at = excluded.updated_at
-  `).bind(
-    telegramUserId,
-    row.project_id,
-    row.system_user_id,
-    privateChatId,
-    clean(from.username, 120),
-    telegramDisplayName(from),
-    user.role,
-    now,
-    now,
-  ).run();
-  await saveTelegramProjectSelection(env.DB, telegramUserId, privateChatId, row.project_id);
 
-  await mutateProjectFromTelegram(
-    env,
-    row.project_id,
-    user.name,
-    user.role,
-    'telegram.bind',
-    `Telegram подключён: ${user.name}`,
-    (state) => {
-      state.settings.users = (state.settings?.users ?? []).map((item) => item.id === user.id ? {
-        ...item,
-        telegram: from.username ? `@${clean(from.username, 120)}` : item.telegram,
-        telegramChatId: privateChatId,
-        telegramBoundAt: now,
-        status: item.status === 'disabled' ? 'disabled' : 'active',
-      } : item);
-      state.activity = [{
-        id: `activity-${crypto.randomUUID()}`,
-        timestamp: now,
-        actor: user.name,
-        text: 'Подключил личный Telegram к ИКИОМА ОС',
-        tone: 'neutral',
-      }, ...(state.activity ?? [])];
-    },
-  );
+  const now = existingBinding?.bound_at || new Date().toISOString();
+  if (!existingBinding) {
+    const claimed = await claimTelegramBinding(env.DB, {
+      codeHash,
+      claimId: crypto.randomUUID(),
+      now,
+      telegramUserId,
+      projectId: row.project_id,
+      systemUserId: row.system_user_id,
+      privateChatId,
+      username: clean(from.username, 120),
+      displayName: telegramDisplayName(from),
+      role: user.role,
+    });
+    if (!claimed) {
+      await telegramSend(env.TELEGRAM_BOT_TOKEN, chat.id, 'Ссылка уже использована другим подключением. Попросите руководителя выпустить новую в ИКИОМА ОС.');
+      return;
+    }
+  }
+
+  try {
+    await reconcileTelegramUserState(env, row.project_id, user, from, privateChatId, now);
+  } catch {
+    // telegram_bindings — источник истины. Повторный /start безопасно восстановит снимок проекта.
+  }
   await telegramSend(
     env.TELEGRAM_BOT_TOKEN,
     privateChatId,
@@ -1463,7 +1717,7 @@ const bindTelegramUser = async (message, code, env) => {
   await reviveTelegramOutbox(env.DB, privateChatId);
 };
 
-const projectForBinding = async (env, binding) => {
+export const projectForBinding = async (env, binding) => {
   const snapshot = await readSnapshot(env.DB, binding.project_id);
   if (!snapshot) throw new Error('project_not_found');
   const user = (snapshot.state.settings?.users ?? []).find((item) => item.id === binding.system_user_id);
@@ -2702,7 +2956,9 @@ const handleTelegramUpdate = async (request, env, context) => {
   if (!expectedSecret || suppliedSecret !== expectedSecret) return json({ ok: false, error: 'webhook_authorization_required' }, 403);
   if (!env.DB || !env.TELEGRAM_BOT_TOKEN) return json({ ok: false, error: 'telegram_not_configured' }, 409);
   let update;
-  try { update = await request.json(); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }
+  try { update = await readJsonBodyLimited(request, MAX_TELEGRAM_UPDATE_BYTES); } catch (error) {
+    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
+  }
   const updateId = clean(String(update?.update_id ?? ''), 80);
   if (!updateId) return json({ ok: false, error: 'invalid_update' }, 422);
   await ensureSchema(env.DB);
@@ -2807,23 +3063,41 @@ const dispatchNotifications = async (previous, next, env, actor, origin, summary
 
 const handlePutState = async (request, env, context) => {
   if (!env.DB) return json({ ok: false, error: 'storage_unavailable' }, 503);
-  const length = Number(request.headers.get('content-length') || 0);
-  if (length > MAX_STATE_BYTES) return json({ ok: false, error: 'payload_too_large' }, 413);
+  const projectId = clean(new URL(request.url).searchParams.get('projectId'), 100);
+  if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
+
+  let authorizedSnapshot;
+  let authenticated;
+  let authorizedIdentity;
+  try {
+    await ensureSchema(env.DB);
+    authorizedSnapshot = await readSnapshot(env.DB, projectId);
+    authenticated = authenticatedIdentity(request, env);
+    authorizedIdentity = authorizedSnapshot
+      ? projectIdentity(request, env, authorizedSnapshot.state)
+      : authenticated?.isOwner ? { ...authenticated, id: 'owner', role: 'management', status: 'active' } : null;
+    if (!authorizedIdentity) return json({ ok: false, error: 'project_access_denied' }, 403);
+  } catch {
+    return json({ ok: false, error: 'storage_error' }, 503);
+  }
 
   let payload;
   try {
-    payload = await request.json();
-  } catch {
-    return json({ ok: false, error: 'invalid_json' }, 400);
+    payload = await readJsonBodyLimited(request, MAX_STATE_BYTES + MAX_JSON_BODY_BYTES);
+  } catch (error) {
+    return json(
+      { ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' },
+      error?.message === 'payload_too_large' ? 413 : 400,
+    );
   }
 
-  const projectId = clean(payload?.projectId, 100);
+  const payloadProjectId = clean(payload?.projectId, 100);
   const expectedRevision = Number(payload?.expectedRevision);
   const action = clean(payload?.action, 80) || 'project_update';
   const summary = clean(payload?.summary, 300) || 'Обновлены данные проекта';
   const incomingState = payload?.state;
 
-  if (!validProjectId(projectId)
+  if (payloadProjectId !== projectId
     || !Number.isInteger(expectedRevision)
     || expectedRevision < 0
     || !incomingState
@@ -2836,17 +3110,17 @@ const handlePutState = async (request, env, context) => {
   const nextRevision = expectedRevision + 1;
 
   try {
-    await ensureSchema(env.DB);
-    const previousSnapshot = expectedRevision > 0 ? await readSnapshot(env.DB, projectId) : null;
-    const authenticated = authenticatedIdentity(request, env);
+    const previousSnapshot = expectedRevision > 0 ? authorizedSnapshot : null;
     const identity = expectedRevision === 0
       ? authenticated?.isOwner ? { ...authenticated, id: 'owner', role: 'management', status: 'active' } : null
-      : previousSnapshot ? projectIdentity(request, env, previousSnapshot.state) : null;
+      : authorizedIdentity;
     if (!identity) return json({ ok: false, error: expectedRevision === 0 ? 'owner_required' : 'project_access_denied' }, 403);
 
     const actor = identity.name;
     const role = identity.role;
-    const mergedState = mergeStateForRole(previousSnapshot?.state ?? null, incomingState, identity);
+    const mergedState = mergeStateForRole(previousSnapshot?.state ?? null, incomingState, identity, {
+      serverManagedRoster: env.AUTH_ROSTER_MODE === 'local_password',
+    });
     const state = applyBattleAutomations(previousSnapshot?.state ?? null, mergedState, actor);
     let stateJson;
     try {
@@ -3093,7 +3367,9 @@ const handleIntegrationTest = async (request, env) => {
   const identity = authenticatedIdentity(request, env);
   if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
   let payload;
-  try { payload = await request.json(); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }
+  try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
+    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
+  }
   const channel = clean(payload?.channel, 30);
   const message = clean(payload?.message, 500) || 'Тестовое уведомление ИКИОМА ОС';
   const status = await integrationStatus(env);
@@ -3127,7 +3403,9 @@ const handleTelegramChatSelect = async (request, env) => {
   if (!env.TELEGRAM_BOT_TOKEN || !env.DB) return json({ ok: false, error: 'telegram_not_configured' }, 409);
 
   let payload;
-  try { payload = await request.json(); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }
+  try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
+    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
+  }
   const chatId = clean(payload?.chatId, 120);
   if (!chatId) return json({ ok: false, error: 'invalid_chat' }, 422);
 
@@ -3417,41 +3695,50 @@ const handleQualityPhotoUpload = async (request, env) => {
     const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
     const checkpoint = (snapshot?.state?.checkpoints ?? []).find((item) => clean(item.id, 100) === checkpointId);
     if (!identity || identity.role === 'client' || !checkpoint) return json({ ok: false, error: 'project_access_denied' }, 403);
-    const form = await request.formData();
-    const file = form.get('file');
-    if (!file || typeof file === 'string' || typeof file.arrayBuffer !== 'function') return json({ ok: false, error: 'file_required' }, 422);
-    if (Number(file.size) <= 0 || Number(file.size) > MAX_QUALITY_PHOTO_BYTES) return json({ ok: false, error: 'invalid_file_size' }, 413);
-    const mimeType = clean(file.type, 120).toLocaleLowerCase('en-US');
-    if (!mimeType.startsWith('image/')) return json({ ok: false, error: 'unsupported_file' }, 415);
-    const name = safeFileName(file.name);
-    const fileKey = `${projectId}/quality/${checkpointId}/${crypto.randomUUID()}-${name}`;
-    const uploadedAt = new Date().toISOString();
-    await env.BUCKET.put(fileKey, file.stream(), {
-      httpMetadata: { contentType: mimeType || 'application/octet-stream' },
-      customMetadata: {
-        projectId,
-        checkpointId,
-        originalName: name,
-        uploadedBy: identity.id,
-        uploadedAt,
-      },
-    });
-    return json({
-      ok: true,
-      photo: {
-        id: crypto.randomUUID(),
-        name,
-        capturedAt: uploadedAt,
-        fileKey,
-        fileName: name,
-        mimeType,
-        sizeBytes: Number(file.size),
-        uploadedAt,
-        uploadedBy: identity.name,
-        source: 'web',
-      },
-    }, 201);
-  } catch {
+    const releaseUpload = claimUploadAdmission();
+    if (!releaseUpload) return json({ ok: false, error: 'upload_busy' }, 429);
+    try {
+      const form = await readFormDataLimited(request, MAX_QUALITY_PHOTO_BYTES + MAX_MULTIPART_OVERHEAD_BYTES);
+      const file = form.get('file');
+      if (!file || typeof file === 'string' || typeof file.arrayBuffer !== 'function') return json({ ok: false, error: 'file_required' }, 422);
+      if (Number(file.size) <= 0 || Number(file.size) > MAX_QUALITY_PHOTO_BYTES) return json({ ok: false, error: 'invalid_file_size' }, 413);
+      const prefix = await file.slice(0, 512).arrayBuffer();
+      const mimeType = rasterImageMimeType(file, prefix);
+      if (!mimeType) return json({ ok: false, error: 'unsupported_file' }, 415);
+      const name = safeFileName(file.name);
+      const fileKey = `${projectId}/quality/${checkpointId}/${crypto.randomUUID()}-${name}`;
+      const uploadedAt = new Date().toISOString();
+      await env.BUCKET.put(fileKey, file.stream(), {
+        maxBytes: MAX_QUALITY_PHOTO_BYTES,
+        httpMetadata: { contentType: mimeType || 'application/octet-stream' },
+        customMetadata: {
+          projectId,
+          checkpointId,
+          originalName: name,
+          uploadedBy: identity.id,
+          uploadedAt,
+        },
+      });
+      return json({
+        ok: true,
+        photo: {
+          id: crypto.randomUUID(),
+          name,
+          capturedAt: uploadedAt,
+          fileKey,
+          fileName: name,
+          mimeType,
+          sizeBytes: Number(file.size),
+          uploadedAt,
+          uploadedBy: identity.name,
+          source: 'web',
+        },
+      }, 201);
+    } finally {
+      releaseUpload();
+    }
+  } catch (error) {
+    if (error?.message === 'payload_too_large') return json({ ok: false, error: 'payload_too_large' }, 413);
     return json({ ok: false, error: 'upload_failed' }, 500);
   }
 };
@@ -3474,16 +3761,17 @@ const handleQualityPhotoFile = async (request, env) => {
     const photo = (checkpoint.photos ?? []).find((item) => clean(item.fileKey, 500) === key);
     const object = await env.BUCKET.get(key);
     if (!object || !photo) return json({ ok: false, error: 'file_not_found' }, 404);
-    const headers = new Headers({
-      'Cache-Control': 'private, no-store',
-      'X-Content-Type-Options': 'nosniff',
-    });
-    object.writeHttpMetadata(headers);
-    if (object.httpEtag) headers.set('ETag', object.httpEtag);
+    let body = object.body;
+    let mimeType = '';
+    if (body?.tee) {
+      const [probe, responseBody] = body.tee();
+      body = responseBody;
+      mimeType = detectRasterImageType(await readStreamPrefix(probe));
+    }
     const filename = safeFileName(photo.fileName || photo.name || 'quality-photo');
-    const fallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'quality-photo';
-    headers.set('Content-Disposition', `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
-    return new Response(object.body, { headers });
+    const headers = protectedFileHeaders(filename, 'quality-photo', { inlineMime: mimeType });
+    if (object.httpEtag) headers.set('ETag', object.httpEtag);
+    return new Response(body, { headers });
   } catch {
     return json({ ok: false, error: 'file_unavailable' }, 500);
   }
@@ -3498,34 +3786,44 @@ const handleDocumentUpload = async (request, env) => {
     const snapshot = await readSnapshot(env.DB, projectId);
     const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
     if (!identity || identity.role === 'client') return json({ ok: false, error: 'project_access_denied' }, 403);
-    const form = await request.formData();
-    const file = form.get('file');
-    if (!file || typeof file === 'string' || typeof file.arrayBuffer !== 'function') return json({ ok: false, error: 'file_required' }, 422);
-    if (Number(file.size) <= 0 || Number(file.size) > MAX_FILE_BYTES) return json({ ok: false, error: 'invalid_file_size' }, 413);
-    if (!supportedDocument(file)) return json({ ok: false, error: 'unsupported_file' }, 415);
-    const name = safeFileName(file.name);
-    const key = `${projectId}/${crypto.randomUUID()}-${name}`;
-    const uploadedAt = new Date().toISOString();
-    await env.BUCKET.put(key, file.stream(), {
-      httpMetadata: { contentType: clean(file.type, 120) || 'application/octet-stream' },
-      customMetadata: {
-        projectId,
-        originalName: name,
-        uploadedBy: identity.id,
-        uploadedAt,
-      },
-    });
-    return json({
-      ok: true,
-      file: {
-        key,
-        name,
-        type: clean(file.type, 120) || 'application/octet-stream',
-        size: Number(file.size),
-        uploadedAt,
-      },
-    }, 201);
-  } catch {
+    const releaseUpload = claimUploadAdmission();
+    if (!releaseUpload) return json({ ok: false, error: 'upload_busy' }, 429);
+    try {
+      const form = await readFormDataLimited(request, MAX_FILE_BYTES + MAX_MULTIPART_OVERHEAD_BYTES);
+      const file = form.get('file');
+      if (!file || typeof file === 'string' || typeof file.arrayBuffer !== 'function') return json({ ok: false, error: 'file_required' }, 422);
+      if (Number(file.size) <= 0 || Number(file.size) > MAX_FILE_BYTES) return json({ ok: false, error: 'invalid_file_size' }, 413);
+      const prefix = await file.slice(0, 512).arrayBuffer();
+      const mimeType = documentMimeType(file, prefix);
+      if (!mimeType) return json({ ok: false, error: 'unsupported_file' }, 415);
+      const name = safeFileName(file.name);
+      const key = `${projectId}/${crypto.randomUUID()}-${name}`;
+      const uploadedAt = new Date().toISOString();
+      await env.BUCKET.put(key, file.stream(), {
+        maxBytes: MAX_FILE_BYTES,
+        httpMetadata: { contentType: mimeType },
+        customMetadata: {
+          projectId,
+          originalName: name,
+          uploadedBy: identity.id,
+          uploadedAt,
+        },
+      });
+      return json({
+        ok: true,
+        file: {
+          key,
+          name,
+          type: mimeType,
+          size: Number(file.size),
+          uploadedAt,
+        },
+      }, 201);
+    } finally {
+      releaseUpload();
+    }
+  } catch (error) {
+    if (error?.message === 'payload_too_large') return json({ ok: false, error: 'payload_too_large' }, 413);
     return json({ ok: false, error: 'upload_failed' }, 500);
   }
 };
@@ -3545,15 +3843,9 @@ const handleDocumentFile = async (request, env) => {
     if (!document || (identity.role === 'client' && !document.clientVisible)) return json({ ok: false, error: 'file_not_found' }, 404);
     const object = await env.BUCKET.get(key);
     if (!object) return json({ ok: false, error: 'file_not_found' }, 404);
-    const headers = new Headers({
-      'Cache-Control': 'private, no-store',
-      'X-Content-Type-Options': 'nosniff',
-    });
-    object.writeHttpMetadata(headers);
-    if (object.httpEtag) headers.set('ETag', object.httpEtag);
     const filename = safeFileName(document.fileName || document.name);
-    const fallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'document';
-    headers.set('Content-Disposition', `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    const headers = protectedFileHeaders(filename, 'document');
+    if (object.httpEtag) headers.set('ETag', object.httpEtag);
     return new Response(object.body, { headers });
   } catch {
     return json({ ok: false, error: 'file_unavailable' }, 500);
@@ -3576,15 +3868,9 @@ const handleFieldReportFile = async (request, env) => {
     const attachment = (report.attachments ?? []).find((item) => clean(item.key, 500) === key);
     const object = await env.BUCKET.get(key);
     if (!object || !attachment) return json({ ok: false, error: 'file_not_found' }, 404);
-    const headers = new Headers({
-      'Cache-Control': 'private, no-store',
-      'X-Content-Type-Options': 'nosniff',
-    });
-    object.writeHttpMetadata(headers);
-    if (object.httpEtag) headers.set('ETag', object.httpEtag);
     const filename = safeFileName(attachment.name);
-    const fallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'field-report';
-    headers.set('Content-Disposition', `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    const headers = protectedFileHeaders(filename, 'field-report');
+    if (object.httpEtag) headers.set('ETag', object.httpEtag);
     return new Response(object.body, { headers });
   } catch {
     return json({ ok: false, error: 'file_unavailable' }, 500);
@@ -3610,7 +3896,9 @@ const handleLeadInbox = async (request, env) => {
     } catch { return json({ ok: false, error: 'storage_error' }, 500); }
   }
   let payload;
-  try { payload = await request.json(); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }
+  try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
+    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
+  }
   const projectId = clean(payload?.projectId, 100);
   const name = clean(payload?.name, 120);
   const phone = clean(payload?.phone, 60);
@@ -3656,10 +3944,7 @@ export const claimPublicLeadRateLimit = async (db, clientAddress, now = Date.now
     WHERE window_start < ?
   `).bind(expiredBefore).run();
 
-  const globalAttempts = await incrementPublicLeadRateLimit(db, 'global', windowStart, updatedAt);
-  if (globalAttempts > PUBLIC_LEAD_GLOBAL_LIMIT) return { allowed: false, retryAfter, scope: 'global' };
-
-  const clientHash = await sha256(clean(clientAddress, 200) || 'unknown');
+  const clientHash = await sha256(normalizeClientAddress(clientAddress));
   const clientAttempts = await incrementPublicLeadRateLimit(db, `client:${clientHash}`, windowStart, updatedAt);
   if (clientAttempts > PUBLIC_LEAD_CLIENT_LIMIT) return { allowed: false, retryAfter, scope: 'client' };
   return { allowed: true, retryAfter, scope: '' };
@@ -3681,6 +3966,28 @@ const handlePublicLead = async (request, env) => {
   if (request.method !== 'POST') return publicLeadResponse({ ok: false, error: 'method_not_allowed' }, 405, origin);
   if (!env.DB) return publicLeadResponse({ ok: false, error: 'storage_unavailable' }, 503, origin);
 
+  let payload;
+  try {
+    payload = await readJsonBodyLimited(request, PUBLIC_LEAD_BODY_LIMIT);
+  } catch (error) {
+    return publicLeadResponse(
+      { ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' },
+      error?.message === 'payload_too_large' ? 413 : 400,
+      origin,
+    );
+  }
+
+  const name = clean(payload?.name, 120);
+  const phone = clean(payload?.phone, 60);
+  const email = clean(payload?.email, 240);
+  const source = clean(payload?.source, 40) || 'website';
+  const message = clean(payload?.message, 1000);
+  const trap = clean(payload?.company, 120);
+  if (trap) return publicLeadResponse({ ok: true }, 202, origin);
+  if (!name || phone.replace(/\D/g, '').length < 10 || (email && !/^\S+@\S+\.\S+$/.test(email))) {
+    return publicLeadResponse({ ok: false, error: 'invalid_lead' }, 422, origin);
+  }
+
   try {
     await ensureSchema(env.DB);
     const clientAddress = clean(
@@ -3698,20 +4005,6 @@ const handlePublicLead = async (request, env) => {
     }
   } catch {
     return publicLeadResponse({ ok: false, error: 'storage_error' }, 500, origin);
-  }
-
-  let payload;
-  try { payload = await request.json(); } catch { return publicLeadResponse({ ok: false, error: 'invalid_json' }, 400, origin); }
-
-  const name = clean(payload?.name, 120);
-  const phone = clean(payload?.phone, 60);
-  const email = clean(payload?.email, 240);
-  const source = clean(payload?.source, 40) || 'website';
-  const message = clean(payload?.message, 1000);
-  const trap = clean(payload?.company, 120);
-  if (trap) return publicLeadResponse({ ok: true }, 202, origin);
-  if (!name || phone.replace(/\D/g, '').length < 10 || (email && !/^\S+@\S+\.\S+$/.test(email))) {
-    return publicLeadResponse({ ok: false, error: 'invalid_lead' }, 422, origin);
   }
 
   try {
@@ -3760,7 +4053,9 @@ const handleDeveloperFeedback = async (request, env) => {
   let projectId = clean(url.searchParams.get('projectId'), 120);
   let payload = null;
   if (request.method === 'POST') {
-    try { payload = await request.json(); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }
+    try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
+      return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
+    }
     projectId = clean(payload?.projectId, 120);
   }
   if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
@@ -3804,6 +4099,7 @@ const handleApi = async (request, env, context) => {
   if (origin && origin !== url.origin) return json({ ok: false, error: 'forbidden_origin' }, 403);
 
   if (url.pathname === '/api/session' && request.method === 'GET') return handleSession(request, env);
+  if (url.pathname === '/api/access/users' && request.method === 'GET') return handleAccessUsers(request, env);
   if (url.pathname === '/api/state' && request.method === 'GET') return handleGetState(request, env);
   if (url.pathname === '/api/state' && request.method === 'PUT') return handlePutState(request, env, context);
   if (url.pathname === '/api/projects' && request.method === 'GET') return handleProjects(request, env);
@@ -3811,6 +4107,7 @@ const handleApi = async (request, env, context) => {
   if (url.pathname === '/api/integrations/test' && request.method === 'POST') return handleIntegrationTest(request, env);
   if (url.pathname === '/api/integrations/telegram/select' && request.method === 'POST') return handleTelegramChatSelect(request, env);
   if (url.pathname === '/api/integrations/telegram/link' && request.method === 'POST') return handleTelegramLink(request, env);
+  if (url.pathname === '/api/integrations/telegram/unlink' && request.method === 'POST') return handleTelegramUnlink(request, env);
   if (url.pathname === '/api/integrations/telegram/bootstrap' && request.method === 'POST') return handleTelegramBootstrap(request, env);
   if (url.pathname === '/api/integrations/telegram/update' && request.method === 'POST') return handleTelegramUpdate(request, env, context);
   if (url.pathname === '/api/camera/status' && request.method === 'GET') return handleCameraStatus(request, env);

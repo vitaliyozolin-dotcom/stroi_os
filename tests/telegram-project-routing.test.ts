@@ -294,6 +294,7 @@ test('task callback key includes project identity for duplicate task ids', () =>
 
 test('project routing and confirmation are isolated by Telegram user, chat and draft project', () => {
   const worker = readFileSync(new URL('../sites/worker.js', import.meta.url), 'utf8');
+  const bindings = readFileSync(new URL('../sites/telegram/bindings.js', import.meta.url), 'utf8');
   assert.match(worker, /PRIMARY KEY \(telegram_user_id, chat_id\)/);
   assert.match(worker, /saveTelegramProjectSelection\(env\.DB, telegramUserId, chatId, project\.id\)/);
   assert.match(worker, /bindingForTelegramProject\(env\.DB, telegramUserId, draft\.project_id\)/);
@@ -305,7 +306,9 @@ test('project routing and confirmation are isolated by Telegram user, chat and d
   assert.match(worker, /К какому проекту относится этот файл или отчёт/);
   assert.match(worker, /command\.name === 'expense'/);
   assert.match(worker, /message is not modified/);
-  assert.match(worker, /WHERE code_hash = \? AND used_at IS NULL AND expires_at >= \?/);
+  assert.match(bindings, /WHERE code_hash = \? AND used_at IS NULL AND expires_at >= \?/);
+  assert.match(bindings, /SET used_at = \?, claim_id = \?/);
+  assert.match(bindings, /export const unlinkTelegramBinding/);
   assert.match(worker, /pending: \{ type: 'command', command, sourceMessageId:/);
   assert.match(worker, /await env\.DB\.batch\(\[stateStatement, \.\.\.outboxStatements\]\)/);
   assert.match(worker, /WHERE project_id = \? AND revision = \? AND updated_at = \? AND updated_by = \?/);

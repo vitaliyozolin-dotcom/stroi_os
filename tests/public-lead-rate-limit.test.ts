@@ -45,20 +45,32 @@ test('public leads are limited per trusted client without storing its raw addres
     scope: 'client',
   });
   assert.equal([...db.rows.keys()].some((key) => key.includes('203.0.113.7')), false);
+  const rowCountAtBlock = db.rows.size;
+  for (let attempt = 0; attempt < 1_000; attempt += 1) {
+    assert.equal((await claimPublicLeadRateLimit(db, '203.0.113.7', now)).allowed, false);
+  }
+  assert.equal(db.rows.size, rowCountAtBlock);
+  assert.equal([...db.rows.keys()].some((key) => key.startsWith('global|')), false);
   assert.equal((await claimPublicLeadRateLimit(db, '203.0.113.8', now)).allowed, true);
 });
 
-test('public leads have a global ceiling and reset in the next time window', async () => {
+test('one abusive client cannot consume a global lead quota and its window resets', async () => {
   const db = new RateLimitDb();
   const now = Date.parse('2026-08-14T12:00:10.000Z');
 
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    assert.equal((await claimPublicLeadRateLimit(db, `198.51.100.${attempt}`, now)).allowed, true);
+  for (let attempt = 0; attempt < 1_000; attempt += 1) {
+    await claimPublicLeadRateLimit(db, '198.51.100.10', now);
   }
-  assert.deepEqual(await claimPublicLeadRateLimit(db, '192.0.2.1', now), {
-    allowed: false,
-    retryAfter: 50,
-    scope: 'global',
-  });
-  assert.equal((await claimPublicLeadRateLimit(db, '192.0.2.1', now + 60_000)).allowed, true);
+  assert.equal((await claimPublicLeadRateLimit(db, '192.0.2.1', now)).allowed, true);
+  assert.equal((await claimPublicLeadRateLimit(db, '198.51.100.10', now + 60_000)).allowed, true);
+});
+
+test('public lead IPv6 addresses share a client limit inside one /64 only', async () => {
+  const db = new RateLimitDb();
+  const now = Date.parse('2026-08-14T12:00:10.000Z');
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    assert.equal((await claimPublicLeadRateLimit(db, `2001:db8:1:2::${attempt + 1}`, now)).allowed, true);
+  }
+  assert.equal((await claimPublicLeadRateLimit(db, '2001:db8:1:2:ffff::9', now)).allowed, false);
+  assert.equal((await claimPublicLeadRateLimit(db, '2001:db8:1:3::1', now)).allowed, true);
 });
