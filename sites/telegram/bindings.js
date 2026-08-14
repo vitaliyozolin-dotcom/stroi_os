@@ -1,3 +1,5 @@
+const changes = (result) => Number(result?.meta?.changes ?? result?.changes ?? 0);
+
 export const bindingForTelegramProject = async (db, telegramUserId, projectId, ensureSchema) => {
   await ensureSchema(db);
   return db.prepare(`
@@ -50,4 +52,100 @@ export const saveTelegramProjectSelection = async (db, telegramUserId, chatId, p
       project_id = excluded.project_id,
       updated_at = excluded.updated_at
   `).bind(telegramUserId, chatId, projectId, now).run();
+};
+
+export const claimTelegramBinding = async (db, {
+  codeHash,
+  claimId,
+  now,
+  telegramUserId,
+  projectId,
+  systemUserId,
+  privateChatId,
+  username,
+  displayName,
+  role,
+}) => {
+  const results = await db.batch([
+    db.prepare(`
+      UPDATE telegram_link_codes
+      SET used_at = ?, claim_id = ?
+      WHERE code_hash = ? AND used_at IS NULL AND expires_at >= ?
+    `).bind(now, claimId, codeHash, now),
+    db.prepare(`
+      DELETE FROM telegram_user_chat_projects
+      WHERE project_id = ?
+        AND telegram_user_id IN (
+          SELECT telegram_user_id FROM telegram_bindings
+          WHERE project_id = ? AND system_user_id = ?
+        )
+        AND EXISTS (
+          SELECT 1 FROM telegram_link_codes WHERE code_hash = ? AND claim_id = ?
+        )
+    `).bind(projectId, projectId, systemUserId, codeHash, claimId),
+    db.prepare(`
+      DELETE FROM telegram_bindings
+      WHERE project_id = ? AND system_user_id = ?
+        AND EXISTS (
+          SELECT 1 FROM telegram_link_codes WHERE code_hash = ? AND claim_id = ?
+        )
+    `).bind(projectId, systemUserId, codeHash, claimId),
+    db.prepare(`
+      INSERT INTO telegram_bindings (
+        telegram_user_id, project_id, system_user_id, private_chat_id,
+        username, display_name, role, bound_at, updated_at
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE EXISTS (
+        SELECT 1 FROM telegram_link_codes WHERE code_hash = ? AND claim_id = ?
+      )
+      ON CONFLICT(telegram_user_id, project_id) DO UPDATE SET
+        system_user_id = excluded.system_user_id,
+        private_chat_id = excluded.private_chat_id,
+        username = excluded.username,
+        display_name = excluded.display_name,
+        role = excluded.role,
+        bound_at = excluded.bound_at,
+        updated_at = excluded.updated_at
+    `).bind(
+      telegramUserId, projectId, systemUserId, privateChatId,
+      username, displayName, role, now, now, codeHash, claimId,
+    ),
+    db.prepare(`
+      INSERT INTO telegram_user_chat_projects (telegram_user_id, chat_id, project_id, updated_at)
+      SELECT ?, ?, ?, ?
+      WHERE EXISTS (
+        SELECT 1 FROM telegram_link_codes WHERE code_hash = ? AND claim_id = ?
+      )
+      ON CONFLICT(telegram_user_id, chat_id) DO UPDATE SET
+        project_id = excluded.project_id,
+        updated_at = excluded.updated_at
+    `).bind(telegramUserId, privateChatId, projectId, now, codeHash, claimId),
+  ]);
+  return changes(results?.[0]) === 1 && changes(results?.[3]) === 1;
+};
+
+export const unlinkTelegramBinding = async (db, projectId, systemUserId) => {
+  const existing = await db.prepare(`
+    SELECT telegram_user_id,private_chat_id
+    FROM telegram_bindings WHERE project_id = ? AND system_user_id = ?
+  `).bind(projectId, systemUserId).all();
+  const results = await db.batch([
+    db.prepare(`
+      DELETE FROM telegram_user_chat_projects
+      WHERE project_id = ?
+        AND telegram_user_id IN (
+          SELECT telegram_user_id FROM telegram_bindings
+          WHERE project_id = ? AND system_user_id = ?
+        )
+    `).bind(projectId, projectId, systemUserId),
+    db.prepare(`
+      DELETE FROM telegram_link_codes
+      WHERE project_id = ? AND system_user_id = ? AND used_at IS NULL
+    `).bind(projectId, systemUserId),
+    db.prepare(`
+      DELETE FROM telegram_bindings WHERE project_id = ? AND system_user_id = ?
+    `).bind(projectId, systemUserId),
+  ]);
+  return { removed: changes(results?.[2]), bindings: existing?.results ?? [] };
 };

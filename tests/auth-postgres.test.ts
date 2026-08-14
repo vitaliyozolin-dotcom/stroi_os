@@ -8,6 +8,8 @@ import test from 'node:test';
 import { FileBucket } from '../server/file-bucket.js';
 import { PostgresDatabase } from '../server/postgres.js';
 import { revokeRestoredAccess } from '../server/revoke-restored-access.js';
+import { claimTelegramBinding, unlinkTelegramBinding } from '../sites/telegram/bindings.js';
+import { projectForBinding } from '../sites/worker.js';
 import {
   ACCESS_SCHEMA_VERSION,
   AccessError,
@@ -50,6 +52,7 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
   const pool = database.pool;
   try {
     await pool.query('DROP TABLE IF EXISTS auth_tokens,auth_sessions,auth_memberships,auth_login_limits,auth_audit,auth_users CASCADE');
+    await pool.query('DROP TABLE IF EXISTS telegram_user_chat_projects,telegram_bindings,telegram_link_codes CASCADE');
     await pool.query('DROP TABLE IF EXISTS audit_log,project_state,system_meta CASCADE');
     await pool.query(`CREATE TABLE system_meta (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL)`);
     await pool.query(`
@@ -62,6 +65,25 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
       CREATE TABLE audit_log (
         id TEXT PRIMARY KEY,project_id TEXT NOT NULL,revision INTEGER NOT NULL,created_at TEXT NOT NULL,
         actor TEXT NOT NULL,role TEXT NOT NULL,action TEXT NOT NULL,summary TEXT NOT NULL,state_bytes INTEGER NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE telegram_link_codes (
+        code_hash TEXT PRIMARY KEY,project_id TEXT NOT NULL,system_user_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,expires_at TEXT NOT NULL,used_at TEXT,claim_id TEXT
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE telegram_bindings (
+        telegram_user_id TEXT NOT NULL,project_id TEXT NOT NULL,system_user_id TEXT NOT NULL,
+        private_chat_id TEXT NOT NULL,username TEXT,display_name TEXT NOT NULL,role TEXT NOT NULL,
+        bound_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY (telegram_user_id,project_id)
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE telegram_user_chat_projects (
+        telegram_user_id TEXT NOT NULL,chat_id TEXT NOT NULL,project_id TEXT NOT NULL,updated_at TEXT NOT NULL,
+        PRIMARY KEY (telegram_user_id,chat_id)
       )
     `);
     const now = new Date().toISOString();
@@ -321,6 +343,50 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
     );
     await pool.query('DELETE FROM auth_login_limits');
 
+    let distributedAccountChecks = 0;
+    const accountCooldownService = new UserAccessService({
+      database,
+      ownerEmail: 'owner@example.test', ownerName: 'Владелец', ownerUsername: 'owner',
+      ownerPassword: 'owner-password-strong-123', publicUrl: 'https://stroios.example.test',
+      maxConcurrentPasswordJobs: 20,
+      passwordVerifier: async (candidate: string, encoded: string) => {
+        distributedAccountChecks += 1;
+        return verifyAccessPassword(candidate, encoded);
+      },
+    });
+    await accountCooldownService.initialize();
+    for (let index = 0; index < 5; index += 1) {
+      await assert.rejects(
+        () => accountCooldownService.authenticate('ivan@example.test', 'distributed-wrong-password', { ip: `198.51.101.${index + 1}` }),
+        (error: AccessError) => error.code === 'invalid_credentials',
+      );
+    }
+    await assert.rejects(
+      () => accountCooldownService.authenticate('ivan@example.test', 'distributed-wrong-password', { ip: '198.51.101.6' }),
+      (error: AccessError) => error.code === 'rate_limited' && error.retryAfter >= 1,
+    );
+    assert.equal(distributedAccountChecks, 6);
+    await assert.rejects(
+      () => accountCooldownService.authenticate('ivan@example.test', 'distributed-wrong-password', { ip: '198.51.101.7' }),
+      (error: AccessError) => error.code === 'rate_limited',
+    );
+    assert.equal(distributedAccountChecks, 6, 'account cooldown rejects rotating prefixes before another KDF');
+    const ivanRateKey = accountCooldownService.loginRateKey('ivan@example.test');
+    await pool.query("UPDATE auth_login_limits SET blocked_until='2000-01-01T00:00:00.000Z' WHERE key_hash=$1", [ivanRateKey]);
+    await assert.rejects(
+      () => accountCooldownService.authenticate('ivan@example.test', 'distributed-wrong-password', { ip: '198.51.101.8' }),
+      (error: AccessError) => error.code === 'rate_limited',
+    );
+    assert.equal(distributedAccountChecks, 7);
+    await pool.query("UPDATE auth_login_limits SET blocked_until='2000-01-01T00:00:00.000Z' WHERE key_hash=$1", [ivanRateKey]);
+    const cooldownRecovery = await accountCooldownService.authenticate(
+      'ivan@example.test', 'a-very-strong-password-123', { ip: '198.51.101.9' },
+    );
+    assert.equal((await accountCooldownService.fromRequest(sessionRequest(cooldownRecovery.token)))?.email, 'ivan@example.test');
+    assert.equal(distributedAccountChecks, 8);
+    assert.equal((await pool.query('SELECT COUNT(*)::int AS count FROM auth_login_limits WHERE key_hash=$1', [ivanRateKey])).rows[0].count, 0);
+    await pool.query('DELETE FROM auth_login_limits');
+
     const collisionService = new UserAccessService({
       database,
       ownerEmail: 'owner@example.test', ownerName: 'Владелец', ownerUsername: 'owner',
@@ -414,11 +480,36 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
     assert.equal(await service.fromRequest(sessionRequest(beforeReset.token)), null);
     assert.equal((await service.fromRequest(sessionRequest(afterReset.token)))?.email, 'ivan@example.test');
 
+    const telegramClaimedAt = new Date().toISOString();
+    await pool.query(`
+      INSERT INTO telegram_link_codes(code_hash,project_id,system_user_id,created_at,expires_at,used_at,claim_id)
+      VALUES ('telegram-claim-test','project-a','user-1',$1,$2,NULL,NULL)
+    `, [telegramClaimedAt, new Date(Date.now() + 60_000).toISOString()]);
+    assert.equal(await claimTelegramBinding(database, {
+      codeHash: 'telegram-claim-test', claimId: 'claim-test-id', now: telegramClaimedAt,
+      telegramUserId: '777', projectId: 'project-a', systemUserId: 'user-1', privateChatId: '777',
+      username: 'ivan_telegram', displayName: 'Иван Telegram', role: 'foreman',
+    }), true);
+    assert.equal((await pool.query("SELECT used_at FROM telegram_link_codes WHERE code_hash='telegram-claim-test'")).rows[0].used_at, telegramClaimedAt);
+    assert.equal((await service.listProjectAccess('project-a')).find((item) => item.userId === 'user-1')?.telegram.status, 'connected');
+
     await service.setBlocked({ projectId: 'project-a', userId: 'user-1', actorEmail: 'owner@example.test', blocked: true });
     assert.equal(await service.fromRequest(sessionRequest(afterReset.token)), null);
     assert.equal((await pool.query("SELECT status FROM auth_memberships WHERE project_id='project-a'")).rows[0].status, 'disabled');
     const blockedState = JSON.parse((await pool.query("SELECT state_json FROM project_state WHERE project_id='project-a'")).rows[0].state_json);
-    assert.equal(blockedState.settings.users[0].status, 'disabled');
+    assert.equal(blockedState.settings.users[0].status, 'active');
+    const binding = (await pool.query("SELECT * FROM telegram_bindings WHERE project_id='project-a' AND system_user_id='user-1'")).rows[0];
+    assert.equal((await projectForBinding({ DB: database }, binding)).user.id, 'user-1');
+    const blockedAccess = (await service.listProjectAccess('project-a')).find((item) => item.userId === 'user-1');
+    assert.equal(blockedAccess?.web.status, 'blocked');
+    assert.equal(blockedAccess?.telegram.status, 'connected');
+    await assert.rejects(
+      () => service.issueToken({ projectId: 'project-a', userId: 'user-1', actorEmail: 'owner@example.test', purpose: 'reset' }),
+      (error: AccessError) => error.code === 'user_disabled',
+    );
+    const unlinked = await unlinkTelegramBinding(database, 'project-a', 'user-1');
+    assert.equal(unlinked.removed, 1);
+    assert.equal((await service.listProjectAccess('project-a')).find((item) => item.userId === 'user-1')?.telegram.status, 'not_connected');
 
     await service.setBlocked({ projectId: 'project-a', userId: 'user-1', actorEmail: 'owner@example.test', blocked: false });
     const existing = await service.issueToken({ projectId: 'project-b', userId: 'user-1', actorEmail: 'owner@example.test' });

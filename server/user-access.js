@@ -22,6 +22,8 @@ const SCRYPT_MAXMEM = 64 * 1024 * 1024;
 const LOGIN_WINDOW_MS = 15 * 60_000;
 const LOGIN_BLOCK_MS = 15 * 60_000;
 const LOGIN_LIMIT = 5;
+const ACCOUNT_BACKOFF_BASE_MS = 2_000;
+const ACCOUNT_BACKOFF_MAX_MS = 30_000;
 const LOGIN_LIMIT_RETENTION_MS = 24 * 60 * 60_000;
 const UNKNOWN_LOGIN_IP_BUCKETS = 4_096;
 const MAX_CONCURRENT_PASSWORD_JOBS = 4;
@@ -77,11 +79,12 @@ export const verifyAccessPassword = async (password, encoded) => {
 };
 
 export class AccessError extends Error {
-  constructor(code, status = 400) {
+  constructor(code, status = 400, retryAfter = 0) {
     super(code);
     this.name = 'AccessError';
     this.code = code;
     this.status = status;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -225,6 +228,7 @@ export class UserAccessService {
         INSERT INTO system_meta (key,value,updated_at) VALUES ('owner_auth_hash',$1,$2)
         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=EXCLUDED.updated_at
       `, [ownerAuthHash, now]);
+      await this.clearLoginLimits([this.loginRateKey(this.ownerEmail)]);
     }
     this.dummyPasswordHash = await hashAccessPassword(randomBytes(24).toString('base64url'));
   }
@@ -388,6 +392,41 @@ export class UserAccessService {
     });
   }
 
+  async reserveAccountAttempt(key, now = new Date()) {
+    const nowIso = now.toISOString();
+    const windowStart = new Date(now.getTime() - LOGIN_WINDOW_MS).toISOString();
+    return this.transaction(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
+      const current = (await client.query(
+        'SELECT attempts,window_started_at,blocked_until FROM auth_login_limits WHERE key_hash=$1 FOR UPDATE',
+        [key],
+      )).rows[0];
+      if (current?.blocked_until && current.blocked_until > nowIso) {
+        return {
+          blocked: true,
+          retryAfter: Math.max(1, Math.ceil((new Date(current.blocked_until).getTime() - now.getTime()) / 1_000)),
+          cooling: true,
+        };
+      }
+
+      const attempts = !current || current.window_started_at < windowStart ? 1 : Number(current.attempts) + 1;
+      const backoffMs = attempts > LOGIN_LIMIT
+        ? Math.min(ACCOUNT_BACKOFF_MAX_MS, ACCOUNT_BACKOFF_BASE_MS * (2 ** Math.min(8, attempts - LOGIN_LIMIT - 1)))
+        : 0;
+      const blockedUntil = backoffMs ? new Date(now.getTime() + backoffMs).toISOString() : null;
+      await client.query(`
+        INSERT INTO auth_login_limits (key_hash,attempts,window_started_at,blocked_until,updated_at)
+        VALUES ($1,$2,$3,$4,$5)
+        ON CONFLICT(key_hash) DO UPDATE SET
+          attempts=EXCLUDED.attempts,
+          window_started_at=EXCLUDED.window_started_at,
+          blocked_until=EXCLUDED.blocked_until,
+          updated_at=EXCLUDED.updated_at
+      `, [key, attempts, !current || current.window_started_at < windowStart ? nowIso : current.window_started_at, blockedUntil, nowIso]);
+      return { blocked: false, retryAfter: backoffMs ? Math.ceil(backoffMs / 1_000) : 0, cooling: backoffMs > 0 };
+    });
+  }
+
   async releaseSuccessfulLogin(keys, client = this.pool) {
     const now = new Date().toISOString();
     await client.query(`
@@ -457,54 +496,60 @@ export class UserAccessService {
         ? this.loginRateKey(user.email_normalized)
         : '';
     const keys = [ipKey];
-    if (await this.reserveLoginAttempt(keys, now)) throw new AccessError('rate_limited', 429);
-    if (reservedOwner) {
-      const valid = await this.runReservedPasswordWork(keys, async () => {
+    return this.runPasswordWork(async () => {
+      if (await this.reserveLoginAttempt(keys, now)) throw new AccessError('rate_limited', 429, Math.ceil(LOGIN_BLOCK_MS / 1_000));
+      const accountClaim = accountRateKey ? await this.reserveAccountAttempt(accountRateKey, now) : null;
+      if (accountClaim?.blocked) {
+        await this.releaseSuccessfulLogin(keys);
+        throw new AccessError('rate_limited', 429, accountClaim.retryAfter);
+      }
+
+      if (reservedOwner) {
         await this.passwordVerifier(password, this.dummyPasswordHash);
-        return (safeEqual(login, this.ownerUsername) || safeEqual(normalized, this.ownerEmail))
+        const valid = (safeEqual(login, this.ownerUsername) || safeEqual(normalized, this.ownerEmail))
           && safeEqual(password, this.ownerPassword);
-      });
-      if (valid) {
-        const identity = { accountId: null, email: this.ownerEmail, name: this.ownerName, isOwner: true };
-        session = await this.transaction(async (client) => {
-          await this.releaseSuccessfulLogin(keys, client);
-          await this.clearLoginLimits(accountRateKey ? [accountRateKey] : [], client);
-          return this.createSession(identity, context, client);
-        });
+        if (valid) {
+          const identity = { accountId: null, email: this.ownerEmail, name: this.ownerName, isOwner: true };
+          session = await this.transaction(async (client) => {
+            await this.releaseSuccessfulLogin(keys, client);
+            await this.clearLoginLimits(accountRateKey ? [accountRateKey] : [], client);
+            return this.createSession(identity, context, client);
+          });
+        }
+      } else {
+        const observedHash = user?.password_hash || null;
+        const valid = await this.passwordVerifier(password, observedHash || this.dummyPasswordHash);
+        if (valid && observedHash) {
+          session = await this.transaction(async (client) => {
+            const locked = (await client.query(`
+              SELECT id,email_normalized,name,password_hash,status FROM auth_users WHERE id=$1 FOR UPDATE
+            `, [user.id])).rows[0];
+            if (!locked || locked.status !== 'active' || locked.password_hash !== observedHash) return null;
+            const membership = await client.query(
+              "SELECT 1 FROM auth_memberships WHERE auth_user_id=$1 AND status='active' LIMIT 1",
+              [locked.id],
+            );
+            if (!membership.rowCount) return null;
+            const identity = { accountId: locked.id, email: locked.email_normalized, name: locked.name, isOwner: false };
+            await client.query('UPDATE auth_users SET last_login_at=$1,updated_at=$1 WHERE id=$2', [new Date().toISOString(), locked.id]);
+            await this.releaseSuccessfulLogin(keys, client);
+            await this.clearLoginLimits(accountRateKey ? [accountRateKey] : [], client);
+            return this.createSession(identity, context, client);
+          });
+        }
       }
-    } else {
-      const observedHash = user?.password_hash || null;
-      const valid = await this.runReservedPasswordWork(keys, () => this.passwordVerifier(password, observedHash || this.dummyPasswordHash));
-      if (valid && observedHash) {
-        session = await this.transaction(async (client) => {
-          const locked = (await client.query(`
-            SELECT id,email_normalized,name,password_hash,status FROM auth_users WHERE id=$1 FOR UPDATE
-          `, [user.id])).rows[0];
-          if (!locked || locked.status !== 'active' || locked.password_hash !== observedHash) return null;
-          const membership = await client.query(
-            "SELECT 1 FROM auth_memberships WHERE auth_user_id=$1 AND status='active' LIMIT 1",
-            [locked.id],
-          );
-          if (!membership.rowCount) return null;
-          const identity = { accountId: locked.id, email: locked.email_normalized, name: locked.name, isOwner: false };
-          await client.query('UPDATE auth_users SET last_login_at=$1,updated_at=$1 WHERE id=$2', [new Date().toISOString(), locked.id]);
-          await this.releaseSuccessfulLogin(keys, client);
-          await this.clearLoginLimits(accountRateKey ? [accountRateKey] : [], client);
-          return this.createSession(identity, context, client);
-        });
-      }
-    }
 
-    if (!session) {
-      if (accountRateKey) await this.reserveLoginAttempt([accountRateKey], new Date());
-      if (reservedOwner || user) {
-        await this.audit(this.pool, { actorEmail: normalized, targetUserId: user?.id, action: 'login_failed', metadata: { ipHash: ipKey } });
+      if (!session) {
+        if (reservedOwner || user) {
+          await this.audit(this.pool, { actorEmail: normalized, targetUserId: user?.id, action: 'login_failed', metadata: { ipHash: ipKey } });
+        }
+        if (accountClaim?.cooling) throw new AccessError('rate_limited', 429, accountClaim.retryAfter);
+        throw new AccessError('invalid_credentials', 401);
       }
-      throw new AccessError('invalid_credentials', 401);
-    }
 
-    await this.audit(this.pool, { actorEmail: session.identity.email, targetUserId: session.identity.accountId, action: 'login_succeeded' });
-    return session;
+      await this.audit(this.pool, { actorEmail: session.identity.email, targetUserId: session.identity.accountId, action: 'login_succeeded' });
+      return session;
+    });
   }
 
   async loadProject(client, projectId, lock = false) {
@@ -641,11 +686,12 @@ export class UserAccessService {
           affectedAccountIds.add(targetAccount.id);
         }
 
-        const disabled = current.status === 'disabled' || membership.status === 'disabled';
+        const profileDisabled = current.status === 'disabled';
+        const webDisabled = membership.status === 'disabled';
         const targetAccountStatus = emailChanged ? targetAccount.status : membership.account_status;
         const accountActive = Boolean(targetAccount.password_hash && targetAccountStatus === 'active');
-        const membershipStatus = disabled ? 'disabled' : accountActive ? 'active' : 'pending';
-        nextStatus = disabled ? 'disabled' : accountActive ? 'active' : 'invited';
+        const membershipStatus = profileDisabled || webDisabled ? 'disabled' : accountActive ? 'active' : 'pending';
+        nextStatus = profileDisabled ? 'disabled' : accountActive ? 'active' : 'invited';
         await client.query(`
           UPDATE auth_memberships
           SET auth_user_id=$1,role=$2,status=$3,updated_at=$4
@@ -754,6 +800,11 @@ export class UserAccessService {
         'SELECT id,password_hash,status,activated_at FROM auth_users WHERE email_normalized=$1 FOR UPDATE',
         [user.email],
       )).rows[0];
+      const currentMembership = (await client.query(
+        'SELECT status FROM auth_memberships WHERE project_id=$1 AND system_user_id=$2 FOR UPDATE',
+        [projectId, user.id],
+      )).rows[0];
+      if (currentMembership?.status === 'disabled') throw new AccessError('user_disabled', 409);
       if (purpose === 'reset' && (!existingAccount?.password_hash || existingAccount.status !== 'active')) {
         throw new AccessError('access_not_active', 409);
       }
@@ -824,7 +875,7 @@ export class UserAccessService {
       WHERE t.token_hash=$1 LIMIT 1
     `, [hashAccessToken(rawToken)]);
     const row = result.rows[0];
-    if (!row || row.used_at || row.revoked_at || row.expires_at <= new Date().toISOString()) throw new AccessError('invite_invalid', 410);
+    if (!row || row.used_at || row.revoked_at || row.membership_status === 'disabled' || row.expires_at <= new Date().toISOString()) throw new AccessError('invite_invalid', 410);
     const project = await this.loadProject(this.pool, row.project_id);
     const user = this.validateProjectUser(project.state, row.system_user_id);
     if (user.status === 'disabled' || user.email !== normalizeAccessEmail(row.email_normalized)) throw new AccessError('invite_invalid', 410);
@@ -865,7 +916,7 @@ export class UserAccessService {
         WHERE t.token_hash=$1 AND t.auth_user_id=$2 FOR UPDATE OF t,m
       `, [hashAccessToken(rawToken), inspected.accountId]);
       const token = tokenResult.rows[0];
-      if (!account || !token || token.project_id !== inspected.projectId || token.used_at || token.revoked_at || token.expires_at <= now) throw new AccessError('invite_invalid', 410);
+      if (!account || !token || token.membership_status === 'disabled' || token.project_id !== inspected.projectId || token.used_at || token.revoked_at || token.expires_at <= now) throw new AccessError('invite_invalid', 410);
       const user = this.validateProjectUser(project.state, token.system_user_id);
       if (user.status === 'disabled' || user.email !== normalizeAccessEmail(account.email_normalized)) throw new AccessError('invite_invalid', 410);
 
@@ -880,6 +931,7 @@ export class UserAccessService {
       `, [now, token.auth_user_id, token.token_hash]);
       await client.query('UPDATE auth_tokens SET used_at=$1 WHERE token_hash=$2 AND used_at IS NULL', [now, token.token_hash]);
       await client.query('UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,$1) WHERE auth_user_id=$2', [now, token.auth_user_id]);
+      await this.clearLoginLimits([this.loginRateKey(user.email)], client);
 
       const nextState = structuredClone(project.state);
       nextState.settings.users = nextState.settings.users.map((item) => item.id === user.id ? {
@@ -923,21 +975,30 @@ export class UserAccessService {
 
   async listProjectAccess(projectId) {
     const project = await this.loadProject(this.pool, clean(projectId, 100));
-    const result = await this.pool.query(`
-      SELECT m.system_user_id,m.status AS membership_status,u.status AS account_status,u.email_normalized,
-        u.password_hash,u.activated_at,u.last_login_at,
-        t.created_at AS invited_at,t.expires_at,t.used_at,t.revoked_at,t.purpose
-      FROM auth_memberships m JOIN auth_users u ON u.id=m.auth_user_id
-      LEFT JOIN LATERAL (
-        SELECT created_at,expires_at,used_at,revoked_at,purpose FROM auth_tokens
-        WHERE membership_id=m.id ORDER BY created_at DESC LIMIT 1
-      ) t ON TRUE
-      WHERE m.project_id=$1
-    `, [projectId]);
+    const [result, telegramResult] = await Promise.all([
+      this.pool.query(`
+        SELECT m.system_user_id,m.status AS membership_status,u.status AS account_status,u.email_normalized,
+          u.password_hash,u.activated_at,u.last_login_at,
+          t.created_at AS invited_at,t.expires_at,t.used_at,t.revoked_at,t.purpose
+        FROM auth_memberships m JOIN auth_users u ON u.id=m.auth_user_id
+        LEFT JOIN LATERAL (
+          SELECT created_at,expires_at,used_at,revoked_at,purpose FROM auth_tokens
+          WHERE membership_id=m.id ORDER BY created_at DESC LIMIT 1
+        ) t ON TRUE
+        WHERE m.project_id=$1
+      `, [projectId]),
+      this.pool.query(`
+        SELECT DISTINCT ON (system_user_id) system_user_id,bound_at,username
+        FROM telegram_bindings WHERE project_id=$1
+        ORDER BY system_user_id,updated_at DESC
+      `, [projectId]),
+    ]);
     const byId = new Map(result.rows.map((row) => [row.system_user_id, row]));
+    const telegramById = new Map(telegramResult.rows.map((row) => [row.system_user_id, row]));
     const now = new Date().toISOString();
     return (project.state.settings?.users ?? []).map((user) => {
       const row = byId.get(user.id);
+      const telegram = telegramById.get(user.id);
       const profileMatchesAccount = normalizeAccessEmail(user.email) === normalizeAccessEmail(row?.email_normalized);
       let status = 'not_issued';
       if (user.status === 'disabled' || row?.membership_status === 'disabled') status = 'blocked';
@@ -952,9 +1013,9 @@ export class UserAccessService {
           lastLoginAt: row?.last_login_at || undefined,
         },
         telegram: {
-          status: user.telegramBoundAt ? 'connected' : 'not_connected',
-          boundAt: user.telegramBoundAt || undefined,
-          username: clean(user.telegram, 120) || undefined,
+          status: telegram ? 'connected' : 'not_connected',
+          boundAt: telegram?.bound_at || undefined,
+          username: clean(telegram?.username, 120) || undefined,
         },
       };
     });
@@ -977,15 +1038,17 @@ export class UserAccessService {
       }
       const nextState = structuredClone(project.state);
       const activeAfter = !blocked && Boolean(membership?.password_hash && membership?.account_status === 'active');
-      nextState.settings.users = nextState.settings.users.map((item) => item.id === user.id ? {
-        ...item, status: blocked ? 'disabled' : activeAfter ? 'active' : 'invited',
-      } : item);
+      if (!blocked && user.status === 'disabled') {
+        nextState.settings.users = nextState.settings.users.map((item) => item.id === user.id ? {
+          ...item, status: activeAfter ? 'active' : 'invited',
+        } : item);
+      }
       await this.saveProjectAccessMutation(client, projectId, project.revision, nextState, {
         actor: actorEmail, action: blocked ? 'access.block' : 'access.unblock',
         summary: blocked ? `Веб-доступ заблокирован: ${user.name}` : `Веб-доступ разблокирован: ${user.name}`,
       });
       await this.audit(client, { actorEmail, targetUserId: membership?.auth_user_id, projectId, action: blocked ? 'access_blocked' : 'access_unblocked', metadata: { systemUserId: user.id } });
-      return { status: blocked ? 'blocked' : activeAfter ? 'active' : 'not_issued' };
+      return { status: membership ? blocked ? 'blocked' : activeAfter ? 'active' : 'not_issued' : 'not_issued' };
     });
   }
 

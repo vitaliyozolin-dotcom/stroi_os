@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-test('login reset atomically preserves a private dotenv under a permissive caller umask', async () => {
+const bashAvailable = spawnSync('bash', ['--version'], { stdio: 'ignore' }).status === 0;
+
+test('login reset atomically preserves a private dotenv under a permissive caller umask', { skip: !bashAvailable }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'stroios-login-reset-'));
   const dotenv = join(root, '.env');
   const script = fileURLToPath(new URL('../scripts/reset-login.sh', import.meta.url));
@@ -34,7 +36,7 @@ test('login reset atomically preserves a private dotenv under a permissive calle
   }
 });
 
-test('a successful mocked login rotation leaves no secret backup in the worktree or process arguments', async () => {
+test('a successful mocked login rotation leaves no secret backup in the worktree or process arguments', { skip: !bashAvailable }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'stroios-login-reset-full-'));
   const sourceScript = fileURLToPath(new URL('../scripts/reset-login.sh', import.meta.url));
   const scriptDirectory = join(root, 'scripts');

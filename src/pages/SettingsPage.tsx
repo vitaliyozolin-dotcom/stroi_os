@@ -268,6 +268,10 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
       ?? { status: user.status === 'disabled' ? 'blocked' : 'not_issued' };
   };
 
+  const telegramAccessFor = (user: SystemUser): AccessUser['telegram'] => accessSnapshot?.users
+    .find((item) => item.userId === user.id)?.telegram
+    ?? { status: 'not_connected' };
+
   const issueWebLink = async (user: SystemUser, reset = false, retryOnce = false) => {
     setAccessBusy({ userId: user.id, action: reset ? 'reset' : 'invite' });
     setAccessErrors((current) => ({ ...current, [user.id]: '' }));
@@ -399,6 +403,27 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     }
   };
 
+  const disconnectTelegram = async (user: SystemUser) => {
+    if (!window.confirm(`Отключить Telegram пользователя ${user.name}? Веб-доступ и пароль не изменятся.`)) return;
+    setAccessBusy({ userId: user.id, action: 'telegram-unlink' });
+    setIntegrationMessage(`Отключаем Telegram пользователя ${user.name}…`);
+    try {
+      const response = await fetch('/api/integrations/telegram/unlink', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: state.project.id, userId: user.id }),
+      });
+      const body = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !body.ok) throw new Error(body.error || 'telegram_unlink_failed');
+      setIntegrationMessage(`Telegram пользователя ${user.name} отключён. Веб-доступ сохранён.`);
+      await refreshAccess();
+    } catch {
+      setIntegrationMessage('Не удалось отключить Telegram. Обновите страницу и повторите.');
+    } finally {
+      setAccessBusy(null);
+    }
+  };
+
   const telegramCommand = integrationStatus?.telegramBotUsername ? `/start@${integrationStatus.telegramBotUsername}` : '/start';
   const telegramHeadquartersReady = Boolean(integrationStatus?.telegramCommon && integrationStatus?.telegramInbound);
   const telegramStatusLabel = integrationStatus?.telegramCommon
@@ -445,6 +470,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
                   <div className="user-list__head"><span>Пользователь</span><span>Роль</span><span>Веб-доступ</span><span>Telegram</span><span>Последний вход</span><span>Действия</span></div>
                   {state.settings.users.map((user) => {
                     const web = webAccessFor(user);
+                    const telegram = telegramAccessFor(user);
                     const webView = webStatusView(user);
                     const busy = accessBusy?.userId === user.id;
                     const localAccess = canManageAccess && accessSnapshot?.authMode !== 'sites_sso' && user.id !== 'user-owner';
@@ -453,7 +479,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
                       <div className="user-row__identity"><strong>{user.name}</strong><small>{user.email}</small></div>
                       <span className="user-row__role"><StatusBadge label={roleLabels[user.role]} tone={user.role === 'management' ? 'blue' : 'neutral'} /></span>
                       <span className="user-row__web"><StatusBadge label={webView.label} tone={webView.tone} /></span>
-                      <span className="user-row__telegram"><StatusBadge label={user.telegramBoundAt ? 'Подключён' : 'Не подключён'} tone={user.telegramBoundAt ? 'positive' : 'neutral'} /></span>
+                      <span className="user-row__telegram"><StatusBadge label={telegram.status === 'connected' ? 'Подключён' : 'Не подключён'} tone={telegram.status === 'connected' ? 'positive' : 'neutral'} /></span>
                       <small className="user-row__last">{web.lastLoginAt ? formatDateTime(web.lastLoginAt) : 'Ещё не входил'}</small>
                       <span className="user-row__actions access-actions">
                         {localAccess && ['not_issued', 'expired'].includes(web.status) && <button type="button" disabled={busy} onClick={() => void issueWebLink(user)}>{web.status === 'expired' ? 'Новая ссылка' : 'Выдать доступ'}</button>}
@@ -462,7 +488,8 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
                         {localAccess && web.status === 'active' && <button type="button" disabled={busy} onClick={() => void changeWebAccess(user, 'sessions/revoke')}>Завершить сессии</button>}
                         {localAccess && web.status === 'active' && <button type="button" className="danger" disabled={busy} onClick={() => void changeWebAccess(user, 'block')}>Заблокировать</button>}
                         {localAccess && web.status === 'blocked' && <button type="button" disabled={busy} onClick={() => void changeWebAccess(user, 'unblock')}>Разблокировать</button>}
-                        <button type="button" disabled={busy || user.status === 'disabled'} onClick={() => void createTelegramLink(user)}>Telegram</button>
+                        {canManageAccess && telegram.status === 'not_connected' && <button type="button" disabled={busy || user.status === 'disabled'} onClick={() => void createTelegramLink(user)}>Подключить Telegram</button>}
+                        {canManageAccess && telegram.status === 'connected' && <button type="button" className="danger" disabled={busy} onClick={() => void disconnectTelegram(user)}>Отключить Telegram</button>}
                         <button type="button" aria-label={`Редактировать ${user.name}`} disabled={!canManageAccess || busy || user.id === 'user-owner'} onClick={() => setEditingUser({ ...user })}><Pencil size={15} /></button>
                       </span>
                       {accessErrors[user.id] && <small className="access-inline-error" role="status" aria-live="polite">{accessErrors[user.id]}</small>}

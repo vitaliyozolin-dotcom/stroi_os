@@ -306,7 +306,7 @@ const server = createServer(async (incoming, outgoing) => {
       } catch (error) {
         const blocked = error instanceof AccessError && error.code === 'rate_limited';
         const status = error instanceof AccessError ? error.status : 500;
-        const extra = blocked ? { 'Retry-After': '900' } : {};
+        const extra = blocked ? { 'Retry-After': String(error.retryAfter || 900) } : {};
         return writeResponse(outgoing, htmlResponse(loginPage({ username, error: 'invalid', blocked }), status, extra));
       }
     }

@@ -77,7 +77,9 @@ backup/rollback и отзыв доступа: [docs/timeweb-autodeploy.md](docs/
 - `POST /api/access/web/invitations` — выпустить или перевыпустить ссылку активации на 7 дней;
 - `POST /api/access/web/reset` — выпустить одноразовую ссылку сброса пароля на 1 час;
 - `GET /invite/:token` / `POST /api/auth/activate` — проверить ссылку и активировать аккаунт;
-- `POST /api/access/users/:id/block` — заблокировать доступ и немедленно отозвать сессии.
+- `POST /api/access/users/:id/block` — заблокировать только веб-доступ и немедленно отозвать веб-сессии;
+- `POST /api/integrations/telegram/link` — выпустить отдельную Telegram-ссылку на 24 часа;
+- `POST /api/integrations/telegram/unlink` — отозвать Telegram-привязку, не меняя веб-доступ.
 
 ## Как выдать доступ человеку
 

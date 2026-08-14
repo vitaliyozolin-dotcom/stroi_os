@@ -48,8 +48,10 @@ import {
   bindingForTelegramProject as bindingForTelegramProjectModule,
   bindingsForTelegramUser as bindingsForTelegramUserModule,
   bindingForTelegramUser as bindingForTelegramUserModule,
+  claimTelegramBinding,
   saveTelegramProjectSelection,
   selectTelegramBinding,
+  unlinkTelegramBinding,
 } from './telegram/bindings.js';
 
 const MAX_STATE_BYTES = 6_000_000;
@@ -203,6 +205,14 @@ const protectedFileHeaders = (filename, fallbackName, { inlineMime = '' } = {}) 
   });
 };
 
+const ensureTelegramClaimColumn = async (db) => {
+  try {
+    await db.prepare('ALTER TABLE telegram_link_codes ADD COLUMN claim_id TEXT').run();
+  } catch (error) {
+    if (!/duplicate column|already exists/i.test(String(error?.message || error))) throw error;
+  }
+};
+
 const ensureSchema = async (db) => {
   if (!schemaPromise) {
     schemaPromise = Promise.all([
@@ -272,7 +282,8 @@ const ensureSchema = async (db) => {
           system_user_id TEXT NOT NULL,
           created_at TEXT NOT NULL,
           expires_at TEXT NOT NULL,
-          used_at TEXT
+          used_at TEXT,
+          claim_id TEXT
         )
       `).run(),
       db.prepare(`
@@ -367,7 +378,7 @@ const ensureSchema = async (db) => {
           reason TEXT NOT NULL
         )
       `).run(),
-    ]).then(() => Promise.all([
+    ]).then(() => ensureTelegramClaimColumn(db)).then(() => Promise.all([
       db.prepare(`
         CREATE INDEX IF NOT EXISTS audit_log_project_revision
         ON audit_log (project_id, revision DESC)
@@ -1494,7 +1505,7 @@ const handleTelegramLink = async (request, env) => {
     await ensureSchema(env.DB);
     const snapshot = await readSnapshot(env.DB, projectId);
     const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
-    if (!identity || identity.role !== 'management') return json({ ok: false, error: 'project_access_denied' }, 403);
+    if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
     const user = (snapshot.state.settings?.users ?? []).find((item) => clean(item.id, 100) === userId && item.status !== 'disabled');
     if (!user) return json({ ok: false, error: 'user_not_found' }, 404);
     const username = await telegramBotUsername(env);
@@ -1504,11 +1515,17 @@ const handleTelegramLink = async (request, env) => {
     const codeHash = await sha256(code);
     const now = new Date();
     const expiresAt = addDays(now, 1).toISOString();
-    await env.DB.prepare(`
-      INSERT INTO telegram_link_codes (
-        code_hash, project_id, system_user_id, created_at, expires_at, used_at
-      ) VALUES (?, ?, ?, ?, ?, NULL)
-    `).bind(codeHash, projectId, userId, now.toISOString(), expiresAt).run();
+    await env.DB.batch([
+      env.DB.prepare(`
+        DELETE FROM telegram_link_codes
+        WHERE project_id = ? AND system_user_id = ? AND used_at IS NULL
+      `).bind(projectId, userId),
+      env.DB.prepare(`
+        INSERT INTO telegram_link_codes (
+          code_hash, project_id, system_user_id, created_at, expires_at, used_at, claim_id
+        ) VALUES (?, ?, ?, ?, ?, NULL, NULL)
+      `).bind(codeHash, projectId, userId, now.toISOString(), expiresAt),
+    ]);
     return json({
       ok: true,
       url: `https://t.me/${username}?start=${code}`,
@@ -1520,6 +1537,117 @@ const handleTelegramLink = async (request, env) => {
   }
 };
 
+const handleAccessUsers = async (request, env) => {
+  const projectId = clean(new URL(request.url).searchParams.get('projectId'), 100);
+  if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
+  try {
+    await ensureSchema(env.DB);
+    const snapshot = await readSnapshot(env.DB, projectId);
+    const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
+    if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
+    const result = await env.DB.prepare(`
+      SELECT system_user_id,bound_at,username,updated_at
+      FROM telegram_bindings WHERE project_id = ? ORDER BY updated_at DESC
+    `).bind(projectId).all();
+    const telegramByUser = new Map();
+    for (const binding of result?.results ?? []) {
+      if (!telegramByUser.has(binding.system_user_id)) telegramByUser.set(binding.system_user_id, binding);
+    }
+    const users = (snapshot.state.settings?.users ?? []).map((user) => {
+      const binding = telegramByUser.get(user.id);
+      return {
+        userId: user.id,
+        web: { status: 'not_issued' },
+        telegram: binding ? {
+          status: 'connected', boundAt: binding.bound_at, username: clean(binding.username, 120) || undefined,
+        } : { status: 'not_connected' },
+      };
+    });
+    return json({ ok: true, authMode: 'sites_sso', users });
+  } catch {
+    return json({ ok: false, error: 'access_storage_error' }, 500);
+  }
+};
+
+const handleTelegramUnlink = async (request, env) => {
+  if (!env.DB) return json({ ok: false, error: 'telegram_not_configured' }, 409);
+  let payload;
+  try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
+    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
+  }
+  const projectId = clean(payload?.projectId, 100);
+  const userId = clean(payload?.userId, 100);
+  if (!validProjectId(projectId) || !userId) return json({ ok: false, error: 'invalid_link_target' }, 422);
+
+  try {
+    await ensureSchema(env.DB);
+    const snapshot = await readSnapshot(env.DB, projectId);
+    const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
+    if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
+    const user = (snapshot.state.settings?.users ?? []).find((item) => clean(item.id, 100) === userId);
+    if (!user) return json({ ok: false, error: 'user_not_found' }, 404);
+
+    const removed = await unlinkTelegramBinding(env.DB, projectId, userId);
+    try {
+      await mutateProjectFromTelegram(
+        env,
+        projectId,
+        identity.name,
+        'management',
+        'telegram.unlink',
+        `Telegram отключён: ${user.name}`,
+        (state) => {
+          state.settings.users = (state.settings?.users ?? []).map((item) => item.id === user.id ? {
+            ...item,
+            telegramChatId: undefined,
+            telegramBoundAt: undefined,
+          } : item);
+          state.activity = [{
+            id: `activity-${crypto.randomUUID()}`,
+            timestamp: new Date().toISOString(),
+            actor: identity.name,
+            text: `Отключил Telegram пользователя ${user.name}`,
+            tone: 'neutral',
+          }, ...(state.activity ?? [])];
+        },
+      );
+    } catch {
+      // Таблица привязок уже атомарно очищена и остаётся источником истины для UI и команд.
+    }
+    return json({ ok: true, removed: removed.removed, telegram: { status: 'not_connected' } });
+  } catch {
+    return json({ ok: false, error: 'telegram_unlink_failed' }, 500);
+  }
+};
+
+const reconcileTelegramUserState = async (env, projectId, user, from, privateChatId, now) => mutateProjectFromTelegram(
+  env,
+  projectId,
+  user.name,
+  user.role,
+  'telegram.bind',
+  `Telegram подключён: ${user.name}`,
+  (state) => {
+    state.settings.users = (state.settings?.users ?? []).map((item) => item.id === user.id ? {
+      ...item,
+      telegram: from.username ? `@${clean(from.username, 120)}` : item.telegram,
+      telegramChatId: privateChatId,
+      telegramBoundAt: now,
+    } : item);
+    const alreadyRecorded = (state.activity ?? []).some((item) => item.text === 'Подключил личный Telegram к ИКИОМА ОС'
+      && item.actor === user.name && item.timestamp === now);
+    if (!alreadyRecorded) {
+      state.activity = [{
+        id: `activity-${crypto.randomUUID()}`,
+        timestamp: now,
+        actor: user.name,
+        text: 'Подключил личный Telegram к ИКИОМА ОС',
+        tone: 'neutral',
+      }, ...(state.activity ?? [])];
+    }
+  },
+);
+
 const bindTelegramUser = async (message, code, env) => {
   const chat = message?.chat;
   const from = message?.from;
@@ -1529,11 +1657,11 @@ const bindTelegramUser = async (message, code, env) => {
   }
   const codeHash = await sha256(code);
   const row = await env.DB.prepare(`
-    SELECT code_hash, project_id, system_user_id, expires_at, used_at
+    SELECT code_hash, project_id, system_user_id, expires_at, used_at, claim_id
     FROM telegram_link_codes
     WHERE code_hash = ?
   `).bind(codeHash).first();
-  if (!row || row.used_at || row.expires_at < new Date().toISOString()) {
+  if (!row || row.expires_at < new Date().toISOString()) {
     await telegramSend(env.TELEGRAM_BOT_TOKEN, chat.id, 'Ссылка недействительна или уже использована. Попросите руководителя выпустить новую в ИКИОМА ОС.');
     return;
   }
@@ -1544,66 +1672,43 @@ const bindTelegramUser = async (message, code, env) => {
     return;
   }
 
-  const now = new Date().toISOString();
-  const linkClaim = await env.DB.prepare(`
-    UPDATE telegram_link_codes
-    SET used_at = ?
-    WHERE code_hash = ? AND used_at IS NULL AND expires_at >= ?
-  `).bind(now, codeHash, now).run();
-  if (changes(linkClaim) !== 1) {
+  const telegramUserId = String(from.id);
+  const privateChatId = String(chat.id);
+  const existingBinding = row.used_at ? await env.DB.prepare(`
+    SELECT telegram_user_id,private_chat_id,bound_at
+    FROM telegram_bindings
+    WHERE project_id = ? AND system_user_id = ? AND telegram_user_id = ?
+  `).bind(row.project_id, row.system_user_id, telegramUserId).first() : null;
+  if (row.used_at && !existingBinding) {
     await telegramSend(env.TELEGRAM_BOT_TOKEN, chat.id, 'Ссылка уже использована другим подключением. Попросите руководителя выпустить новую в ИКИОМА ОС.');
     return;
   }
-  const telegramUserId = String(from.id);
-  const privateChatId = String(chat.id);
-  await env.DB.prepare(`
-    INSERT INTO telegram_bindings (
-      telegram_user_id, project_id, system_user_id, private_chat_id,
-      username, display_name, role, bound_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(telegram_user_id, project_id) DO UPDATE SET
-      system_user_id = excluded.system_user_id,
-      private_chat_id = excluded.private_chat_id,
-      username = excluded.username,
-      display_name = excluded.display_name,
-      role = excluded.role,
-      updated_at = excluded.updated_at
-  `).bind(
-    telegramUserId,
-    row.project_id,
-    row.system_user_id,
-    privateChatId,
-    clean(from.username, 120),
-    telegramDisplayName(from),
-    user.role,
-    now,
-    now,
-  ).run();
-  await saveTelegramProjectSelection(env.DB, telegramUserId, privateChatId, row.project_id);
 
-  await mutateProjectFromTelegram(
-    env,
-    row.project_id,
-    user.name,
-    user.role,
-    'telegram.bind',
-    `Telegram подключён: ${user.name}`,
-    (state) => {
-      state.settings.users = (state.settings?.users ?? []).map((item) => item.id === user.id ? {
-        ...item,
-        telegram: from.username ? `@${clean(from.username, 120)}` : item.telegram,
-        telegramChatId: privateChatId,
-        telegramBoundAt: now,
-      } : item);
-      state.activity = [{
-        id: `activity-${crypto.randomUUID()}`,
-        timestamp: now,
-        actor: user.name,
-        text: 'Подключил личный Telegram к ИКИОМА ОС',
-        tone: 'neutral',
-      }, ...(state.activity ?? [])];
-    },
-  );
+  const now = existingBinding?.bound_at || new Date().toISOString();
+  if (!existingBinding) {
+    const claimed = await claimTelegramBinding(env.DB, {
+      codeHash,
+      claimId: crypto.randomUUID(),
+      now,
+      telegramUserId,
+      projectId: row.project_id,
+      systemUserId: row.system_user_id,
+      privateChatId,
+      username: clean(from.username, 120),
+      displayName: telegramDisplayName(from),
+      role: user.role,
+    });
+    if (!claimed) {
+      await telegramSend(env.TELEGRAM_BOT_TOKEN, chat.id, 'Ссылка уже использована другим подключением. Попросите руководителя выпустить новую в ИКИОМА ОС.');
+      return;
+    }
+  }
+
+  try {
+    await reconcileTelegramUserState(env, row.project_id, user, from, privateChatId, now);
+  } catch {
+    // telegram_bindings — источник истины. Повторный /start безопасно восстановит снимок проекта.
+  }
   await telegramSend(
     env.TELEGRAM_BOT_TOKEN,
     privateChatId,
@@ -1612,7 +1717,7 @@ const bindTelegramUser = async (message, code, env) => {
   await reviveTelegramOutbox(env.DB, privateChatId);
 };
 
-const projectForBinding = async (env, binding) => {
+export const projectForBinding = async (env, binding) => {
   const snapshot = await readSnapshot(env.DB, binding.project_id);
   if (!snapshot) throw new Error('project_not_found');
   const user = (snapshot.state.settings?.users ?? []).find((item) => item.id === binding.system_user_id);
@@ -3994,6 +4099,7 @@ const handleApi = async (request, env, context) => {
   if (origin && origin !== url.origin) return json({ ok: false, error: 'forbidden_origin' }, 403);
 
   if (url.pathname === '/api/session' && request.method === 'GET') return handleSession(request, env);
+  if (url.pathname === '/api/access/users' && request.method === 'GET') return handleAccessUsers(request, env);
   if (url.pathname === '/api/state' && request.method === 'GET') return handleGetState(request, env);
   if (url.pathname === '/api/state' && request.method === 'PUT') return handlePutState(request, env, context);
   if (url.pathname === '/api/projects' && request.method === 'GET') return handleProjects(request, env);
@@ -4001,6 +4107,7 @@ const handleApi = async (request, env, context) => {
   if (url.pathname === '/api/integrations/test' && request.method === 'POST') return handleIntegrationTest(request, env);
   if (url.pathname === '/api/integrations/telegram/select' && request.method === 'POST') return handleTelegramChatSelect(request, env);
   if (url.pathname === '/api/integrations/telegram/link' && request.method === 'POST') return handleTelegramLink(request, env);
+  if (url.pathname === '/api/integrations/telegram/unlink' && request.method === 'POST') return handleTelegramUnlink(request, env);
   if (url.pathname === '/api/integrations/telegram/bootstrap' && request.method === 'POST') return handleTelegramBootstrap(request, env);
   if (url.pathname === '/api/integrations/telegram/update' && request.method === 'POST') return handleTelegramUpdate(request, env, context);
   if (url.pathname === '/api/camera/status' && request.method === 'GET') return handleCameraStatus(request, env);
