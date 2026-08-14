@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
-import worker from '../sites/worker.js';
+import worker, { flushTelegramOutbox } from '../sites/worker.js';
 import { FileBucket } from './file-bucket.js';
 import { PostgresDatabase } from './postgres.js';
 import { isPublicRoute } from './public-routes.js';
@@ -31,6 +31,7 @@ const auth = createSessionAuth({
 const loginLimiter = new LoginRateLimiter();
 const database = new PostgresDatabase(databaseUrl);
 const bucket = new FileBucket(process.env.FILE_STORAGE_PATH || '/data/files');
+const telegramOutboxIntervalMs = Math.max(15_000, Number(process.env.TELEGRAM_OUTBOX_INTERVAL_MS) || 30_000);
 
 const mimeTypes = {
   '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -174,8 +175,10 @@ const writeResponse = async (outgoing, response) => {
   Readable.fromWeb(response.body).pipe(outgoing);
 };
 
+let telegramOutboxTimer;
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, async () => {
+    if (telegramOutboxTimer) clearInterval(telegramOutboxTimer);
     server.close();
     await database.close();
     process.exit(0);
@@ -185,6 +188,11 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 await access(clientRoot);
 server.listen(port, '0.0.0.0', () => {
   console.log(`stroios listening on ${port}`);
+  const flushOutbox = () => flushTelegramOutbox(env).catch((error) => {
+    console.error(`telegram outbox flush failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  void flushOutbox();
+  telegramOutboxTimer = setInterval(flushOutbox, telegramOutboxIntervalMs);
   ensureTelegramWebhook(process.env)
     .then((status) => {
       if (status.skipped) console.warn(`telegram webhook skipped: ${status.reason}`);
