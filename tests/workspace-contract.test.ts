@@ -92,7 +92,7 @@ test('Telegram uses the VPS host network relay and reports real upstream failure
   const compose = source('compose.yaml');
   const relay = source('server/telegram-relay.js');
   const repair = source('server/repair-telegram.js');
-  const worker = source('sites/worker.js');
+  const transport = source('sites/telegram/transport.js');
 
   assert.match(compose, /telegram-relay:/);
   assert.match(compose, /network_mode: host/);
@@ -105,8 +105,8 @@ test('Telegram uses the VPS host network relay and reports real upstream failure
   assert.match(repair, /TELEGRAM_API_BASE/);
   assert.match(repair, /networkErrorDetails/);
   assert.match(repair, /сеть контейнера недоступна/);
-  assert.match(worker, /telegramApiUrl/);
-  assert.match(worker, /telegramTransportHeaders/);
+  assert.match(transport, /telegramApiUrl/);
+  assert.match(transport, /telegramTransportHeaders/);
 });
 
 test('Telegram webhook is restored safely when the app starts', () => {
@@ -139,11 +139,12 @@ test('Telegram explains exactly what is read, drafted, saved or ignored', () => 
 
 test('Telegram webhook retries failures and reclaims only stale processing updates', () => {
   const worker = source('sites/worker.js');
+  const transport = source('sites/telegram/transport.js');
 
   assert.match(worker, /TELEGRAM_UPDATE_LEASE_MS = TELEGRAM_DRAFT_LEASE_MS \+ 60_000/);
   assert.match(worker, /export const claimTelegramUpdate/);
   assert.match(worker, /WHERE update_id = \? AND status = 'processing' AND received_at = \?/);
   assert.match(worker, /return json\(\{ ok: false, error: 'telegram_update_failed' \}, 503\)/);
   assert.doesNotMatch(worker, /context\.waitUntil\(work\)/);
-  assert.match(worker, /signal: AbortSignal\.timeout\(timeoutMs\)/);
+  assert.match(transport, /signal: AbortSignal\.timeout\(timeoutMs\)/);
 });
