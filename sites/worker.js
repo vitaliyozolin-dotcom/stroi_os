@@ -14,6 +14,12 @@ import {
   telegramDurableSend,
 } from './telegram/outbox.js';
 import {
+  claimTelegramUpdate as claimTelegramUpdateModule,
+  completeTelegramUpdate,
+  failTelegramUpdate,
+  readTelegramUpdateStatus,
+} from './telegram/inbox.js';
+import {
   parseTelegramBody,
   telegramApiUrl,
   telegramCheckedRequest,
@@ -32,7 +38,6 @@ const PUBLIC_LEAD_PROJECT_ID = 'ikioma-sales';
 const PUBLIC_LEAD_ORIGINS = new Set(['https://ikioma.ru', 'https://www.ikioma.ru']);
 const TELEGRAM_MUTATION_NOOP = Symbol('telegram_mutation_noop');
 const TELEGRAM_DRAFT_LEASE_MS = 300_000;
-const TELEGRAM_UPDATE_LEASE_MS = TELEGRAM_DRAFT_LEASE_MS + 60_000;
 let schemaPromise;
 let battleResetPromise;
 
@@ -2976,44 +2981,7 @@ const processTelegramUpdate = async (update, env) => {
   }
 };
 
-export const claimTelegramUpdate = async (db, updateId, {
-  now = new Date(),
-  processingTtlMs = TELEGRAM_UPDATE_LEASE_MS,
-} = {}) => {
-  const claimedAt = now.toISOString();
-  const inserted = await db.prepare(`
-    INSERT INTO telegram_updates (update_id, received_at, processed_at, status, error)
-    VALUES (?, ?, NULL, 'processing', NULL)
-    ON CONFLICT(update_id) DO NOTHING
-  `).bind(updateId, claimedAt).run();
-  if (changes(inserted) === 1) return claimedAt;
-
-  const existing = await db.prepare(`
-    SELECT status, received_at
-    FROM telegram_updates
-    WHERE update_id = ?
-  `).bind(updateId).first();
-  if (!existing || existing.status === 'done') return null;
-  if (existing.status === 'processing') {
-    const receivedAt = Date.parse(clean(existing.received_at, 80));
-    if (Number.isFinite(receivedAt) && now.getTime() - receivedAt <= processingTtlMs) return null;
-    const reclaimed = await db.prepare(`
-      UPDATE telegram_updates
-      SET received_at = ?, processed_at = NULL, status = 'processing', error = NULL
-      WHERE update_id = ? AND status = 'processing' AND received_at = ?
-    `).bind(claimedAt, updateId, existing.received_at).run();
-    return changes(reclaimed) === 1 ? claimedAt : null;
-  }
-  if (existing.status === 'error') {
-    const retried = await db.prepare(`
-      UPDATE telegram_updates
-      SET received_at = ?, processed_at = NULL, status = 'processing', error = NULL
-      WHERE update_id = ? AND status = 'error'
-    `).bind(claimedAt, updateId).run();
-    return changes(retried) === 1 ? claimedAt : null;
-  }
-  return null;
-};
+export const claimTelegramUpdate = claimTelegramUpdateModule;
 
 const handleTelegramUpdate = async (request, env, context) => {
   const suppliedSecret = clean(request.headers.get('x-telegram-bot-api-secret-token'), 256);
@@ -3029,24 +2997,15 @@ const handleTelegramUpdate = async (request, env, context) => {
   context.waitUntil(flushTelegramOutbox(env).catch(() => null));
   const updateLease = await claimTelegramUpdate(env.DB, updateId);
   if (!updateLease) {
-    const existing = await env.DB.prepare(`SELECT status FROM telegram_updates WHERE update_id = ?`).bind(updateId).first();
-    if (existing?.status === 'done') return json({ ok: true, duplicate: true });
+    if (await readTelegramUpdateStatus(env.DB, updateId) === 'done') return json({ ok: true, duplicate: true });
     return json({ ok: false, error: 'telegram_update_busy' }, 503);
   }
   try {
     await processTelegramUpdate(update, env);
-    await env.DB.prepare(`
-      UPDATE telegram_updates
-      SET status = 'done', processed_at = ?, error = NULL
-      WHERE update_id = ? AND status = 'processing' AND received_at = ?
-    `).bind(new Date().toISOString(), updateId, updateLease).run();
+    await completeTelegramUpdate(env.DB, updateId, updateLease);
     return json({ ok: true, accepted: true });
   } catch (error) {
-    await env.DB.prepare(`
-      UPDATE telegram_updates
-      SET status = 'error', processed_at = ?, error = ?
-      WHERE update_id = ? AND status = 'processing' AND received_at = ?
-    `).bind(new Date().toISOString(), clean(error instanceof Error ? error.message : 'processing_failed', 300), updateId, updateLease).run();
+    await failTelegramUpdate(env.DB, updateId, updateLease, error);
     // Telegram повторит webhook после non-2xx. Детерминированные draft/source IDs
     // не позволяют повторной доставке создать вторую бизнес-запись.
     return json({ ok: false, error: 'telegram_update_failed' }, 503);

@@ -313,8 +313,9 @@ test('project routing and confirmation are isolated by Telegram user, chat and d
 
 test('Telegram retries keep the update lease and queue confirmations before closing drafts', () => {
   const worker = readFileSync(new URL('../sites/worker.js', import.meta.url), 'utf8');
-  assert.match(worker, /TELEGRAM_UPDATE_LEASE_MS = TELEGRAM_DRAFT_LEASE_MS \+ 60_000/);
-  assert.match(worker, /now\.getTime\(\) - receivedAt <= processingTtlMs/);
+  const inbox = readFileSync(new URL('../sites/telegram/inbox.js', import.meta.url), 'utf8');
+  assert.match(inbox, /TELEGRAM_UPDATE_LEASE_MS = 360_000/);
+  assert.match(inbox, /now\.getTime\(\) - receivedAt <= processingTtlMs/);
 
   const functionBlock = (name: string, nextName: string) => {
     const start = worker.indexOf(`const ${name} =`);

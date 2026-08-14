@@ -141,9 +141,10 @@ test('Telegram webhook retries failures and reclaims only stale processing updat
   const worker = source('sites/worker.js');
   const transport = source('sites/telegram/transport.js');
 
-  assert.match(worker, /TELEGRAM_UPDATE_LEASE_MS = TELEGRAM_DRAFT_LEASE_MS \+ 60_000/);
+  const inbox = source('sites/telegram/inbox.js');
+  assert.match(inbox, /TELEGRAM_UPDATE_LEASE_MS = 360_000/);
   assert.match(worker, /export const claimTelegramUpdate/);
-  assert.match(worker, /WHERE update_id = \? AND status = 'processing' AND received_at = \?/);
+  assert.match(inbox, /WHERE update_id = \? AND status = 'processing' AND received_at = \?/);
   assert.match(worker, /return json\(\{ ok: false, error: 'telegram_update_failed' \}, 503\)/);
   assert.doesNotMatch(worker, /context\.waitUntil\(work\)/);
   assert.match(transport, /signal: AbortSignal\.timeout\(timeoutMs\)/);
