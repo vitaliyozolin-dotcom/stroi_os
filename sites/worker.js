@@ -17,6 +17,11 @@ const BATTLE_SCHEMA_VERSION = 17;
 const BATTLE_RESET_KEY = 'battle_v17_reset';
 const PUBLIC_LEAD_PROJECT_ID = 'ikioma-sales';
 const PUBLIC_LEAD_ORIGINS = new Set(['https://ikioma.ru', 'https://www.ikioma.ru']);
+const TELEGRAM_MUTATION_NOOP = Symbol('telegram_mutation_noop');
+const TELEGRAM_DRAFT_LEASE_MS = 300_000;
+const TELEGRAM_UPDATE_LEASE_MS = TELEGRAM_DRAFT_LEASE_MS + 60_000;
+const TELEGRAM_OUTBOX_LEASE_MS = 120_000;
+const TELEGRAM_OUTBOX_RETRY_MS = 30_000;
 let schemaPromise;
 let battleResetPromise;
 
@@ -108,6 +113,15 @@ const ensureSchema = async (db) => {
         )
       `).run(),
       db.prepare(`
+        CREATE TABLE IF NOT EXISTS telegram_user_chat_projects (
+          telegram_user_id TEXT NOT NULL,
+          chat_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (telegram_user_id, chat_id)
+        )
+      `).run(),
+      db.prepare(`
         CREATE TABLE IF NOT EXISTS telegram_chat_candidates (
           chat_id TEXT PRIMARY KEY,
           title TEXT NOT NULL,
@@ -139,6 +153,19 @@ const ensureSchema = async (db) => {
         )
       `).run(),
       db.prepare(`
+        CREATE TABLE IF NOT EXISTS telegram_outbox (
+          id TEXT PRIMARY KEY,
+          chat_id TEXT NOT NULL,
+          text TEXT NOT NULL,
+          options_json TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempts INTEGER NOT NULL,
+          last_error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `).run(),
+      db.prepare(`
         CREATE TABLE IF NOT EXISTS system_meta (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL,
@@ -163,6 +190,14 @@ const ensureSchema = async (db) => {
       db.prepare(`
         CREATE INDEX IF NOT EXISTS telegram_bindings_project_user
         ON telegram_bindings (project_id, system_user_id)
+      `).run(),
+      db.prepare(`
+        CREATE INDEX IF NOT EXISTS telegram_user_chat_projects_project
+        ON telegram_user_chat_projects (project_id)
+      `).run(),
+      db.prepare(`
+        CREATE INDEX IF NOT EXISTS telegram_outbox_status_created
+        ON telegram_outbox (status, created_at)
       `).run(),
       db.prepare(`
         CREATE INDEX IF NOT EXISTS data_reset_backups_created_at
@@ -362,9 +397,11 @@ const runBattleReset = async (env) => {
       env.DB.prepare(`DELETE FROM telegram_link_codes`),
       env.DB.prepare(`DELETE FROM telegram_bindings`),
       env.DB.prepare(`DELETE FROM telegram_chat_projects`),
+      env.DB.prepare(`DELETE FROM telegram_user_chat_projects`),
       env.DB.prepare(`DELETE FROM telegram_chat_candidates`),
       env.DB.prepare(`DELETE FROM telegram_drafts`),
       env.DB.prepare(`DELETE FROM telegram_updates`),
+      env.DB.prepare(`DELETE FROM telegram_outbox`),
       env.DB.prepare(`
         INSERT INTO project_state (
           project_id, state_json, revision, created_at, updated_at, updated_by, updated_role
@@ -670,20 +707,150 @@ const telegramTransportHeaders = (headers = {}) => {
     : headers;
 };
 const telegramApiUrl = (path) => `${telegramApiBase()}${path}`;
+const telegramMessageText = (value, limit = 4000) => {
+  const source = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+  return source.length <= limit ? source : `${source.slice(0, Math.max(1, limit - 34)).trimEnd()}\n\n… сообщение сокращено ИКИОМА ОС`;
+};
 
-const telegramSend = (token, chatId, text, options = {}) => {
+const telegramSend = async (token, chatId, text, options = {}) => {
   const { timeoutMs = 10_000, ...telegramOptions } = options;
-  return fetch(telegramApiUrl(`/bot${token}/sendMessage`), {
+  const response = await fetch(telegramApiUrl(`/bot${token}/sendMessage`), {
     method: 'POST',
     headers: telegramTransportHeaders({ 'Content-Type': 'application/json' }),
     signal: AbortSignal.timeout(timeoutMs),
-    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true, ...telegramOptions }),
+    body: JSON.stringify({ chat_id: chatId, text: telegramMessageText(text), disable_web_page_preview: true, ...telegramOptions }),
   });
+  if (!response.ok) {
+    const body = await response.clone().json().catch(() => null);
+    throw new Error(`telegram_send_failed:${response.status}:${clean(body?.description || response.status, 200)}`);
+  }
+  return response;
 };
 
-const telegramRequest = (token, method, payload = {}) => fetch(telegramApiUrl(`/bot${token}/${method}`), {
+const queueTelegramMessage = async (db, chatId, text, options = {}, stableId = '') => {
+  const id = clean(stableId, 180) || `telegram-outbox-${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+  await db.prepare(`
+    INSERT INTO telegram_outbox (
+      id, chat_id, text, options_json, status, attempts, last_error, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'pending', 0, NULL, ?, ?)
+    ON CONFLICT(id) DO NOTHING
+  `).bind(id, String(chatId), text, JSON.stringify(options ?? {}), now, now).run();
+  return id;
+};
+
+const telegramOutboxRetryReady = (row, now = Date.now()) => {
+  if (row.status === 'pending') return true;
+  const updatedAt = Date.parse(clean(row.updated_at, 80));
+  if (!Number.isFinite(updatedAt)) return true;
+  if (row.status === 'sending') return now - updatedAt > TELEGRAM_OUTBOX_LEASE_MS;
+  if (row.status === 'failed') return now - updatedAt >= TELEGRAM_OUTBOX_RETRY_MS;
+  return false;
+};
+
+const claimTelegramOutbox = async (db, row) => {
+  if (!row || row.status === 'sent' || !telegramOutboxRetryReady(row)) return null;
+  const lease = new Date().toISOString();
+  const result = await db.prepare(`
+    UPDATE telegram_outbox
+    SET status = 'sending', attempts = attempts + 1, updated_at = ?
+    WHERE id = ? AND status = ? AND updated_at = ? AND attempts = ?
+  `).bind(lease, row.id, row.status, row.updated_at, Number(row.attempts)).run();
+  return changes(result) === 1
+    ? { ...row, status: 'sending', attempts: Number(row.attempts) + 1, updated_at: lease }
+    : null;
+};
+
+const finishTelegramOutbox = async (db, claimed, status, error = '') => {
+  const result = await db.prepare(`
+    UPDATE telegram_outbox
+    SET status = ?, last_error = ?, updated_at = ?
+    WHERE id = ? AND status = 'sending' AND updated_at = ?
+  `).bind(status, clean(error, 300) || null, new Date().toISOString(), claimed.id, claimed.updated_at).run();
+  return changes(result) === 1;
+};
+
+const reviveTelegramOutbox = async (db, chatId) => {
+  if (!db || !chatId) return;
+  await db.prepare(`
+    UPDATE telegram_outbox
+    SET status = 'failed', attempts = 0, last_error = 'retry_after_reconnect', updated_at = '1970-01-01T00:00:00.000Z'
+    WHERE chat_id = ? AND status = 'dead'
+  `).bind(String(chatId)).run();
+};
+
+const deliverTelegramOutbox = async (env, row) => {
+  const claimed = await claimTelegramOutbox(env.DB, row);
+  if (!claimed) return false;
+  let options = {};
+  try { options = JSON.parse(claimed.options_json || '{}'); } catch { options = {}; }
+  try {
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, claimed.chat_id, claimed.text, options);
+    await finishTelegramOutbox(env.DB, claimed, 'sent');
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'telegram_send_failed';
+    const terminal = /^telegram_send_failed:(?:400|401|403|404):/u.test(message);
+    await finishTelegramOutbox(env.DB, claimed, terminal ? 'dead' : 'failed', message);
+    return false;
+  }
+};
+
+const telegramDurableSend = async (env, chatId, text, options = {}, stableId = '', waitForDelivery = true) => {
+  if (!env.DB) return telegramSend(env.TELEGRAM_BOT_TOKEN, chatId, text, options);
+  const id = await queueTelegramMessage(env.DB, chatId, text, options, stableId);
+  const row = await env.DB.prepare(`
+    SELECT id, chat_id, text, options_json, status, attempts, created_at, updated_at
+    FROM telegram_outbox
+    WHERE id = ?
+  `).bind(id).first();
+  if (row?.status === 'sent') return true;
+  if (!waitForDelivery) {
+    void deliverTelegramOutbox(env, row).catch(() => null);
+    return true;
+  }
+  return deliverTelegramOutbox(env, row);
+};
+
+export const flushTelegramOutbox = async (env, limit = 10) => {
+  if (!env.DB || !env.TELEGRAM_BOT_TOKEN) return { attempted: 0, delivered: 0 };
+  await ensureSchema(env.DB);
+  const pendingQuota = Math.max(1, Math.ceil(limit * 0.8));
+  const pendingResult = await env.DB.prepare(`
+    SELECT id, chat_id, text, options_json, status, attempts, created_at, updated_at
+    FROM telegram_outbox
+    WHERE status = 'pending'
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).bind(pendingQuota).all();
+  const retryQuota = Math.max(1, limit - (pendingResult?.results?.length ?? 0));
+  const failedBefore = new Date(Date.now() - TELEGRAM_OUTBOX_RETRY_MS).toISOString();
+  const staleLeaseBefore = new Date(Date.now() - TELEGRAM_OUTBOX_LEASE_MS).toISOString();
+  const retryResult = await env.DB.prepare(`
+    SELECT id, chat_id, text, options_json, status, attempts, created_at, updated_at
+    FROM telegram_outbox
+    WHERE (status = 'failed' AND updated_at <= ?)
+       OR (status = 'sending' AND updated_at <= ?)
+    ORDER BY updated_at ASC
+    LIMIT ?
+  `).bind(failedBefore, staleLeaseBefore, retryQuota).all();
+  const pendingRows = pendingResult?.results ?? [];
+  const retryRows = retryResult?.results ?? [];
+  const candidates = [...pendingRows, ...retryRows].slice(0, limit);
+  let attempted = 0;
+  let delivered = 0;
+  for (const row of candidates) {
+    if (!telegramOutboxRetryReady(row)) continue;
+    attempted += 1;
+    if (await deliverTelegramOutbox(env, row)) delivered += 1;
+  }
+  return { attempted, delivered };
+};
+
+const telegramRequest = (token, method, payload = {}, timeoutMs = 15_000) => fetch(telegramApiUrl(`/bot${token}/${method}`), {
   method: 'POST',
   headers: telegramTransportHeaders({ 'Content-Type': 'application/json' }),
+  signal: AbortSignal.timeout(timeoutMs),
   body: JSON.stringify(payload),
 });
 
@@ -693,6 +860,16 @@ const parseTelegramBody = async (response) => {
   } catch {
     return null;
   }
+};
+
+const telegramCheckedRequest = async (token, method, payload = {}, timeoutMs = 15_000) => {
+  const response = await telegramRequest(token, method, payload, timeoutMs);
+  const body = await parseTelegramBody(response);
+  if (!response.ok || body?.ok === false) {
+    const description = clean(body?.description || response.status, 200);
+    throw new Error(`telegram_${method}_failed:${response.status}:${description}`);
+  }
+  return body?.result ?? body;
 };
 
 const telegramChatCandidates = (updates) => {
@@ -809,6 +986,13 @@ const readTelegramConfig = async (db) => {
   };
 };
 
+const telegramGroupChatAuthorized = async (env, chatId) => {
+  const expected = clean(env.TELEGRAM_COMMON_CHAT_ID, 120) || clean(env.TELEGRAM_CHAT_ID, 120);
+  if (expected) return String(chatId) === expected;
+  const stored = await readTelegramConfig(env.DB);
+  return Boolean(stored?.chat?.id && String(chatId) === String(stored.chat.id));
+};
+
 const writeTelegramConfig = async (db, chat, bot) => {
   if (!db) return;
   await ensureSchema(db);
@@ -850,6 +1034,7 @@ const verifyAndStoreTelegramChat = async (env, chat, bot) => {
     );
     if (!response.ok) return { ok: false, issue: 'send_failed' };
     await writeTelegramConfig(env.DB, chat, bot);
+    await reviveTelegramOutbox(env.DB, chat.id);
     return { ok: true, issue: '' };
   } catch {
     return { ok: false, issue: 'provider_unavailable' };
@@ -926,24 +1111,69 @@ const resolveTelegramConnection = async (env, { discover = true } = {}) => {
   return { tokenConfigured: true, chat, bot: discovered.bot, candidates: [], issue: '', verifiedAt: new Date().toISOString() };
 };
 
-const telegramAnswerCallback = (token, callbackQueryId, text = '', showAlert = false) => telegramRequest(token, 'answerCallbackQuery', {
-  callback_query_id: callbackQueryId,
-  text,
-  show_alert: showAlert,
-});
+const telegramAnswerCallback = async (token, callbackQueryId, text = '', showAlert = false) => {
+  try {
+    return await telegramCheckedRequest(token, 'answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      text,
+      show_alert: showAlert,
+    });
+  } catch {
+    // A stale callback acknowledgement must not block the idempotent action or
+    // the visible chat confirmation that follows it.
+    return null;
+  }
+};
 
-const telegramEditMessage = (token, chatId, messageId, text, replyMarkup) => telegramRequest(token, 'editMessageText', {
-  chat_id: chatId,
-  message_id: messageId,
-  text,
-  disable_web_page_preview: true,
-  reply_markup: replyMarkup,
-});
+const telegramEditMessage = async (token, chatId, messageId, text, replyMarkup) => {
+  try {
+    return await telegramCheckedRequest(token, 'editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: telegramMessageText(text),
+      disable_web_page_preview: true,
+      reply_markup: replyMarkup,
+    });
+  } catch (error) {
+    if (error instanceof Error && /message is not modified/iu.test(error.message)) return null;
+    throw error;
+  }
+};
+
+const telegramConfirmVisible = async (env, chatId, messageId, text, replyMarkup) => {
+  try {
+    await telegramEditMessage(env.TELEGRAM_BOT_TOKEN, chatId, messageId, text, replyMarkup);
+    return 'edited';
+  } catch {
+    const options = replyMarkup ? { reply_markup: replyMarkup } : {};
+    return telegramDurableVisibility(env, chatId, text, options, `telegram-confirm:${chatId}:${messageId}`);
+  }
+};
+
+const telegramDurableVisibility = async (env, chatId, text, options, stableId) => {
+  try {
+    const sent = await telegramDurableSend(env, chatId, text, options, stableId);
+    if (sent) return 'sent';
+    if (!env.DB) return 'undelivered';
+    const row = await env.DB.prepare(`
+      SELECT status
+      FROM telegram_outbox
+      WHERE id = ?
+    `).bind(clean(stableId, 180)).first();
+    return row && row.status !== 'dead' ? 'queued' : 'undelivered';
+  } catch {
+    return 'undelivered';
+  }
+};
+
+const requireTelegramVisibility = (status) => {
+  if (status === 'undelivered') throw new Error('telegram_confirmation_unavailable');
+};
 
 const telegramSendPhoto = (token, chatId, photo, caption, options = {}) => telegramRequest(token, 'sendPhoto', {
   chat_id: chatId,
   photo,
-  caption,
+  caption: telegramMessageText(caption, 1000),
   ...options,
 });
 
@@ -1027,6 +1257,9 @@ const mutateProjectFromTelegram = async (env, projectId, actor, role, action, su
     const previous = snapshot.state;
     const next = JSON.parse(JSON.stringify(previous));
     const resultState = await mutate(next);
+    if (resultState === TELEGRAM_MUTATION_NOOP) {
+      return { previous, state: previous, revision: snapshot.revision, updatedAt: snapshot.updatedAt, changed: false };
+    }
     const state = resultState ?? next;
     const stateJson = JSON.stringify(state);
     const stateBytes = new TextEncoder().encode(stateJson).byteLength;
@@ -1048,31 +1281,18 @@ const mutateProjectFromTelegram = async (env, projectId, actor, role, action, su
     } catch {
       // Основное состояние уже сохранено.
     }
-    return { previous, state, revision: nextRevision, updatedAt: now };
+    return { previous, state, revision: nextRevision, updatedAt: now, changed: true };
   }
   throw new Error('revision_conflict');
 };
 
-const bindingForTelegramUser = async (db, telegramUserId, chatId = '') => {
+const bindingForTelegramProject = async (db, telegramUserId, projectId) => {
   await ensureSchema(db);
-  if (chatId) {
-    const mapped = await db.prepare(`SELECT project_id FROM telegram_chat_projects WHERE chat_id = ?`).bind(chatId).first();
-    if (mapped?.project_id) {
-      const binding = await db.prepare(`
-        SELECT telegram_user_id, project_id, system_user_id, private_chat_id, username, display_name, role, bound_at, updated_at
-        FROM telegram_bindings
-        WHERE telegram_user_id = ? AND project_id = ?
-      `).bind(telegramUserId, mapped.project_id).first();
-      if (binding) return binding;
-    }
-  }
   return db.prepare(`
     SELECT telegram_user_id, project_id, system_user_id, private_chat_id, username, display_name, role, bound_at, updated_at
     FROM telegram_bindings
-    WHERE telegram_user_id = ?
-    ORDER BY updated_at DESC
-    LIMIT 1
-  `).bind(telegramUserId).first();
+    WHERE telegram_user_id = ? AND project_id = ?
+  `).bind(telegramUserId, projectId).first();
 };
 
 const bindingsForTelegramUser = async (db, telegramUserId) => {
@@ -1086,23 +1306,89 @@ const bindingsForTelegramUser = async (db, telegramUserId) => {
   return result?.results ?? [];
 };
 
-const createTelegramDraft = async (db, telegramUserId, chatId, projectId, kind, payload) => {
-  const id = shortId();
+export const selectTelegramBinding = (bindings, selectedProjectId = '') => {
+  if (selectedProjectId) {
+    const selected = bindings.find((item) => item.project_id === selectedProjectId);
+    if (selected) return selected;
+  }
+  return bindings.length === 1 ? bindings[0] : null;
+};
+
+const bindingForTelegramUser = async (db, telegramUserId, chatId = '') => {
+  const bindings = await bindingsForTelegramUser(db, telegramUserId);
+  if (!bindings.length) return null;
+  if (chatId) {
+    const mapped = await db.prepare(`
+      SELECT project_id
+      FROM telegram_user_chat_projects
+      WHERE telegram_user_id = ? AND chat_id = ?
+    `).bind(telegramUserId, chatId).first();
+    const selected = selectTelegramBinding(bindings, mapped?.project_id);
+    if (selected) return selected;
+  }
+  return selectTelegramBinding(bindings);
+};
+
+const saveTelegramProjectSelection = async (db, telegramUserId, chatId, projectId) => {
+  const now = new Date().toISOString();
+  await db.prepare(`
+    INSERT INTO telegram_user_chat_projects (telegram_user_id, chat_id, project_id, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(telegram_user_id, chat_id) DO UPDATE SET
+      project_id = excluded.project_id,
+      updated_at = excluded.updated_at
+  `).bind(telegramUserId, chatId, projectId, now).run();
+};
+
+export const createTelegramDraft = async (db, telegramUserId, chatId, projectId, kind, payload, sourceMessageId = '') => {
+  const sourceKey = clean(sourceMessageId, 120);
+  const id = sourceKey
+    ? (await sha256(`telegram-draft:${telegramUserId}:${chatId}:${kind}:${sourceKey}`)).slice(0, 16)
+    : shortId();
   const now = new Date();
   await db.prepare(`
     INSERT INTO telegram_drafts (
       id, telegram_user_id, chat_id, project_id, kind, payload_json, status, created_at, expires_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)
+    ON CONFLICT(id) DO NOTHING
   `).bind(id, telegramUserId, chatId, projectId, kind, JSON.stringify(payload), now.toISOString(), addDays(now, 1).toISOString(), now.toISOString()).run();
-  return { id, payload };
+  const row = await db.prepare(`
+    SELECT id, telegram_user_id, chat_id, project_id, kind, payload_json, status, created_at, expires_at, updated_at
+    FROM telegram_drafts
+    WHERE id = ? AND telegram_user_id = ? AND chat_id = ? AND kind = ?
+  `).bind(id, telegramUserId, chatId, kind).first();
+  if (!row) throw new Error('draft_create_failed');
+  try {
+    return { ...row, payload: JSON.parse(row.payload_json) };
+  } catch {
+    throw new Error('draft_create_failed');
+  }
 };
 
 const readTelegramDraft = async (db, id, telegramUserId) => {
-  const row = await db.prepare(`
+  let row = await db.prepare(`
     SELECT id, telegram_user_id, chat_id, project_id, kind, payload_json, status, created_at, expires_at, updated_at
     FROM telegram_drafts
     WHERE id = ? AND telegram_user_id = ?
   `).bind(id, telegramUserId).first();
+  if (row?.status === 'processing') {
+    const updatedAt = Date.parse(clean(row.updated_at, 80));
+    const stale = !Number.isFinite(updatedAt) || Date.now() - updatedAt > TELEGRAM_DRAFT_LEASE_MS;
+    if (stale) {
+      const reclaimed = await db.prepare(`
+        UPDATE telegram_drafts
+        SET status = 'draft', updated_at = ?
+        WHERE id = ? AND telegram_user_id = ? AND status = 'processing' AND updated_at = ?
+      `).bind(new Date().toISOString(), id, telegramUserId, row.updated_at).run();
+      if (changes(reclaimed) === 1) {
+        row = await db.prepare(`
+          SELECT id, telegram_user_id, chat_id, project_id, kind, payload_json, status, created_at, expires_at, updated_at
+          FROM telegram_drafts
+          WHERE id = ? AND telegram_user_id = ?
+        `).bind(id, telegramUserId).first();
+      }
+    }
+  }
   if (!row || row.status !== 'draft' || row.expires_at < new Date().toISOString()) return null;
   try {
     return { ...row, payload: JSON.parse(row.payload_json) };
@@ -1111,12 +1397,83 @@ const readTelegramDraft = async (db, id, telegramUserId) => {
   }
 };
 
-const updateTelegramDraft = async (db, draft, payload, status = 'draft') => {
-  await db.prepare(`
+export const updateTelegramDraft = async (db, draft, payload, status = 'draft') => {
+  const expectedStatus = status === 'draft' ? 'draft' : 'processing';
+  const result = await db.prepare(`
     UPDATE telegram_drafts
     SET payload_json = ?, status = ?, updated_at = ?
-    WHERE id = ? AND status = 'draft'
-  `).bind(JSON.stringify(payload), status, new Date().toISOString(), draft.id).run();
+    WHERE id = ? AND status = ? AND updated_at = ?
+  `).bind(JSON.stringify(payload), status, new Date().toISOString(), draft.id, expectedStatus, draft.updated_at).run();
+  if (changes(result) !== 1) throw new Error('draft_state_conflict');
+};
+
+export const claimTelegramDraft = async (db, draft) => {
+  const lease = new Date().toISOString();
+  const result = await db.prepare(`
+    UPDATE telegram_drafts
+    SET status = 'processing', updated_at = ?
+    WHERE id = ? AND telegram_user_id = ? AND chat_id = ? AND status = 'draft' AND updated_at = ?
+  `).bind(lease, draft.id, draft.telegram_user_id, draft.chat_id, draft.updated_at).run();
+  return changes(result) === 1 ? lease : null;
+};
+
+const readClaimedTelegramDraft = async (db, draft, lease) => {
+  const row = await db.prepare(`
+    SELECT id, telegram_user_id, chat_id, project_id, kind, payload_json, status, created_at, expires_at, updated_at
+    FROM telegram_drafts
+    WHERE id = ? AND telegram_user_id = ? AND chat_id = ? AND status = 'processing' AND updated_at = ?
+  `).bind(draft.id, draft.telegram_user_id, draft.chat_id, lease).first();
+  if (!row) throw new Error('draft_state_conflict');
+  try {
+    return { ...row, payload: JSON.parse(row.payload_json) };
+  } catch {
+    throw new Error('draft_state_conflict');
+  }
+};
+
+const assertTelegramDraftLease = async (db, draft) => {
+  const row = await db.prepare(`
+    SELECT id
+    FROM telegram_drafts
+    WHERE id = ? AND telegram_user_id = ? AND chat_id = ? AND status = 'processing' AND updated_at = ?
+  `).bind(draft.id, draft.telegram_user_id, draft.chat_id, draft.updated_at).first();
+  if (!row) throw new Error('draft_state_conflict');
+};
+
+const saveClaimedTelegramDraftPayload = async (db, draft, payload) => {
+  const updatedAt = new Date().toISOString();
+  const result = await db.prepare(`
+    UPDATE telegram_drafts
+    SET payload_json = ?, updated_at = ?
+    WHERE id = ? AND status = 'processing' AND updated_at = ?
+  `).bind(JSON.stringify(payload), updatedAt, draft.id, draft.updated_at).run();
+  if (changes(result) !== 1) throw new Error('draft_state_conflict');
+  return { ...draft, payload, payload_json: JSON.stringify(payload), updated_at: updatedAt };
+};
+
+export const releaseTelegramDraft = async (db, draft) => {
+  await db.prepare(`
+    UPDATE telegram_drafts
+    SET status = 'draft', updated_at = ?
+    WHERE id = ? AND status = 'processing' AND updated_at = ?
+  `).bind(new Date().toISOString(), draft.id, draft.updated_at).run();
+};
+
+const runClaimedTelegramDraft = async (callback, draft, env, action) => {
+  const lease = await claimTelegramDraft(env.DB, draft);
+  if (!lease) {
+    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Черновик уже обрабатывается или закрыт.', true);
+    return false;
+  }
+  let claimedDraft = null;
+  try {
+    claimedDraft = await readClaimedTelegramDraft(env.DB, draft, lease);
+    await action(claimedDraft);
+    return true;
+  } catch (error) {
+    await releaseTelegramDraft(env.DB, claimedDraft ?? { ...draft, updated_at: lease });
+    throw error;
+  }
 };
 
 const telegramDisplayName = (from) => clean([from?.first_name, from?.last_name].filter(Boolean).join(' '), 160)
@@ -1124,7 +1481,7 @@ const telegramDisplayName = (from) => clean([from?.first_name, from?.last_name].
   || `Telegram ${String(from?.id ?? '')}`;
 
 const TELEGRAM_COMMAND_NAMES = [
-  'task', 'tasks', 'stages', 'done', 'finance', 'status',
+  'task', 'tasks', 'stages', 'done', 'finance', 'expense', 'status',
   'note', 'report', 'doc', 'camera', 'project', 'help',
 ];
 
@@ -1164,11 +1521,18 @@ const telegramCommandSuggestion = (value) => {
   return ranked[0]?.distance <= 1 ? ranked[0].candidate : '';
 };
 
-const commandFromText = (value) => {
+export const commandFromText = (value) => {
   const text = clean(value, 3000);
-  const match = text.match(/^\/([a-z_]+)(?:@[a-z0-9_]+)?(?:\s+([\s\S]*))?$/i);
-  return match ? { name: match[1].toLocaleLowerCase('en-US'), body: clean(match[2], 2400) } : null;
+  const match = text.match(/^\/([a-z_]+)(?:@([a-z0-9_]+))?(?:\s+([\s\S]*))?$/i);
+  return match ? {
+    name: match[1].toLocaleLowerCase('en-US'),
+    target: clean(match[2], 120).toLocaleLowerCase('en-US'),
+    body: clean(match[3], 2400),
+  } : null;
 };
+
+export const telegramCommandTargetsBot = (command, botUsername) => !command?.target
+  || command.target === clean(botUsername, 120).replace(/^@/u, '').toLocaleLowerCase('en-US');
 
 const taskAssigneeFromText = (state, text) => {
   const source = clean(text, 2400).toLocaleLowerCase('ru');
@@ -1206,6 +1570,7 @@ const renderTaskDraft = (draft, state) => {
     text: [
       'Черновик задачи',
       '',
+      `Проект: ${payload.projectName}`,
       `Что: ${payload.title}`,
       `Ответственный: ${assignee?.name ?? 'выберите ниже'}`,
       `Срок: ${payload.dueDate}`,
@@ -1236,6 +1601,7 @@ const renderFileDraft = (draft) => {
     text: [
       isDocument ? 'Черновик документа' : 'Черновик записи в дневник объекта',
       '',
+      `Проект: ${payload.projectName}`,
       `Файл: ${payload.fileName}`,
       isDocument ? `Категория: ${payload.typeLabel}` : `Комментарий: ${payload.note || 'без комментария'}`,
       '',
@@ -1250,16 +1616,20 @@ const renderFileDraft = (draft) => {
   };
 };
 
-const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uploadedBy) => {
+const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uploadedBy, draftId) => {
   const metadataResponse = await telegramRequest(env.TELEGRAM_BOT_TOKEN, 'getFile', { file_id: fileId });
   const metadataBody = await parseTelegramBody(metadataResponse);
   if (!metadataResponse.ok || !metadataBody?.ok || !metadataBody.result?.file_path) throw new Error('telegram_file_unavailable');
   const declaredSize = Number(metadataBody.result.file_size) || 0;
   if (declaredSize > MAX_FILE_BYTES) throw new Error('telegram_file_too_large');
-  const sourceResponse = await fetch(telegramApiUrl(`/file/bot${env.TELEGRAM_BOT_TOKEN}/${metadataBody.result.file_path}`), { headers: telegramTransportHeaders() });
+  const sourceResponse = await fetch(telegramApiUrl(`/file/bot${env.TELEGRAM_BOT_TOKEN}/${metadataBody.result.file_path}`), {
+    headers: telegramTransportHeaders(),
+    signal: AbortSignal.timeout(60_000),
+  });
   if (!sourceResponse.ok || !sourceResponse.body) throw new Error('telegram_file_unavailable');
   const safeName = safeFileName(fileName);
-  const key = `${projectId}/telegram/${crypto.randomUUID()}-${safeName}`;
+  const stableDraftId = clean(draftId, 80) || crypto.randomUUID();
+  const key = `${projectId}/telegram/${stableDraftId}-${safeName}`;
   const uploadedAt = new Date().toISOString();
   await env.BUCKET.put(key, sourceResponse.body, {
     httpMetadata: { contentType: clean(mimeType, 120) || sourceResponse.headers.get('content-type') || 'application/octet-stream' },
@@ -1272,7 +1642,7 @@ const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uplo
     },
   });
   return {
-    id: `attachment-${crypto.randomUUID()}`,
+    id: `attachment-telegram-${stableDraftId}`,
     key,
     name: safeName,
     mimeType: clean(mimeType, 120) || sourceResponse.headers.get('content-type') || 'application/octet-stream',
@@ -1281,6 +1651,37 @@ const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uplo
     uploadedBy: clean(uploadedBy, 160),
     source: 'telegram',
   };
+};
+
+export const resolveTelegramDraftFile = async (state, draft, loadAttachment) => {
+  const isDocument = draft?.kind === 'document';
+  const saved = isDocument
+    ? (state?.documents ?? []).find((item) => item.sourceDraftId === draft?.id)
+    : (state?.fieldReports ?? []).find((item) => item.sourceDraftId === draft?.id);
+  if (!saved) return { existing: false, attachment: await loadAttachment(), saved: null };
+
+  const attachment = isDocument
+    ? {
+      id: `attachment-telegram-${draft.id}`,
+      key: clean(saved.fileKey, 500),
+      name: clean(saved.fileName, 240) || clean(saved.name, 240) || clean(draft.payload?.fileName, 240) || 'Файл Telegram',
+      mimeType: clean(saved.mimeType, 120) || clean(draft.payload?.mimeType, 120) || 'application/octet-stream',
+      sizeBytes: Number(saved.sizeBytes) || 0,
+      uploadedAt: clean(saved.uploadedAt, 80),
+      uploadedBy: clean(saved.uploadedBy, 160),
+      source: 'telegram',
+    }
+    : saved.attachments?.[0] ?? {
+      id: `attachment-telegram-${draft.id}`,
+      key: '',
+      name: clean(draft.payload?.fileName, 240) || 'Файл Telegram',
+      mimeType: clean(draft.payload?.mimeType, 120) || 'application/octet-stream',
+      sizeBytes: 0,
+      uploadedAt: clean(saved.createdAt, 80),
+      uploadedBy: clean(saved.author, 160),
+      source: 'telegram',
+    };
+  return { existing: true, attachment, saved };
 };
 
 const telegramOrigin = (env) => clean(env.APP_PUBLIC_URL, 500) || 'https://stroios-work-2026.ozolin.chatgpt.site';
@@ -1299,6 +1700,7 @@ const telegramHelp = (role = 'foreman') => [
   '',
   '🟡 ЗАПИШЕТ ТОЛЬКО ПОСЛЕ ВАШЕГО ПОДТВЕРЖДЕНИЯ',
   role === 'management' ? '/task текст — черновик новой задачи' : null,
+  role === 'management' ? '/expense сумма описание — черновик расхода' : null,
   '/note текст — черновик записи в дневник объекта',
   'Фото или голос + подпись /report — черновик фотоотчёта',
   'Документ + подпись /doc — черновик документа',
@@ -1309,6 +1711,7 @@ const telegramHelp = (role = 'foreman') => [
   '• текст, который бот не смог понять.',
   '',
   'В общем чате обращайтесь к @ikioma_bot, отвечайте на сообщение бота или используйте команду. В личном чате можно писать без упоминания.',
+  'Если свободная фраза с @ikioma_bot не получает ответа, в Telegram включён Privacy Mode: используйте /expense@ikioma_bot, /note@ikioma_bot, /task@ikioma_bot или отключите Privacy Mode через @BotFather.',
   'Если команда написана с ошибкой или смысл неясен, бот ответит «ничего не записано» и предложит подсказку. Молчание никогда не означает сохранение.',
   '',
   '/help — показать эту памятку',
@@ -1323,27 +1726,54 @@ const taskStatusLabel = (status) => ({
   canceled: 'отменено',
 }[status] ?? status);
 
-const taskActionMarkup = (taskId, role) => ({
+export const telegramTaskActionKey = (projectId, taskId) => {
+  let hash = 0xcbf29ce484222325n;
+  for (const character of `${clean(projectId, 100)}\u0000${clean(taskId, 160)}`) {
+    hash ^= BigInt(character.codePointAt(0) ?? 0);
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, '0');
+};
+
+const taskActionMarkup = (projectId, taskId, role) => {
+  const actionKey = telegramTaskActionKey(projectId, taskId);
+  return ({
   inline_keyboard: role === 'management'
     ? [[
-      { text: 'В работу', callback_data: `ts|${taskId}|ip` },
-      { text: 'Выполнено', callback_data: `ts|${taskId}|done` },
-      { text: 'Есть проблема', callback_data: `ts|${taskId}|wait` },
+      { text: 'В работу', callback_data: `ts|${actionKey}|ip` },
+      { text: 'Выполнено', callback_data: `ts|${actionKey}|done` },
+      { text: 'Есть проблема', callback_data: `ts|${actionKey}|wait` },
     ]]
     : [[
-      { text: 'Принял', callback_data: `ts|${taskId}|ip` },
-      { text: 'На проверку', callback_data: `ts|${taskId}|review` },
-      { text: 'Есть проблема', callback_data: `ts|${taskId}|wait` },
+      { text: 'Принял', callback_data: `ts|${actionKey}|ip` },
+      { text: 'На проверку', callback_data: `ts|${actionKey}|review` },
+      { text: 'Есть проблема', callback_data: `ts|${actionKey}|wait` },
     ]],
-});
+  });
+};
 
 const telegramBotUsername = async (env) => {
-  const stored = await readTelegramConfig(env.DB);
-  const configured = clean(stored?.bot?.username, 120);
-  if (configured) return configured;
-  const response = await telegramRequest(env.TELEGRAM_BOT_TOKEN, 'getMe');
-  const body = await parseTelegramBody(response);
-  return response.ok && body?.ok ? clean(body.result?.username, 120) : '';
+  const fromEnv = clean(env.TELEGRAM_BOT_USERNAME, 120).replace(/^@/u, '');
+  if (fromEnv) return fromEnv;
+  try {
+    const stored = await readTelegramConfig(env.DB);
+    const configured = clean(stored?.bot?.username, 120).replace(/^@/u, '');
+    if (configured) return configured;
+  } catch {
+    // Имя бота не должно зависеть от доступности служебной записи или Telegram getMe.
+  }
+  return 'ikioma_bot';
+};
+
+export const telegramMessageMentionsBot = (message, botUsername) => {
+  const expected = `@${clean(botUsername, 120).replace(/^@/u, '').toLocaleLowerCase('en-US')}`;
+  if (expected === '@') return false;
+  const text = clean(message?.text, 3000);
+  if (new RegExp(`${expected.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}\\b`, 'iu').test(text)) return true;
+  return (message?.entities ?? []).some((entity) => {
+    if (entity?.type !== 'mention') return false;
+    return text.slice(Number(entity.offset) || 0, (Number(entity.offset) || 0) + (Number(entity.length) || 0)).toLocaleLowerCase('en-US') === expected;
+  });
 };
 
 const handleTelegramLink = async (request, env) => {
@@ -1409,6 +1839,15 @@ const bindTelegramUser = async (message, code, env) => {
   }
 
   const now = new Date().toISOString();
+  const linkClaim = await env.DB.prepare(`
+    UPDATE telegram_link_codes
+    SET used_at = ?
+    WHERE code_hash = ? AND used_at IS NULL AND expires_at >= ?
+  `).bind(now, codeHash, now).run();
+  if (changes(linkClaim) !== 1) {
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, chat.id, 'Ссылка уже использована другим подключением. Попросите руководителя выпустить новую в ИКИОМА ОС.');
+    return;
+  }
   const telegramUserId = String(from.id);
   const privateChatId = String(chat.id);
   await env.DB.prepare(`
@@ -1434,14 +1873,7 @@ const bindTelegramUser = async (message, code, env) => {
     now,
     now,
   ).run();
-  await env.DB.prepare(`
-    INSERT INTO telegram_chat_projects (chat_id, project_id, updated_at, updated_by)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(chat_id) DO UPDATE SET
-      project_id = excluded.project_id,
-      updated_at = excluded.updated_at,
-      updated_by = excluded.updated_by
-  `).bind(privateChatId, row.project_id, now, telegramUserId).run();
+  await saveTelegramProjectSelection(env.DB, telegramUserId, privateChatId, row.project_id);
 
   await mutateProjectFromTelegram(
     env,
@@ -1467,24 +1899,12 @@ const bindTelegramUser = async (message, code, env) => {
       }, ...(state.activity ?? [])];
     },
   );
-  await env.DB.prepare(`UPDATE telegram_link_codes SET used_at = ? WHERE code_hash = ?`).bind(now, codeHash).run();
-
-  const connection = await resolveTelegramConnection(env, { discover: false });
-  if (connection.chat?.id) {
-    await env.DB.prepare(`
-      INSERT INTO telegram_chat_projects (chat_id, project_id, updated_at, updated_by)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(chat_id) DO UPDATE SET
-        project_id = excluded.project_id,
-        updated_at = excluded.updated_at,
-        updated_by = excluded.updated_by
-    `).bind(String(connection.chat.id), row.project_id, now, telegramUserId).run();
-  }
   await telegramSend(
     env.TELEGRAM_BOT_TOKEN,
     privateChatId,
     `Готово, ${user.name}. Вы подключены к проекту «${snapshot.state.project?.name ?? snapshot.state.project?.code}».\n\n${telegramHelp(user.role)}`,
   );
+  await reviveTelegramOutbox(env.DB, privateChatId);
 };
 
 const projectForBinding = async (env, binding) => {
@@ -1512,11 +1932,12 @@ const telegramTaskDraft = async (message, binding, body, env) => {
   const dueOffset = Math.max(0, Math.round((new Date(`${dueDate}T12:00:00Z`).getTime() - new Date(`${dateKey()}T12:00:00Z`).getTime()) / 86_400_000));
   const draft = await createTelegramDraft(env.DB, String(message.from.id), String(message.chat.id), binding.project_id, 'task', {
     title: clean(body, 500),
+    projectName: snapshot.state.project?.name ?? snapshot.state.project?.code ?? binding.project_id,
     assigneeId: assignee?.id ?? '',
     dueDate,
     dueOffset: [0, 1, 3, 7].includes(dueOffset) ? dueOffset : -1,
     priority: taskPriorityFromText(body),
-  });
+  }, String(message.message_id ?? ''));
   const card = renderTaskDraft(draft, snapshot.state);
   await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, card.text, { reply_markup: card.replyMarkup });
 };
@@ -1583,9 +2004,127 @@ const telegramFinance = async (message, binding, env) => {
   ].join('\n'));
 };
 
-const naturalTelegramCommand = (value) => {
+const expenseSelectionFromDescription = (options, description) => {
+  const source = clean(description, 500).toLocaleLowerCase('ru').replace(/ё/g, 'е');
+  const matched = options.find((item) => {
+    const name = clean(item.name, 200).toLocaleLowerCase('ru').replace(/ё/g, 'е');
+    return name.length >= 4 && source.includes(name);
+  });
+  return matched?.id ?? (options.length === 1 ? options[0].id : '');
+};
+
+const renderExpenseDraft = (draft) => {
+  const payload = draft.payload;
+  const budgetLine = payload.budgetLines?.find((item) => item.id === payload.budgetLineId);
+  const stage = payload.stages?.find((item) => item.id === payload.stageId);
+  const counterparty = payload.counterparties?.find((item) => item.id === payload.counterpartyId);
+  const rows = [];
+  for (let index = 0; index < (payload.budgetLines ?? []).length; index += 1) {
+    const item = payload.budgetLines[index];
+    rows.push([{ text: `${item.id === payload.budgetLineId ? '✓ ' : ''}Статья: ${item.name}`, callback_data: `eb|${draft.id}|${index}` }]);
+  }
+  for (let index = 0; index < (payload.counterparties ?? []).length; index += 2) {
+    rows.push(payload.counterparties.slice(index, index + 2).map((item) => ({
+      text: `${item.id === payload.counterpartyId ? '✓ ' : ''}${item.name}`,
+      callback_data: `ec|${draft.id}|${payload.counterparties.indexOf(item)}`,
+    })));
+  }
+  const allowedStages = (payload.stages ?? []).filter((item) => budgetLine?.stageIds?.includes(item.id));
+  if (allowedStages.length > 1) {
+    for (let index = 0; index < allowedStages.length; index += 2) {
+      rows.push(allowedStages.slice(index, index + 2).map((item) => ({
+        text: `${item.id === payload.stageId ? '✓ ' : ''}Этап: ${item.name}`,
+        callback_data: `es|${draft.id}|${payload.stages.indexOf(item)}`,
+      })));
+    }
+  }
+  rows.push([
+    { text: 'Сохранить расход', callback_data: `xc|${draft.id}` },
+    { text: 'Отмена', callback_data: `xx|${draft.id}` },
+  ]);
+  return {
+    text: [
+      'Черновик расхода',
+      '',
+      `Проект: ${payload.projectName}`,
+      `Сумма: ${Number(payload.amount).toLocaleString('ru-RU')} ₽`,
+      `Основание: ${payload.description}`,
+      `Статья: ${budgetLine?.name ?? 'выберите ниже'}`,
+      `Этап: ${stage?.name ?? (budgetLine ? 'выберите ниже' : 'сначала выберите статью')}`,
+      `Контрагент: ${counterparty?.name ?? (payload.counterparties?.length ? 'выберите ниже' : 'сначала добавьте в ИКИОМА ОС')}`,
+      '',
+      'Это обязательство. Оплата и приёмка не фиксируются автоматически.',
+      'В ИКИОМА ОС ничего не изменится, пока вы не нажмёте «Сохранить расход».',
+    ].join('\n'),
+    replyMarkup: { inline_keyboard: rows },
+  };
+};
+
+const telegramExpenseDraft = async (message, binding, body, env) => {
+  const { snapshot, user } = await projectForBinding(env, binding);
+  if (user.role !== 'management') {
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Добавлять расходы через Telegram может только роль «Управление».');
+    return;
+  }
+  const expense = parseTelegramExpense(body);
+  if (!expense) {
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
+      'Не удалось определить сумму и основание расхода.',
+      'Ничего не записано в ИКИОМА ОС.',
+      '',
+      'Пример: /expense 6000 пробное бурение',
+    ].join('\n'));
+    return;
+  }
+  const budgetLines = (snapshot.state.budgetLines ?? []).slice(0, 12).map((item) => ({
+    id: item.id,
+    name: item.name,
+    stageIds: item.stageIds ?? [],
+  }));
+  const stages = (snapshot.state.stages ?? []).map((item) => ({ id: item.id, name: item.name }));
+  const counterparties = (snapshot.state.counterparties ?? [])
+    .filter((item) => item.status !== 'blocked')
+    .slice(0, 12)
+    .map((item) => ({ id: item.id, name: item.name }));
+  const budgetLineId = expenseSelectionFromDescription(budgetLines, expense.description);
+  const selectedBudgetLine = budgetLines.find((item) => item.id === budgetLineId);
+  const draft = await createTelegramDraft(env.DB, String(message.from.id), String(message.chat.id), binding.project_id, 'expense', {
+    ...expense,
+    projectName: snapshot.state.project?.name ?? snapshot.state.project?.code ?? binding.project_id,
+    budgetLines,
+    stages,
+    counterparties,
+    budgetLineId,
+    stageId: selectedBudgetLine?.stageIds?.length === 1 ? selectedBudgetLine.stageIds[0] : '',
+    counterpartyId: expenseSelectionFromDescription(counterparties, expense.description),
+  }, String(message.message_id ?? ''));
+  const card = renderExpenseDraft(draft);
+  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, card.text, { reply_markup: card.replyMarkup });
+};
+
+export const parseTelegramExpense = (value) => {
+  const source = clean(value, 2400).replace(/\u00a0/gu, ' ').trim();
+  const amountMatch = source.match(/\d[\d ]*(?:[.,]\d{1,2})?/u);
+  if (!amountMatch || amountMatch.index === undefined) return null;
+  const amount = Number(amountMatch[0].replace(/\s+/gu, '').replace(',', '.'));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000_000) return null;
+  const before = source.slice(0, amountMatch.index);
+  const after = source.slice(amountMatch.index + amountMatch[0].length)
+    .replace(/^\s*(?:₽|руб(?:\.?|ля|лей)?|р\.)\s*/iu, ' ');
+  const description = clean(`${before} ${after}`.replace(/^\s*(?:на|за)\s+/iu, '').replace(/^[\s:—-]+|[\s:—-]+$/gu, ''), 500);
+  return description ? { amount, description } : null;
+};
+
+export const naturalTelegramCommand = (value) => {
   const source = clean(value, 3000).trim();
   const text = source.toLocaleLowerCase('ru').replace(/ё/g, 'е');
+  const writeIntent = source.match(/^(?:запиши(?:\s+в\s+ос)?|зафиксируй|добавь)\s+([а-яё]+)(?=\s|[:—-]|$)\s*[:—-]?\s*([\s\S]*)$/iu);
+  if (writeIntent) {
+    const token = writeIntent[1].toLocaleLowerCase('ru').replace(/ё/g, 'е');
+    const expenseWords = ['расход', 'расхода', 'расходу', 'расходы', 'расходов', 'затрата', 'затрату', 'затраты', 'трата', 'трату', 'траты', 'оплата', 'оплату'];
+    const likelyExpense = expenseWords.some((word) => telegramCommandDistance(token, word) <= 1);
+    if (likelyExpense) return { name: 'expense', body: clean(writeIntent[2], 2400) };
+  }
   const note = source.match(/^(?:запомни|зафиксируй|запиши(?:\s+в\s+ос)?|добавь\s+заметку)\s*[:—-]?\s*([\s\S]+)$/iu);
   if (note?.[1]) return { name: 'note', body: clean(note[1], 2400) };
   if (/(этап|этапы|стадии|ход работ)/u.test(text)) return { name: 'stages', body: '' };
@@ -1637,21 +2176,43 @@ const telegramCamera = async (message, binding, env) => {
   await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Камера ещё не установлена. Команда уже готова и заработает после подключения оборудования.');
 };
 
-const telegramSelectProject = async (message, binding, env) => {
-  const bindings = await bindingsForTelegramUser(env.DB, String(message.from.id));
-  if (bindings.length <= 1) {
-    const { snapshot } = await projectForBinding(env, binding);
-    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, `Текущий объект: ${snapshot.state.project?.name ?? snapshot.state.project?.code}`);
-    return;
-  }
+const telegramProjectsForBindings = async (env, bindings) => {
   const projects = [];
   for (const item of bindings.slice(0, 12)) {
     const snapshot = await readSnapshot(env.DB, item.project_id);
     if (snapshot) projects.push({ id: item.project_id, name: snapshot.state.project?.name ?? snapshot.state.project?.code ?? item.project_id });
   }
-  const draft = await createTelegramDraft(env.DB, String(message.from.id), String(message.chat.id), binding.project_id, 'project', { projects });
-  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Выберите объект для этого чата:', {
-    reply_markup: { inline_keyboard: projects.map((item, index) => [{ text: item.name, callback_data: `ps|${draft.id}|${index}` }]) },
+  return projects;
+};
+
+const telegramSelectProject = async (message, binding, env, options = {}) => {
+  const bindings = options.bindings ?? await bindingsForTelegramUser(env.DB, String(message.from.id));
+  if (!bindings.length) return;
+  const projects = await telegramProjectsForBindings(env, bindings);
+  if (projects.length === 1 && !options.pending) {
+    await saveTelegramProjectSelection(env.DB, String(message.from.id), String(message.chat.id), projects[0].id);
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, `Текущий объект: ${projects[0].name}`);
+    return;
+  }
+  const current = projects.find((item) => item.id === binding?.project_id);
+  const draft = await createTelegramDraft(
+    env.DB,
+    String(message.from.id),
+    String(message.chat.id),
+    binding?.project_id ?? projects[0]?.id,
+    'project',
+    { projects, pending: options.pending ?? null },
+    String(message.message_id ?? ''),
+  );
+  const prompt = options.prompt
+    || [current ? `Сейчас выбран: ${current.name}` : '', 'Выберите объект для этого чата:'].filter(Boolean).join('\n\n');
+  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, prompt, {
+    reply_markup: {
+      inline_keyboard: projects.map((item, index) => [{
+        text: `${item.id === current?.id ? '✓ ' : ''}${item.name}`,
+        callback_data: `ps|${draft.id}|${index}`,
+      }]),
+    },
   });
 };
 
@@ -1672,6 +2233,7 @@ const telegramNoteDraft = async (message, binding, body, env) => {
       note,
       telegramMessageId: String(message.message_id ?? ''),
     },
+    String(message.message_id ?? ''),
   );
   await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
     'Черновик записи в дневник объекта',
@@ -1693,9 +2255,11 @@ const telegramNoteDraft = async (message, binding, body, env) => {
 };
 
 const telegramAttachmentDraft = async (message, binding, env) => {
+  const { snapshot } = await projectForBinding(env, binding);
   const caption = clean(message.caption, 1200);
   const captionCommand = commandFromText(caption);
   const isPrivate = message.chat?.type === 'private';
+  if (!isPrivate && !telegramCommandTargetsBot(captionCommand, await telegramBotUsername(env))) return;
   if (!isPrivate && !['doc', 'report'].includes(captionCommand?.name)) return;
   const document = message.document;
   const photo = Array.isArray(message.photo) ? message.photo.at(-1) : null;
@@ -1708,6 +2272,7 @@ const telegramAttachmentDraft = async (message, binding, env) => {
   const [category, typeLabel] = categoryFromDocument(fallbackName, caption);
   const note = clean(captionCommand?.body || caption, 1000);
   const draft = await createTelegramDraft(env.DB, String(message.from.id), String(message.chat.id), binding.project_id, kind, {
+    projectName: snapshot.state.project?.name ?? snapshot.state.project?.code ?? binding.project_id,
     telegramFileId: source.file_id,
     fileName: fallbackName,
     mimeType: clean(document?.mime_type || voice?.mime_type || (photo ? 'image/jpeg' : ''), 120),
@@ -1716,21 +2281,75 @@ const telegramAttachmentDraft = async (message, binding, env) => {
     category,
     typeLabel,
     telegramMessageId: String(message.message_id ?? ''),
-  });
+  }, String(message.message_id ?? ''));
   const card = renderFileDraft(draft);
   await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, card.text, { reply_markup: card.replyMarkup });
 };
 
-const telegramHandleCommand = async (message, binding, command, env) => {
+const telegramAttachmentPayload = (message) => ({
+  message_id: message.message_id,
+  caption: clean(message.caption, 1200),
+  chat: { id: message.chat.id, type: message.chat.type },
+  document: message.document ?? null,
+  photo: message.photo ?? null,
+  voice: message.voice ?? null,
+});
+
+const TELEGRAM_WRITE_COMMANDS = new Set(['task', 'note', 'expense']);
+
+const telegramHandleCommand = async (message, binding, command, env, options = {}) => {
+  const bindings = options.bindings ?? await bindingsForTelegramUser(env.DB, String(message.from.id));
+  if (command.name === 'start') {
+    const role = binding?.role ?? bindings[0]?.role ?? 'foreman';
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
+      bindings.length ? `Telegram подключён. Доступно проектов: ${bindings.length}.` : 'Telegram пока не связан с пользователем ИКИОМА ОС.',
+      '',
+      telegramHelp(role),
+    ].join('\n'));
+    if (bindings.length > 1) await telegramSelectProject(message, binding, env, { bindings });
+    return;
+  }
+  if (command.name === 'help') {
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, telegramHelp(binding?.role ?? bindings[0]?.role ?? 'foreman'));
+    return;
+  }
+  if (command.name === 'project') return telegramSelectProject(message, binding, env, { bindings });
+  if (!TELEGRAM_COMMAND_NAMES.includes(command.name)) {
+    const suggestion = telegramCommandSuggestion(command.name);
+    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
+      `Команда /${command.name} не распознана.`,
+      suggestion ? `Возможно, вы имели в виду /${suggestion}.` : null,
+      'Ничего не записано в ИКИОМА ОС.',
+      '',
+      'Отправьте /help, чтобы увидеть все команды.',
+    ].filter(Boolean).join('\n'));
+    return;
+  }
+  if (bindings.length > 1 && TELEGRAM_WRITE_COMMANDS.has(command.name) && !options.projectConfirmed) {
+    await telegramSelectProject(message, binding, env, {
+      bindings,
+      pending: { type: 'command', command, sourceMessageId: String(message.message_id ?? '') },
+      prompt: 'К какому проекту относится это действие?',
+    });
+    return;
+  }
+  if (!binding) {
+    await telegramSelectProject(message, binding, env, {
+      bindings,
+      pending: { type: 'command', command, sourceMessageId: String(message.message_id ?? '') },
+      prompt: `Выберите проект для команды /${command.name}:`,
+    });
+    return;
+  }
   if (command.name === 'task') return telegramTaskDraft(message, binding, command.body, env);
   if (command.name === 'tasks') return telegramTasks(message, binding, env);
   if (command.name === 'stages') return telegramStages(message, binding, env);
   if (command.name === 'done') return telegramCompletedTasks(message, binding, env);
   if (command.name === 'finance') return telegramFinance(message, binding, env);
+  if (command.name === 'expense') return telegramExpenseDraft(message, binding, command.body, env);
   if (command.name === 'status') return telegramProjectStatus(message, binding, env);
   if (command.name === 'note') return telegramNoteDraft(message, binding, command.body, env);
   if (command.name === 'camera') return telegramCamera(message, binding, env);
-  if (command.name === 'project') return telegramSelectProject(message, binding, env);
   if (command.name === 'doc') {
     await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Пришлите файл в личный чат с ботом. В общем чате приложите к документу подпись /doc. Бот покажет категорию и попросит подтверждение.');
     return;
@@ -1739,44 +2358,45 @@ const telegramHandleCommand = async (message, binding, command, env) => {
     await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Пришлите фото или голосовое сообщение в личный чат. В общем чате добавьте подпись /report и комментарий. Запись попадёт в дневник объекта только после подтверждения.');
     return;
   }
-  const { user } = await projectForBinding(env, binding);
-  if (command.name === 'help') {
-    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, telegramHelp(user.role));
-    return;
-  }
-  const suggestion = telegramCommandSuggestion(command.name);
-  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
-    `Команда /${command.name} не распознана.`,
-    suggestion ? `Возможно, вы имели в виду /${suggestion}.` : null,
-    'Ничего не записано в ИКИОМА ОС.',
-    '',
-    'Отправьте /help, чтобы увидеть все команды.',
-  ].filter(Boolean).join('\n'));
 };
 
 const telegramHandleMessage = async (message, env) => {
   if (!message?.chat?.id || !message?.from?.id || message.from.is_bot) return;
   const command = commandFromText(message.text);
+  const isPrivate = message.chat.type === 'private';
+  const botUsername = isPrivate ? '' : await telegramBotUsername(env);
+  if (!isPrivate && !telegramCommandTargetsBot(command, botUsername)) return;
+  if (!isPrivate && !await telegramGroupChatAuthorized(env, message.chat.id)) {
+    const addressed = Boolean(command) || telegramMessageMentionsBot(message, botUsername);
+    if (addressed) {
+      await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Этот чат не подключён к ИКИОМА ОС. Попросите руководителя выбрать и подтвердить общий Telegram-чат в настройках ОС.');
+    }
+    return;
+  }
   if (command?.name === 'start' && command.body) {
     await bindTelegramUser(message, command.body, env);
     return;
   }
 
   const rawText = clean(message.text, 3000);
-  let botUsername = '';
   let mentioned = false;
-  if (!command && message.chat.type !== 'private') {
-    botUsername = await telegramBotUsername(env);
-    mentioned = Boolean(botUsername && new RegExp(`@${botUsername}\\b`, 'iu').test(rawText));
+  if (!command && !isPrivate) {
+    mentioned = telegramMessageMentionsBot(message, botUsername);
   }
-  const repliedToBot = Boolean(message.reply_to_message?.from?.is_bot);
-  const addressedToBot = message.chat.type === 'private' || Boolean(command) || mentioned || repliedToBot;
+  const replyAuthor = message.reply_to_message?.from;
+  const repliedToBot = Boolean(
+    replyAuthor?.is_bot
+    && clean(replyAuthor.username, 120).replace(/^@/u, '').toLocaleLowerCase('en-US') === botUsername.toLocaleLowerCase('en-US'),
+  );
+  const addressedToBot = isPrivate || Boolean(command) || mentioned || repliedToBot;
+  const bindings = await bindingsForTelegramUser(env.DB, String(message.from.id));
   const binding = await bindingForTelegramUser(env.DB, String(message.from.id), String(message.chat.id));
 
-  if (!binding) {
-    if (command?.name === 'help') {
+  if (!bindings.length) {
+    if (command?.name === 'help' || command?.name === 'start') {
       await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, telegramHelp('management'));
-    } else if (addressedToBot) {
+    }
+    if (addressedToBot && command?.name !== 'help') {
       await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
         'Сообщение не записано в ИКИОМА ОС.',
         'Ваш Telegram ещё не связан с пользователем системы.',
@@ -1789,11 +2409,25 @@ const telegramHandleMessage = async (message, env) => {
   }
 
   if (message.document || message.photo || message.voice) {
+    const captionCommand = commandFromText(message.caption);
+    const acceptedAttachment = isPrivate || (
+      telegramCommandTargetsBot(captionCommand, botUsername)
+      && ['doc', 'report'].includes(captionCommand?.name)
+    );
+    if (!acceptedAttachment) return;
+    if (bindings.length > 1) {
+      await telegramSelectProject(message, binding, env, {
+        bindings,
+        pending: { type: 'attachment', message: telegramAttachmentPayload(message) },
+        prompt: 'К какому проекту относится этот файл или отчёт?',
+      });
+      return;
+    }
     await telegramAttachmentDraft(message, binding, env);
     return;
   }
   if (command) {
-    await telegramHandleCommand(message, binding, command, env);
+    await telegramHandleCommand(message, binding, command, env, { bindings });
     return;
   }
   if (addressedToBot) {
@@ -1802,7 +2436,7 @@ const telegramHandleMessage = async (message, env) => {
       .trim();
     const naturalCommand = naturalTelegramCommand(addressedText);
     if (naturalCommand) {
-      await telegramHandleCommand(message, binding, naturalCommand, env);
+      await telegramHandleCommand(message, binding, naturalCommand, env, { bindings });
       return;
     }
     await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
@@ -1815,12 +2449,14 @@ const telegramHandleMessage = async (message, env) => {
 };
 
 const telegramConfirmTask = async (callback, draft, binding, env) => {
-  const { snapshot, user } = await projectForBinding(env, binding);
+  const access = await projectForBinding(env, binding);
+  const { snapshot } = access;
+  let { user } = access;
   if (user.role !== 'management' || draft.kind !== 'task') throw new Error('action_denied');
-  const assignee = (snapshot.state.settings?.users ?? []).find((item) => item.id === draft.payload.assigneeId && item.status !== 'disabled');
+  let assignee = (snapshot.state.settings?.users ?? []).find((item) => item.id === draft.payload.assigneeId && item.status !== 'disabled' && item.role !== 'client');
   if (!assignee) throw new Error('assignee_missing');
   const now = new Date().toISOString();
-  const taskId = `task-${crypto.randomUUID()}`;
+  const taskId = `task-telegram-${draft.id}`;
   const task = {
     id: taskId,
     title: clean(draft.payload.title, 500),
@@ -1835,6 +2471,7 @@ const telegramConfirmTask = async (callback, draft, binding, env) => {
     originalDueDate: draft.payload.dueDate,
     rescheduleCount: 0,
     attachments: [],
+    sourceDraftId: draft.id,
     history: [{
       id: `task-history-${crypto.randomUUID()}`,
       timestamp: now,
@@ -1843,6 +2480,8 @@ const telegramConfirmTask = async (callback, draft, binding, env) => {
       text: `Создал задачу через Telegram и назначил ${assignee.name}`,
     }],
   };
+  let taskCreated = false;
+  await assertTelegramDraftLease(env.DB, draft);
   const mutation = await mutateProjectFromTelegram(
     env,
     draft.project_id,
@@ -1851,6 +2490,21 @@ const telegramConfirmTask = async (callback, draft, binding, env) => {
     'telegram.task.create',
     `Создана задача «${task.title}» · ответственный ${assignee.name}`,
     (state) => {
+      if ((state.tasks ?? []).some((item) => item.id === taskId || item.sourceDraftId === draft.id)) {
+        taskCreated = false;
+        return TELEGRAM_MUTATION_NOOP;
+      }
+      const currentUser = (state.settings?.users ?? []).find((item) => item.id === binding.system_user_id && item.status !== 'disabled');
+      if (!currentUser || currentUser.role !== 'management') throw new Error('action_denied');
+      const currentAssignee = (state.settings?.users ?? []).find((item) => item.id === draft.payload.assigneeId && item.status !== 'disabled' && item.role !== 'client');
+      if (!currentAssignee) throw new Error('assignee_missing');
+      user = currentUser;
+      assignee = currentAssignee;
+      task.assigneeName = currentAssignee.name;
+      task.createdBy = currentUser.name;
+      task.history[0].actor = currentUser.name;
+      task.history[0].text = `Создал задачу через Telegram и назначил ${currentAssignee.name}`;
+      taskCreated = true;
       state.tasks = [task, ...(state.tasks ?? [])];
       state.activity = [{
         id: `activity-${crypto.randomUUID()}`,
@@ -1861,24 +2515,40 @@ const telegramConfirmTask = async (callback, draft, binding, env) => {
       }, ...(state.activity ?? [])];
     },
   );
-  await updateTelegramDraft(env.DB, draft, draft.payload, 'confirmed');
-  await telegramEditMessage(
-    env.TELEGRAM_BOT_TOKEN,
+  const confirmedTask = (mutation.state.tasks ?? []).find((item) => item.id === taskId || item.sourceDraftId === draft.id) ?? task;
+  const recoveryEvents = mutation.state.settings?.notifications?.events?.taskAssigned
+    ? [notificationEvent(`Задача: «${confirmedTask.title}» → ${confirmedTask.assigneeName}, срок ${confirmedTask.dueDate}`, 'tasks', confirmedTask.id, confirmedTask.assigneeId)]
+    : [];
+  await dispatchNotifications(
+    mutation.previous,
+    mutation.state,
+    env,
+    user.name,
+    telegramOrigin(env),
+    `Создана задача «${confirmedTask.title}»`,
+    `telegram-draft:${draft.id}`,
+    null,
+    recoveryEvents,
+  );
+  const visibility = await telegramConfirmVisible(
+    env,
     callback.message.chat.id,
     callback.message.message_id,
-    `Задача создана\n\n${task.title}\nОтветственный: ${assignee.name}\nСрок: ${task.dueDate}\n\n${deepLink(telegramOrigin(env), draft.project_id, 'tasks', task.id)}`,
+    `Задача создана\n\n${confirmedTask.title}\nОтветственный: ${confirmedTask.assigneeName}\nСрок: ${confirmedTask.dueDate}\n\n${deepLink(telegramOrigin(env), draft.project_id, 'tasks', confirmedTask.id)}`,
   );
-  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), `Создана задача «${task.title}»`);
+  requireTelegramVisibility(visibility);
+  await updateTelegramDraft(env.DB, draft, draft.payload, 'confirmed');
 };
 
 const telegramConfirmNote = async (callback, draft, binding, env) => {
-  const { user } = await projectForBinding(env, binding);
+  const access = await projectForBinding(env, binding);
+  let { user } = access;
   if (draft.kind !== 'note') throw new Error('action_denied');
   const note = clean(draft.payload.note, 2400);
   if (!note) throw new Error('invalid_note');
   const now = new Date().toISOString();
   const report = {
-    id: `field-report-${crypto.randomUUID()}`,
+    id: `field-report-telegram-${draft.id}`,
     createdAt: now,
     author: user.name,
     note,
@@ -1886,7 +2556,10 @@ const telegramConfirmNote = async (callback, draft, binding, env) => {
     clientVisible: false,
     telegramMessageId: draft.payload.telegramMessageId,
     attachments: [],
+    sourceDraftId: draft.id,
   };
+  let noteCreated = false;
+  await assertTelegramDraftLease(env.DB, draft);
   const mutation = await mutateProjectFromTelegram(
     env,
     draft.project_id,
@@ -1895,6 +2568,15 @@ const telegramConfirmNote = async (callback, draft, binding, env) => {
     'telegram.note.create',
     `Добавлена запись в дневник объекта · ${user.name}`,
     (state) => {
+      if ((state.fieldReports ?? []).some((item) => item.id === report.id || item.sourceDraftId === draft.id)) {
+        noteCreated = false;
+        return TELEGRAM_MUTATION_NOOP;
+      }
+      const currentUser = (state.settings?.users ?? []).find((item) => item.id === binding.system_user_id && item.status !== 'disabled');
+      if (!currentUser) throw new Error('action_denied');
+      user = currentUser;
+      report.author = currentUser.name;
+      noteCreated = true;
       state.fieldReports = [report, ...(state.fieldReports ?? [])];
       state.activity = [{
         id: `activity-${crypto.randomUUID()}`,
@@ -1905,31 +2587,147 @@ const telegramConfirmNote = async (callback, draft, binding, env) => {
       }, ...(state.activity ?? [])];
     },
   );
-  await updateTelegramDraft(env.DB, draft, draft.payload, 'confirmed');
-  await telegramEditMessage(
-    env.TELEGRAM_BOT_TOKEN,
+  await dispatchNotifications(
+    mutation.previous,
+    mutation.state,
+    env,
+    user.name,
+    telegramOrigin(env),
+    'Добавлена запись в дневник объекта',
+    `telegram-draft:${draft.id}`,
+  );
+  const visibility = await telegramConfirmVisible(
+    env,
     callback.message.chat.id,
     callback.message.message_id,
     `Запись сохранена в дневнике объекта\n\n${note}\n\n${deepLink(telegramOrigin(env), draft.project_id, 'project')}`,
   );
-  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), 'Добавлена запись в дневник объекта');
+  requireTelegramVisibility(visibility);
+  await updateTelegramDraft(env.DB, draft, draft.payload, 'confirmed');
+};
+
+const telegramConfirmExpense = async (callback, draft, binding, env) => {
+  const access = await projectForBinding(env, binding);
+  const { snapshot } = access;
+  let { user } = access;
+  if (user.role !== 'management' || draft.kind !== 'expense') throw new Error('action_denied');
+  const amount = Number(draft.payload.amount);
+  let budgetLine = (snapshot.state.budgetLines ?? []).find((item) => item.id === draft.payload.budgetLineId);
+  let counterparty = (snapshot.state.counterparties ?? []).find((item) => item.id === draft.payload.counterpartyId && item.status !== 'blocked');
+  const stageId = clean(draft.payload.stageId, 100);
+  let stage = (snapshot.state.stages ?? []).find((item) => item.id === stageId);
+  if (!Number.isFinite(amount) || amount <= 0 || !budgetLine || !counterparty || !stage || !budgetLine.stageIds?.includes(stageId)) throw new Error('expense_details_missing');
+  const now = new Date().toISOString();
+  const entryId = `finance-telegram-${draft.id}`;
+  const entry = {
+    id: entryId,
+    kind: 'expense',
+    status: 'committed',
+    amount,
+    date: dateKey(),
+    stageId,
+    budgetLineId: budgetLine.id,
+    counterparty: counterparty.name,
+    counterpartyId: counterparty.id,
+    description: clean(draft.payload.description, 500),
+    sourceDraftId: draft.id,
+  };
+  let expenseCreated = false;
+  await assertTelegramDraftLease(env.DB, draft);
+  const mutation = await mutateProjectFromTelegram(
+    env,
+    draft.project_id,
+    user.name,
+    user.role,
+    'telegram.expense.create',
+    `Добавлен расход ${Math.round(amount).toLocaleString('ru-RU')} ₽ · ${entry.description}`,
+    (state) => {
+      if ((state.financeEntries ?? []).some((item) => item.id === entryId || item.sourceDraftId === draft.id)) {
+        expenseCreated = false;
+        return TELEGRAM_MUTATION_NOOP;
+      }
+      const currentUser = (state.settings?.users ?? []).find((item) => item.id === binding.system_user_id && item.status !== 'disabled');
+      if (!currentUser || currentUser.role !== 'management') throw new Error('action_denied');
+      const currentBudgetLine = (state.budgetLines ?? []).find((item) => item.id === draft.payload.budgetLineId);
+      const currentCounterparty = (state.counterparties ?? []).find((item) => item.id === draft.payload.counterpartyId && item.status !== 'blocked');
+      const currentStage = (state.stages ?? []).find((item) => item.id === stageId);
+      if (!currentBudgetLine || !currentCounterparty || !currentStage || !currentBudgetLine.stageIds?.includes(stageId)) throw new Error('expense_details_missing');
+      budgetLine = currentBudgetLine;
+      counterparty = currentCounterparty;
+      stage = currentStage;
+      user = currentUser;
+      entry.budgetLineId = currentBudgetLine.id;
+      entry.counterparty = currentCounterparty.name;
+      entry.counterpartyId = currentCounterparty.id;
+      expenseCreated = true;
+      const currentCommitted = (state.financeEntries ?? [])
+        .filter((item) => item.kind === 'expense' && item.budgetLineId === budgetLine.id)
+        .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      state.budgetLines = (state.budgetLines ?? []).map((item) => item.id === budgetLine.id
+        ? { ...item, forecast: Math.max(Number(item.forecast) || 0, currentCommitted + amount) }
+        : item);
+      state.financeEntries = [entry, ...(state.financeEntries ?? [])];
+      state.activity = [{
+        id: `activity-${crypto.randomUUID()}`,
+        timestamp: now,
+        actor: user.name,
+        text: `Добавлен расход ${Math.round(amount).toLocaleString('ru-RU')} ₽ · ${entry.description}`,
+        tone: 'neutral',
+      }, ...(state.activity ?? [])];
+    },
+  );
+  await dispatchNotifications(
+    mutation.previous,
+    mutation.state,
+    env,
+    user.name,
+    telegramOrigin(env),
+    `Добавлен расход «${entry.description}»`,
+    `telegram-draft:${draft.id}`,
+  );
+  const visibility = await telegramConfirmVisible(
+    env,
+    callback.message.chat.id,
+    callback.message.message_id,
+    [
+      'Расход сохранён как обязательство',
+      '',
+      `${amount.toLocaleString('ru-RU')} ₽ · ${entry.description}`,
+      `Статья: ${budgetLine.name}`,
+      `Этап: ${stage.name}`,
+      `Контрагент: ${counterparty.name}`,
+      '',
+      'Оплата и приёмка не зафиксированы.',
+      deepLink(telegramOrigin(env), draft.project_id, 'finance', entryId),
+    ].join('\n'),
+  );
+  requireTelegramVisibility(visibility);
+  await updateTelegramDraft(env.DB, draft, draft.payload, 'confirmed');
 };
 
 const telegramConfirmFile = async (callback, draft, binding, env) => {
-  const { user } = await projectForBinding(env, binding);
-  if (!env.BUCKET) throw new Error('storage_unavailable');
-  const attachment = await telegramFileToR2(
-    env,
-    draft.project_id,
-    draft.payload.telegramFileId,
-    draft.payload.fileName,
-    draft.payload.mimeType,
-    user.name,
-  );
+  const access = await projectForBinding(env, binding);
+  const { snapshot } = access;
+  let { user } = access;
+  await assertTelegramDraftLease(env.DB, draft);
+  const resolvedFile = await resolveTelegramDraftFile(snapshot.state, draft, () => {
+    if (!env.BUCKET) throw new Error('storage_unavailable');
+    return telegramFileToR2(
+      env,
+      draft.project_id,
+      draft.payload.telegramFileId,
+      draft.payload.fileName,
+      draft.payload.mimeType,
+      user.name,
+      draft.id,
+    );
+  });
+  const { attachment } = resolvedFile;
   const now = new Date().toISOString();
   const isDocument = draft.kind === 'document';
   const summary = isDocument ? `Загружен документ «${attachment.name}» через Telegram` : `Добавлен фотоотчёт через Telegram · ${user.name}`;
-  const mutation = await mutateProjectFromTelegram(
+  let fileCreated = false;
+  const mutation = resolvedFile.existing ? null : await mutateProjectFromTelegram(
     env,
     draft.project_id,
     user.name,
@@ -1937,9 +2735,20 @@ const telegramConfirmFile = async (callback, draft, binding, env) => {
     isDocument ? 'telegram.document.create' : 'telegram.field_report.create',
     summary,
     (state) => {
+      const existing = isDocument
+        ? (state.documents ?? []).some((item) => item.sourceDraftId === draft.id)
+        : (state.fieldReports ?? []).some((item) => item.sourceDraftId === draft.id);
+      if (existing) {
+        fileCreated = false;
+        return TELEGRAM_MUTATION_NOOP;
+      }
+      const currentUser = (state.settings?.users ?? []).find((item) => item.id === binding.system_user_id && item.status !== 'disabled');
+      if (!currentUser) throw new Error('action_denied');
+      user = currentUser;
+      fileCreated = true;
       if (isDocument) {
         const document = {
-          id: `document-${crypto.randomUUID()}`,
+          id: `document-telegram-${draft.id}`,
           name: attachment.name.replace(/\.[^.]+$/, ''),
           type: draft.payload.typeLabel,
           category: draft.payload.category,
@@ -1955,11 +2764,12 @@ const telegramConfirmFile = async (callback, draft, binding, env) => {
           sizeBytes: attachment.sizeBytes,
           uploadedAt: attachment.uploadedAt,
           uploadedBy: user.name,
+          sourceDraftId: draft.id,
         };
         state.documents = [document, ...(state.documents ?? [])];
       } else {
         const report = {
-          id: `field-report-${crypto.randomUUID()}`,
+          id: `field-report-telegram-${draft.id}`,
           createdAt: now,
           author: user.name,
           note: clean(draft.payload.note, 1000) || (attachment.mimeType.startsWith('audio/') ? 'Голосовой отчёт без расшифровки' : 'Фотоотчёт без комментария'),
@@ -1967,6 +2777,7 @@ const telegramConfirmFile = async (callback, draft, binding, env) => {
           clientVisible: false,
           telegramMessageId: draft.payload.telegramMessageId,
           attachments: [attachment],
+          sourceDraftId: draft.id,
         };
         state.fieldReports = [report, ...(state.fieldReports ?? [])];
       }
@@ -1979,23 +2790,40 @@ const telegramConfirmFile = async (callback, draft, binding, env) => {
       }, ...(state.activity ?? [])];
     },
   );
-  await updateTelegramDraft(env.DB, draft, draft.payload, 'confirmed');
-  await telegramEditMessage(
-    env.TELEGRAM_BOT_TOKEN,
+  const notificationMutation = mutation ?? {
+    previous: snapshot.state,
+    state: snapshot.state,
+    revision: snapshot.revision,
+  };
+  await dispatchNotifications(
+    notificationMutation.previous,
+    notificationMutation.state,
+    env,
+    user.name,
+    telegramOrigin(env),
+    summary,
+    `telegram-draft:${draft.id}`,
+  );
+  const visibility = await telegramConfirmVisible(
+    env,
     callback.message.chat.id,
     callback.message.message_id,
     `${isDocument ? 'Документ сохранён' : 'Запись добавлена в дневник объекта'}\n\n${attachment.name}\nАвтор: ${user.name}\n\n${deepLink(telegramOrigin(env), draft.project_id, 'project')}`,
   );
-  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), summary);
+  requireTelegramVisibility(visibility);
+  await updateTelegramDraft(env.DB, draft, draft.payload, 'confirmed');
 };
 
 const telegramChangeTaskStatus = async (callback, binding, taskId, action, env) => {
-  const { snapshot, user } = await projectForBinding(env, binding);
-  const task = (snapshot.state.tasks ?? []).find((item) => item.id === taskId);
+  const access = await projectForBinding(env, binding);
+  const { snapshot } = access;
+  let { user } = access;
+  let task = (snapshot.state.tasks ?? []).find((item) => item.id === taskId);
   if (!task || (user.role !== 'management' && task.assigneeId !== user.id)) throw new Error('action_denied');
   const status = ({ ip: 'in_progress', review: 'review', wait: 'waiting', done: 'done' })[action];
   if (!status || (status === 'done' && user.role !== 'management')) throw new Error('action_denied');
   const now = new Date().toISOString();
+  let statusChanged = false;
   const mutation = await mutateProjectFromTelegram(
     env,
     binding.project_id,
@@ -2004,7 +2832,22 @@ const telegramChangeTaskStatus = async (callback, binding, taskId, action, env) 
     'telegram.task.status',
     `Задача «${task.title}» → ${taskStatusLabel(status)}`,
     (state) => {
-      state.tasks = (state.tasks ?? []).map((item) => item.id === task.id ? {
+      const currentUser = (state.settings?.users ?? []).find((item) => item.id === binding.system_user_id && item.status !== 'disabled');
+      const currentTask = (state.tasks ?? []).find((item) => item.id === taskId);
+      if (!currentUser || !currentTask || (currentUser.role !== 'management' && currentTask.assigneeId !== currentUser.id)) throw new Error('action_denied');
+      if (status === 'done' && currentUser.role !== 'management') throw new Error('action_denied');
+      user = currentUser;
+      task = currentTask;
+      if ((currentTask.history ?? []).some((event) => event.sourceTelegramCallbackId === callback.id)) {
+        statusChanged = false;
+        return TELEGRAM_MUTATION_NOOP;
+      }
+      if (currentTask.status === status) {
+        statusChanged = false;
+        return TELEGRAM_MUTATION_NOOP;
+      }
+      statusChanged = true;
+      state.tasks = (state.tasks ?? []).map((item) => item.id === currentTask.id ? {
         ...item,
         status,
         updatedAt: now,
@@ -2015,6 +2858,7 @@ const telegramChangeTaskStatus = async (callback, binding, taskId, action, env) 
           actor: user.name,
           kind: status === 'done' ? 'completed' : 'status',
           text: `Изменил статус через Telegram: ${taskStatusLabel(status)}`,
+          sourceTelegramCallbackId: callback.id,
         }, ...(item.history ?? [])],
       } : item);
       state.activity = [{
@@ -2026,91 +2870,204 @@ const telegramChangeTaskStatus = async (callback, binding, taskId, action, env) 
       }, ...(state.activity ?? [])];
     },
   );
-  await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, `Статус: ${taskStatusLabel(status)}`);
-  await telegramSend(
-    env.TELEGRAM_BOT_TOKEN,
+  const committedTask = (mutation.state.tasks ?? []).find((item) => item.id === taskId) ?? task;
+  const actionCommitted = statusChanged || (committedTask.history ?? []).some((event) => event.sourceTelegramCallbackId === callback.id);
+  if (actionCommitted && committedTask.status === status) {
+    const recoveryEvents = mutation.state.settings?.notifications?.events?.taskAssigned
+      && ['waiting', 'review', 'done'].includes(status)
+      ? [notificationEvent(`Задача: «${committedTask.title}» → ${taskStatusLabel(status)}`, 'tasks', committedTask.id, committedTask.assigneeId)]
+      : [];
+    await dispatchNotifications(
+      mutation.previous,
+      mutation.state,
+      env,
+      user.name,
+      telegramOrigin(env),
+      `Обновлена задача «${committedTask.title}»`,
+      `telegram-task-status:${callback.id}`,
+      null,
+      recoveryEvents,
+    );
+  }
+  const visibility = await telegramDurableVisibility(
+    env,
     callback.message.chat.id,
-    `Задача «${task.title}» теперь: ${taskStatusLabel(status)}.\n${deepLink(telegramOrigin(env), binding.project_id, 'tasks', task.id)}`,
-    status === 'done' ? {} : { reply_markup: taskActionMarkup(task.id, user.role) },
+    `Задача «${committedTask.title}» теперь: ${taskStatusLabel(committedTask.status)}.\n${deepLink(telegramOrigin(env), binding.project_id, 'tasks', committedTask.id)}`,
+    committedTask.status === 'done' ? {} : { reply_markup: taskActionMarkup(binding.project_id, committedTask.id, user.role) },
+    `telegram-task-status-confirm:${callback.id}`,
   );
-  await dispatchNotifications(mutation.previous, mutation.state, env, user.name, telegramOrigin(env), `Обновлена задача «${task.title}»`);
+  requireTelegramVisibility(visibility);
+  await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, `Статус: ${taskStatusLabel(committedTask.status)}`);
 };
 
 const telegramHandleCallback = async (callback, env) => {
   if (!callback?.id || !callback?.from?.id || !callback?.message?.chat?.id) return;
   const parts = clean(callback.data, 200).split('|');
   const action = parts[0];
-  const binding = await bindingForTelegramUser(env.DB, String(callback.from.id), String(callback.message.chat.id));
-  if (!binding) {
+  const telegramUserId = String(callback.from.id);
+  const chatId = String(callback.message.chat.id);
+  if (callback.message.chat.type !== 'private' && !await telegramGroupChatAuthorized(env, chatId)) {
+    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Этот чат не подключён к ИКИОМА ОС.', true);
+    return;
+  }
+  const bindings = await bindingsForTelegramUser(env.DB, telegramUserId);
+  if (!bindings.length) {
     await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Сначала подключите личный Telegram в ИКИОМА ОС.', true);
     return;
   }
   if (action === 'ts') {
-    await telegramChangeTaskStatus(callback, binding, parts[1], parts[2], env);
+    const taskMatches = [];
+    for (const item of bindings) {
+      const snapshot = await readSnapshot(env.DB, item.project_id);
+      for (const task of snapshot?.state?.tasks ?? []) {
+        if (telegramTaskActionKey(item.project_id, task.id) === parts[1]) {
+          taskMatches.push({ binding: item, taskId: task.id });
+        }
+      }
+    }
+    if (taskMatches.length !== 1) throw new Error('action_denied');
+    await telegramChangeTaskStatus(callback, taskMatches[0].binding, taskMatches[0].taskId, parts[2], env);
     return;
   }
-  const draft = await readTelegramDraft(env.DB, parts[1], String(callback.from.id));
+  const draft = await readTelegramDraft(env.DB, parts[1], telegramUserId);
   if (!draft) {
     await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Черновик уже закрыт или устарел.', true);
     return;
   }
-  if (action === 'tx' || action === 'fx' || action === 'nx') {
-    await updateTelegramDraft(env.DB, draft, draft.payload, 'canceled');
-    await telegramEditMessage(env.TELEGRAM_BOT_TOKEN, callback.message.chat.id, callback.message.message_id, 'Черновик отменён.');
-    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id);
+  if (String(draft.chat_id) !== chatId) throw new Error('action_denied');
+  if (action === 'ps') {
+    const requestedProject = draft.payload.projects?.[Number(parts[2])];
+    if (!requestedProject) throw new Error('project_not_found');
+    await runClaimedTelegramDraft(callback, draft, env, async (claimedDraft) => {
+      await assertTelegramDraftLease(env.DB, claimedDraft);
+      const lockedProject = claimedDraft.payload.selectedProjectId
+        ? claimedDraft.payload.projects?.find((item) => item.id === claimedDraft.payload.selectedProjectId)
+        : null;
+      const project = lockedProject ?? requestedProject;
+      const selectedBinding = bindings.find((item) => item.project_id === project.id);
+      if (!selectedBinding) throw new Error('action_denied');
+      if (!claimedDraft.payload.selectedProjectId) {
+        claimedDraft.payload = {
+          ...claimedDraft.payload,
+          selectedProjectId: project.id,
+          selectedProjectName: project.name,
+        };
+        Object.assign(claimedDraft, await saveClaimedTelegramDraftPayload(env.DB, claimedDraft, claimedDraft.payload));
+      }
+      await saveTelegramProjectSelection(env.DB, telegramUserId, chatId, project.id);
+      const pending = claimedDraft.payload.pending;
+      if (pending?.type === 'command') {
+        await telegramHandleCommand({
+          chat: callback.message.chat,
+          from: callback.from,
+          message_id: pending.sourceMessageId || callback.message.message_id,
+        }, selectedBinding, pending.command, env, { bindings, projectConfirmed: true });
+      } else if (pending?.type === 'attachment' && pending.message) {
+        await telegramAttachmentDraft({ ...pending.message, chat: callback.message.chat, from: callback.from }, selectedBinding, env);
+      }
+      // Selection remains resumable until the child draft/card is created.
+      // If Telegram or storage fails above, runClaimed releases it for retry.
+      await updateTelegramDraft(env.DB, claimedDraft, claimedDraft.payload, 'confirmed');
+      await telegramConfirmVisible(env, callback.message.chat.id, callback.message.message_id, `Проект выбран: ${project.name}`);
+      await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id);
+    });
+    return;
+  }
+  const binding = await bindingForTelegramProject(env.DB, telegramUserId, draft.project_id);
+  if (!binding) throw new Error('action_denied');
+  if (action === 'tx' || action === 'fx' || action === 'nx' || action === 'xx') {
+    await runClaimedTelegramDraft(callback, draft, env, async (claimedDraft) => {
+      await updateTelegramDraft(env.DB, claimedDraft, claimedDraft.payload, 'canceled');
+      await telegramConfirmVisible(env, callback.message.chat.id, callback.message.message_id, 'Черновик отменён.');
+      await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id);
+    });
     return;
   }
   if (action === 'tc') {
-    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Создаю задачу…');
-    await telegramConfirmTask(callback, draft, binding, env);
+    await runClaimedTelegramDraft(callback, draft, env, async (claimedDraft) => {
+      await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Создаю задачу…');
+      await telegramConfirmTask(callback, claimedDraft, binding, env);
+    });
     return;
   }
   if (action === 'fc') {
-    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Сохраняю файл…');
-    await telegramConfirmFile(callback, draft, binding, env);
+    await runClaimedTelegramDraft(callback, draft, env, async (claimedDraft) => {
+      await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Сохраняю файл…');
+      await telegramConfirmFile(callback, claimedDraft, binding, env);
+    });
     return;
   }
   if (action === 'nc') {
-    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Сохраняю запись…');
-    await telegramConfirmNote(callback, draft, binding, env);
+    await runClaimedTelegramDraft(callback, draft, env, async (claimedDraft) => {
+      await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Сохраняю запись…');
+      await telegramConfirmNote(callback, claimedDraft, binding, env);
+    });
+    return;
+  }
+  if (action === 'xc') {
+    await runClaimedTelegramDraft(callback, draft, env, async (claimedDraft) => {
+      if (!claimedDraft.payload.budgetLineId || !claimedDraft.payload.stageId || !claimedDraft.payload.counterpartyId) {
+        throw new Error('expense_details_missing');
+      }
+      await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id, 'Сохраняю расход…');
+      await telegramConfirmExpense(callback, claimedDraft, binding, env);
+    });
+    return;
+  }
+  if (action === 'eb' || action === 'ec' || action === 'es') {
+    await runClaimedTelegramDraft(callback, draft, env, async (claimedDraft) => {
+      const options = action === 'eb'
+        ? claimedDraft.payload.budgetLines
+        : action === 'ec'
+          ? claimedDraft.payload.counterparties
+          : claimedDraft.payload.stages;
+      const selected = options?.[Number(parts[2])];
+      if (!selected) throw new Error('expense_details_missing');
+      if (action === 'eb') {
+        claimedDraft.payload.budgetLineId = selected.id;
+        claimedDraft.payload.stageId = selected.stageIds?.length === 1 ? selected.stageIds[0] : '';
+      } else if (action === 'ec') {
+        claimedDraft.payload.counterpartyId = selected.id;
+      } else {
+        const budgetLine = claimedDraft.payload.budgetLines?.find((item) => item.id === claimedDraft.payload.budgetLineId);
+        if (!budgetLine?.stageIds?.includes(selected.id)) throw new Error('action_denied');
+        claimedDraft.payload.stageId = selected.id;
+      }
+      const editingDraft = await saveClaimedTelegramDraftPayload(env.DB, claimedDraft, claimedDraft.payload);
+      try {
+        const card = renderExpenseDraft(editingDraft);
+        await telegramEditMessage(env.TELEGRAM_BOT_TOKEN, callback.message.chat.id, callback.message.message_id, card.text, card.replyMarkup);
+        await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id);
+      } finally {
+        await releaseTelegramDraft(env.DB, editingDraft);
+      }
+    });
     return;
   }
   if (action === 'ta' || action === 'td') {
-    const snapshot = await readSnapshot(env.DB, draft.project_id);
-    if (!snapshot) throw new Error('project_not_found');
-    if (action === 'ta') {
-      const users = (snapshot.state.settings?.users ?? []).filter((user) => user.status !== 'disabled' && user.role !== 'client').slice(0, 8);
-      const assignee = users[Number(parts[2])];
-      if (assignee) draft.payload.assigneeId = assignee.id;
-    } else {
-      const offset = Number(parts[2]);
-      if (![0, 1, 3, 7].includes(offset)) throw new Error('invalid_due_date');
-      draft.payload.dueOffset = offset;
-      draft.payload.dueDate = dateKey(addDays(new Date(), offset));
-    }
-    await updateTelegramDraft(env.DB, draft, draft.payload);
-    const card = renderTaskDraft(draft, snapshot.state);
-    await telegramEditMessage(env.TELEGRAM_BOT_TOKEN, callback.message.chat.id, callback.message.message_id, card.text, card.replyMarkup);
-    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id);
+    await runClaimedTelegramDraft(callback, draft, env, async (claimedDraft) => {
+      const snapshot = await readSnapshot(env.DB, claimedDraft.project_id);
+      if (!snapshot) throw new Error('project_not_found');
+      if (action === 'ta') {
+        const users = (snapshot.state.settings?.users ?? []).filter((user) => user.status !== 'disabled' && user.role !== 'client').slice(0, 8);
+        const assignee = users[Number(parts[2])];
+        if (assignee) claimedDraft.payload.assigneeId = assignee.id;
+      } else {
+        const offset = Number(parts[2]);
+        if (![0, 1, 3, 7].includes(offset)) throw new Error('invalid_due_date');
+        claimedDraft.payload.dueOffset = offset;
+        claimedDraft.payload.dueDate = dateKey(addDays(new Date(), offset));
+      }
+      const editingDraft = await saveClaimedTelegramDraftPayload(env.DB, claimedDraft, claimedDraft.payload);
+      try {
+        const card = renderTaskDraft(editingDraft, snapshot.state);
+        await telegramEditMessage(env.TELEGRAM_BOT_TOKEN, callback.message.chat.id, callback.message.message_id, card.text, card.replyMarkup);
+        await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id);
+      } finally {
+        await releaseTelegramDraft(env.DB, editingDraft);
+      }
+    });
     return;
-  }
-  if (action === 'ps') {
-    const project = draft.payload.projects?.[Number(parts[2])];
-    if (!project) throw new Error('project_not_found');
-    const allowed = (await bindingsForTelegramUser(env.DB, String(callback.from.id))).some((item) => item.project_id === project.id);
-    if (!allowed) throw new Error('action_denied');
-    const now = new Date().toISOString();
-    await env.DB.prepare(`
-      INSERT INTO telegram_chat_projects (chat_id, project_id, updated_at, updated_by)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(chat_id) DO UPDATE SET
-        project_id = excluded.project_id,
-        updated_at = excluded.updated_at,
-        updated_by = excluded.updated_by
-    `).bind(String(callback.message.chat.id), project.id, now, String(callback.from.id)).run();
-    await updateTelegramDraft(env.DB, draft, draft.payload, 'confirmed');
-    await telegramEditMessage(env.TELEGRAM_BOT_TOKEN, callback.message.chat.id, callback.message.message_id, `Текущий объект: ${project.name}`);
-    await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, callback.id);
   }
 };
 
@@ -2120,19 +3077,101 @@ const processTelegramUpdate = async (update, env) => {
     if (update.message) return await telegramHandleMessage(update.message, env);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'processing_failed';
+    const handledErrors = new Set([
+      'access_disabled',
+      'action_denied',
+      'assignee_missing',
+      'draft_state_conflict',
+      'expense_details_missing',
+      'invalid_due_date',
+      'invalid_note',
+      'payload_too_large',
+      'project_not_found',
+      'storage_unavailable',
+      'telegram_file_too_large',
+      'telegram_file_unavailable',
+    ]);
+    const terminalTelegramError = /^telegram_[^:]+_failed:(?:400|401|403|404):/u.test(message);
+    if (!handledErrors.has(message) && !terminalTelegramError) throw error;
     const userText = message === 'telegram_file_too_large'
       ? 'Файл больше 20 МБ и не может быть сохранён.'
       : message === 'storage_unavailable'
         ? 'Хранилище проекта временно недоступно.'
+        : message === 'expense_details_missing'
+          ? 'Для расхода нужно выбрать статью бюджета, этап и контрагента.'
+          : message === 'assignee_missing'
+            ? 'Выбранный ответственный больше недоступен. Выберите другого участника.'
+            : message === 'draft_state_conflict'
+              ? 'Черновик уже обрабатывается или был изменён. Откройте актуальную карточку.'
+              : message === 'project_not_found' || message === 'access_disabled'
+                ? 'Проект или доступ к нему больше недоступен.'
+                : message === 'payload_too_large'
+                  ? 'Данные слишком велики для сохранения.'
+                  : message === 'telegram_file_unavailable'
+                    ? 'Telegram не смог передать файл. Ничего не сохранено — отправьте файл ещё раз.'
+                    : terminalTelegramError
+                      ? 'Telegram отклонил ответ бота. Ничего нового не записано; повторите команду или откройте /help.'
         : message === 'action_denied'
           ? 'Для этого действия недостаточно прав.'
           : 'Не удалось выполнить действие. Повторите через минуту.';
     if (update.callback_query?.id) {
       await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, update.callback_query.id, userText, true);
+      if (update.callback_query.message?.chat?.id) {
+        await telegramDurableSend(
+          env,
+          update.callback_query.message.chat.id,
+          userText,
+          {},
+          `telegram-error:${clean(update.update_id ?? update.callback_query.id, 100)}:${update.callback_query.message.chat.id}`,
+        );
+      }
     } else if (update.message?.chat?.id) {
-      await telegramSend(env.TELEGRAM_BOT_TOKEN, update.message.chat.id, userText);
+      await telegramDurableSend(
+        env,
+        update.message.chat.id,
+        userText,
+        {},
+        `telegram-error:${clean(update.update_id ?? update.message.message_id, 100)}:${update.message.chat.id}`,
+      );
     }
+    return { handled: true, error: message };
   }
+};
+
+const claimTelegramUpdate = async (db, updateId) => {
+  const now = new Date().toISOString();
+  const inserted = await db.prepare(`
+    INSERT INTO telegram_updates (update_id, received_at, processed_at, status, error)
+    VALUES (?, ?, NULL, 'processing', NULL)
+    ON CONFLICT(update_id) DO NOTHING
+  `).bind(updateId, now).run();
+  if (changes(inserted) === 1) return now;
+
+  const existing = await db.prepare(`
+    SELECT status, received_at
+    FROM telegram_updates
+    WHERE update_id = ?
+  `).bind(updateId).first();
+  if (!existing || existing.status === 'done') return null;
+  if (existing.status === 'processing') {
+    const receivedAt = Date.parse(clean(existing.received_at, 80));
+    if (Number.isFinite(receivedAt) && Date.now() - receivedAt <= TELEGRAM_UPDATE_LEASE_MS) return null;
+    const reclaimed = await db.prepare(`
+      UPDATE telegram_updates
+      SET received_at = ?, processed_at = NULL, status = 'processing', error = NULL
+      WHERE update_id = ? AND status = 'processing' AND received_at = ?
+    `).bind(now, updateId, existing.received_at).run();
+    return changes(reclaimed) === 1 ? now : null;
+  }
+  if (existing.status === 'error') {
+    const retried = await db.prepare(`
+      UPDATE telegram_updates
+      SET received_at = ?, processed_at = NULL, status = 'processing', error = NULL
+      WHERE update_id = ? AND status = 'error'
+    `).bind(now, updateId).run();
+    return changes(retried) === 1 ? now : null;
+  }
+  return null;
 };
 
 const handleTelegramUpdate = async (request, env, context) => {
@@ -2146,39 +3185,54 @@ const handleTelegramUpdate = async (request, env, context) => {
   if (!updateId) return json({ ok: false, error: 'invalid_update' }, 422);
   await ensureSchema(env.DB);
   await rememberTelegramChatCandidates(env.DB, update);
-  const existing = await env.DB.prepare(`SELECT status FROM telegram_updates WHERE update_id = ?`).bind(updateId).first();
-  if (existing?.status === 'done' || existing?.status === 'processing') return json({ ok: true, duplicate: true });
-  const now = new Date().toISOString();
-  await env.DB.prepare(`
-    INSERT INTO telegram_updates (update_id, received_at, processed_at, status, error)
-    VALUES (?, ?, NULL, 'processing', NULL)
-    ON CONFLICT(update_id) DO UPDATE SET
-      received_at = excluded.received_at,
-      processed_at = NULL,
-      status = 'processing',
-      error = NULL
-  `).bind(updateId, now).run();
-  const work = processTelegramUpdate(update, env)
-    .then(() => env.DB.prepare(`UPDATE telegram_updates SET status = 'done', processed_at = ?, error = NULL WHERE update_id = ?`).bind(new Date().toISOString(), updateId).run())
-    .catch((error) => env.DB.prepare(`UPDATE telegram_updates SET status = 'error', processed_at = ?, error = ? WHERE update_id = ?`).bind(new Date().toISOString(), clean(error instanceof Error ? error.message : 'processing_failed', 300), updateId).run());
-  context.waitUntil(work);
-  return json({ ok: true, accepted: true }, 202);
+  context.waitUntil(flushTelegramOutbox(env).catch(() => null));
+  const updateLease = await claimTelegramUpdate(env.DB, updateId);
+  if (!updateLease) {
+    const existing = await env.DB.prepare(`SELECT status FROM telegram_updates WHERE update_id = ?`).bind(updateId).first();
+    if (existing?.status === 'done') return json({ ok: true, duplicate: true });
+    return json({ ok: false, error: 'telegram_update_busy' }, 503);
+  }
+  try {
+    await processTelegramUpdate(update, env);
+    await env.DB.prepare(`
+      UPDATE telegram_updates
+      SET status = 'done', processed_at = ?, error = NULL
+      WHERE update_id = ? AND status = 'processing' AND received_at = ?
+    `).bind(new Date().toISOString(), updateId, updateLease).run();
+    return json({ ok: true, accepted: true });
+  } catch (error) {
+    await env.DB.prepare(`
+      UPDATE telegram_updates
+      SET status = 'error', processed_at = ?, error = ?
+      WHERE update_id = ? AND status = 'processing' AND received_at = ?
+    `).bind(new Date().toISOString(), clean(error instanceof Error ? error.message : 'processing_failed', 300), updateId, updateLease).run();
+    // Telegram повторит webhook после non-2xx. Детерминированные draft/source IDs
+    // не позволяют повторной доставке создать вторую бизнес-запись.
+    return json({ ok: false, error: 'telegram_update_failed' }, 503);
+  }
 };
 
-const dispatchNotifications = async (previous, next, env, actor, origin, summary) => {
+const buildNotificationPlan = async (previous, next, env, actor, origin, summary, eventKey = '', recoveryEvents = []) => {
   let events = notificationEvents(previous, next);
+  if (!events.length && Array.isArray(recoveryEvents) && recoveryEvents.length) events = recoveryEvents.slice(0, 8);
   const channels = next.settings?.notifications?.channels ?? {};
   const allActivity = next.settings?.notifications?.events?.projectActivity !== false;
   if (!events.length && allActivity && clean(summary, 300)) events = [notificationEvent(clean(summary, 300), 'overview')];
-  if (!events.length) return;
+  if (!events.length) return { channels, message: '', deliveries: [] };
   const lines = events.map((event) => `• ${event.text}\n  ${deepLink(origin, next.project.id, event.page, event.entityId)}`);
   const message = `ИКИОМА ОС · ${next.project?.code ?? 'проект'}\nИзменил: ${actor}\n\n${lines.join('\n')}`;
-  const tasks = [];
+  const deliveryKey = clean(eventKey, 120) || clean(next.activity?.[0]?.id, 120) || crypto.randomUUID();
+  const deliveries = [];
   const telegramConnection = channels.telegram && env.TELEGRAM_BOT_TOKEN
-    ? await resolveTelegramConnection(env)
+    ? await resolveTelegramConnection(env, { discover: false })
     : null;
   const commonChatId = clean(telegramConnection?.chat?.id, 120);
-  if (channels.telegram && env.TELEGRAM_BOT_TOKEN && commonChatId) tasks.push(telegramSend(env.TELEGRAM_BOT_TOKEN, commonChatId, message));
+  if (channels.telegram && env.TELEGRAM_BOT_TOKEN && commonChatId) deliveries.push({
+    chatId: commonChatId,
+    text: message,
+    options: {},
+    stableId: `telegram-notification-${(await sha256(`${next.project.id}:${deliveryKey}:${commonChatId}`)).slice(0, 40)}`,
+  });
   if (channels.telegram && env.TELEGRAM_BOT_TOKEN) {
     const users = new Map((next.settings?.users ?? []).map((user) => [clean(user.id, 100), user]));
     const directByChat = new Map();
@@ -2187,18 +3241,14 @@ const dispatchNotifications = async (previous, next, env, actor, origin, summary
       const user = users.get(clean(event.recipientId, 100));
       let chatId = clean(user?.telegramChatId, 120);
       if (!chatId && env.DB && user?.id) {
-        try {
-          const binding = await env.DB.prepare(`
-            SELECT private_chat_id
-            FROM telegram_bindings
-            WHERE project_id = ? AND system_user_id = ?
-            ORDER BY updated_at DESC
-            LIMIT 1
-          `).bind(next.project.id, user.id).first();
-          chatId = clean(binding?.private_chat_id, 120);
-        } catch {
-          chatId = '';
-        }
+        const binding = await env.DB.prepare(`
+          SELECT private_chat_id
+          FROM telegram_bindings
+          WHERE project_id = ? AND system_user_id = ?
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `).bind(next.project.id, user.id).first();
+        chatId = clean(binding?.private_chat_id, 120);
       }
       if (!chatId || user?.status === 'disabled') continue;
       const personalEvents = directByChat.get(chatId) ?? [];
@@ -2210,19 +3260,36 @@ const dispatchNotifications = async (previous, next, env, actor, origin, summary
       const taskEvent = personalEvents.length === 1 && personalEvents[0].page === 'tasks' && personalEvents[0].entityId
         ? personalEvents[0]
         : null;
-      tasks.push(telegramSend(
-        env.TELEGRAM_BOT_TOKEN,
+      deliveries.push({
         chatId,
-        personalText,
-        taskEvent ? { reply_markup: taskActionMarkup(taskEvent.entityId, taskEvent.role) } : {},
-      ));
+        text: personalText,
+        options: taskEvent ? { reply_markup: taskActionMarkup(next.project.id, taskEvent.entityId, taskEvent.role) } : {},
+        stableId: `telegram-personal-${(await sha256(`${next.project.id}:${deliveryKey}:${chatId}`)).slice(0, 40)}`,
+      });
     }
   }
+  return { channels, message, deliveries };
+};
+
+const dispatchNotifications = async (previous, next, env, actor, origin, summary, eventKey = '', preparedPlan = null, recoveryEvents = []) => {
+  const plan = preparedPlan ?? await buildNotificationPlan(previous, next, env, actor, origin, summary, eventKey, recoveryEvents);
+  if (!plan.message) return;
+  const durableTasks = plan.deliveries.map((delivery) => telegramDurableSend(
+    env,
+    delivery.chatId,
+    delivery.text,
+    delivery.options,
+    delivery.stableId,
+    false,
+  ));
+  const bestEffortTasks = [];
+  const { channels, message } = plan;
   if (channels.email && env.RESEND_API_KEY && env.EMAIL_FROM) {
     const recipients = (next.settings?.users ?? []).filter((user) => user.status === 'active' && user.role === 'management' && /^\S+@\S+\.\S+$/.test(user.email)).map((user) => user.email);
-    if (recipients.length) tasks.push(fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: env.EMAIL_FROM, to: recipients, subject: `ИКИОМА ОС: требуется внимание · ${next.project?.code ?? ''}`, text: message }) }));
+    if (recipients.length) bestEffortTasks.push(fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: env.EMAIL_FROM, to: recipients, subject: `ИКИОМА ОС: требуется внимание · ${next.project?.code ?? ''}`, text: message }) }));
   }
-  await Promise.allSettled(tasks);
+  await Promise.all(durableTasks);
+  await Promise.allSettled(bestEffortTasks);
 };
 
 const handlePutState = async (request, env, context) => {
@@ -2277,20 +3344,54 @@ const handlePutState = async (request, env, context) => {
     const stateBytes = new TextEncoder().encode(stateJson).byteLength;
     if (stateBytes > MAX_STATE_BYTES) return json({ ok: false, error: 'payload_too_large' }, 413);
 
-    let result;
-    if (expectedRevision === 0) {
-      result = await env.DB.prepare(`
+    const notificationPlan = await buildNotificationPlan(
+      previousSnapshot?.state ?? null,
+      state,
+      env,
+      actor,
+      new URL(request.url).origin,
+      summary,
+      nextRevision,
+    );
+    const stateStatement = expectedRevision === 0
+      ? env.DB.prepare(`
         INSERT OR IGNORE INTO project_state (
           project_id, state_json, revision, created_at, updated_at, updated_by, updated_role
         ) VALUES (?, ?, 1, ?, ?, ?, ?)
-      `).bind(projectId, stateJson, now, now, actor, role).run();
-    } else {
-      result = await env.DB.prepare(`
+      `).bind(projectId, stateJson, now, now, actor, role)
+      : env.DB.prepare(`
         UPDATE project_state
         SET state_json = ?, revision = ?, updated_at = ?, updated_by = ?, updated_role = ?
         WHERE project_id = ? AND revision = ?
-      `).bind(stateJson, nextRevision, now, actor, role, projectId, expectedRevision).run();
-    }
+      `).bind(stateJson, nextRevision, now, actor, role, projectId, expectedRevision);
+    const outboxStatements = notificationPlan.deliveries.map((delivery) => env.DB.prepare(`
+      INSERT INTO telegram_outbox (
+        id, chat_id, text, options_json, status, attempts, last_error, created_at, updated_at
+      )
+      SELECT ?, ?, ?, ?, 'pending', 0, NULL, ?, ?
+      WHERE EXISTS (
+        SELECT 1
+        FROM project_state
+        WHERE project_id = ? AND revision = ? AND updated_at = ? AND updated_by = ?
+          AND updated_role = ? AND state_json = ?
+      )
+      ON CONFLICT(id) DO NOTHING
+    `).bind(
+      delivery.stableId,
+      String(delivery.chatId),
+      delivery.text,
+      JSON.stringify(delivery.options ?? {}),
+      now,
+      now,
+      projectId,
+      nextRevision,
+      now,
+      actor,
+      role,
+      stateJson,
+    ));
+    const batchResults = await env.DB.batch([stateStatement, ...outboxStatements]);
+    const result = batchResults?.[0];
 
     if (changes(result) !== 1) {
       const current = await readSnapshot(env.DB, projectId);
@@ -2311,9 +3412,18 @@ const handlePutState = async (request, env, context) => {
       // Состояние уже сохранено. Сбой журнала не должен заставлять клиента повторять запись.
     }
 
-    const notificationTask = dispatchNotifications(previousSnapshot?.state ?? null, state, env, actor, new URL(request.url).origin, summary);
-    if (context?.waitUntil) context.waitUntil(notificationTask);
-    else await notificationTask;
+    // State and every required Telegram outbox row were committed in one DB
+    // transaction. Delivery and best-effort email may continue after response.
+    context.waitUntil(dispatchNotifications(
+      previousSnapshot?.state ?? null,
+      state,
+      env,
+      actor,
+      new URL(request.url).origin,
+      summary,
+      nextRevision,
+      notificationPlan,
+    ).catch(() => null));
 
     return json({
       ok: true,
@@ -2323,6 +3433,7 @@ const handlePutState = async (request, env, context) => {
         updatedAt: now,
         updatedBy: actor,
         updatedRole: role,
+        notificationQueued: true,
         state: stateForRole(state, identity),
       },
     });
@@ -2405,13 +3516,36 @@ const integrationStatus = async (env) => {
   const telegramConnection = await resolveTelegramConnection(env);
   const botUsername = clean(telegramConnection.bot?.username, 120);
   let telegramBoundUsers = 0;
+  let telegramPendingMessages = 0;
+  let telegramDeadMessages = 0;
+  let telegramLastDeliveryError = '';
   if (env.DB) {
     try {
       await ensureSchema(env.DB);
-      const row = await env.DB.prepare(`SELECT COUNT(*) AS count FROM telegram_bindings`).first();
-      telegramBoundUsers = Number(row?.count) || 0;
+      const [bindingRow, outboxRow, outboxErrorRow] = await Promise.all([
+        env.DB.prepare(`SELECT COUNT(*) AS count FROM telegram_bindings`).first(),
+        env.DB.prepare(`
+          SELECT COUNT(*) AS count, SUM(CASE WHEN status = 'dead' THEN 1 ELSE 0 END) AS dead_count
+          FROM telegram_outbox
+          WHERE status != 'sent'
+        `).first(),
+        env.DB.prepare(`
+          SELECT last_error
+          FROM telegram_outbox
+          WHERE status != 'sent' AND last_error IS NOT NULL
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `).first(),
+      ]);
+      telegramBoundUsers = Number(bindingRow?.count) || 0;
+      telegramPendingMessages = Number(outboxRow?.count) || 0;
+      telegramDeadMessages = Number(outboxRow?.dead_count) || 0;
+      telegramLastDeliveryError = clean(outboxErrorRow?.last_error, 300);
     } catch {
       telegramBoundUsers = 0;
+      telegramPendingMessages = 0;
+      telegramDeadMessages = 0;
+      telegramLastDeliveryError = '';
     }
   }
   return {
@@ -2425,6 +3559,9 @@ const integrationStatus = async (env) => {
     telegramIssue: clean(telegramConnection.issue, 80),
     telegramInbound: Boolean(env.TELEGRAM_WEBHOOK_URL && env.TELEGRAM_WEBHOOK_SECRET),
     telegramBoundUsers,
+    telegramPendingMessages,
+    telegramDeadMessages,
+    telegramLastDeliveryError,
     camera: Boolean(env.CAMERA_VIEW_URL),
     websiteForm: true,
     publicWebsiteForm: true,
@@ -2463,6 +3600,8 @@ const handleIntegrationTest = async (request, env) => {
       const connection = await resolveTelegramConnection(env, { discover: false });
       const response = await telegramSend(env.TELEGRAM_BOT_TOKEN, connection.chat?.id, message);
       if (!response.ok) return json({ ok: false, error: 'provider_error' }, 502);
+      await reviveTelegramOutbox(env.DB, connection.chat?.id);
+      await flushTelegramOutbox(env);
       return json({ ok: true, channel: 'telegram' });
     } catch { return json({ ok: false, error: 'provider_unavailable' }, 502); }
   }
@@ -2628,6 +3767,7 @@ const handleTelegramBootstrap = async (request, env) => {
             { command: 'stages', description: 'Этапы и сроки' },
             { command: 'done', description: 'Выполненные задачи' },
             { command: 'finance', description: 'Расходы, доходы и баланс' },
+            { command: 'expense', description: 'Добавить расход' },
             { command: 'status', description: 'Статус объекта' },
             { command: 'note', description: 'Запись в дневник объекта' },
             { command: 'report', description: 'Добавить фотоотчёт' },
@@ -3143,6 +4283,9 @@ export default {
   async fetch(request, env, context) {
     try {
       await ensureBattleReset(env);
+      if (env.DB && env.TELEGRAM_BOT_TOKEN && context?.waitUntil) {
+        context.waitUntil(flushTelegramOutbox(env).catch(() => null));
+      }
       const url = new URL(request.url);
       if (url.pathname.startsWith('/api/')) return handleApi(request, env, context);
       return serveSpa(request, env);
@@ -3157,5 +4300,9 @@ export default {
         },
       });
     }
+  },
+  async scheduled(_controller, env, context) {
+    await ensureBattleReset(env);
+    context.waitUntil(flushTelegramOutbox(env));
   },
 };
