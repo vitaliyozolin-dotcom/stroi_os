@@ -1,0 +1,226 @@
+name: Deploy Timeweb Production
+
+on:
+  workflow_run:
+    workflows: ["Check StroiOS"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stroios-production
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main') ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Determine exact release
+        id: release
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          AUTOMATIC_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            target_sha="$AUTOMATIC_SHA"
+          else
+            target_sha="$MANUAL_SHA"
+          fi
+          [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "Invalid release SHA" >&2
+            exit 1
+          }
+          echo "sha=$target_sha" >>"$GITHUB_OUTPUT"
+
+  manual_validate:
+    needs: prepare
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out manual release
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Node for manual validation
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate manual release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm ci
+          npm run build
+          node --input-type=module -e "await import('./dist/server/index.js')"
+          docker build --build-arg "BUILD_SHA=${{ needs.prepare.outputs.sha }}" -t stroios:manual-deploy-check .
+
+  deploy:
+    needs: [prepare, manual_validate]
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      ((github.event_name == 'workflow_run' && needs.manual_validate.result == 'skipped') ||
+       (github.event_name == 'workflow_dispatch' && needs.manual_validate.result == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production-timeweb
+    steps:
+
+      - name: Check one-time configuration
+        id: configuration
+        shell: bash
+        env:
+          TIMEWEB_HOST: ${{ vars.TIMEWEB_HOST }}
+          TIMEWEB_USER: ${{ vars.TIMEWEB_USER }}
+          TIMEWEB_KNOWN_HOSTS: ${{ vars.TIMEWEB_KNOWN_HOSTS }}
+          TIMEWEB_SSH_KEY_PRESENT: ${{ secrets.TIMEWEB_SSH_KEY != '' }}
+        run: |
+          set -Eeuo pipefail
+          missing=()
+          [[ -n "$TIMEWEB_HOST" ]] || missing+=(TIMEWEB_HOST)
+          [[ -n "$TIMEWEB_USER" ]] || missing+=(TIMEWEB_USER)
+          [[ "$TIMEWEB_SSH_KEY_PRESENT" == "true" ]] || missing+=(TIMEWEB_SSH_KEY)
+          [[ -n "$TIMEWEB_KNOWN_HOSTS" ]] || missing+=(TIMEWEB_KNOWN_HOSTS)
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "configured=false" >>"$GITHUB_OUTPUT"
+            {
+              echo "### Timeweb deployment"
+              echo
+              echo "⏭️ Deployment is installed but not activated."
+              printf -- "- Missing protected variable or secret: \`%s\`\n" "${missing[@]}"
+            } >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure restricted SSH
+        if: steps.configuration.outputs.configured == 'true'
+        id: ssh
+        shell: bash
+        env:
+          TIMEWEB_HOST: ${{ vars.TIMEWEB_HOST }}
+          TIMEWEB_USER: ${{ vars.TIMEWEB_USER }}
+          TIMEWEB_KNOWN_HOSTS: ${{ vars.TIMEWEB_KNOWN_HOSTS }}
+          TIMEWEB_SSH_KEY: ${{ secrets.TIMEWEB_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$TIMEWEB_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || {
+            echo "Invalid TIMEWEB_USER" >&2
+            exit 1
+          }
+          [[ "$TIMEWEB_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]] || {
+            echo "Invalid TIMEWEB_HOST" >&2
+            exit 1
+          }
+
+          ssh_dir="$RUNNER_TEMP/stroios-ssh"
+          install -d -m 0700 "$ssh_dir"
+          printf '%s\n' "$TIMEWEB_SSH_KEY" | tr -d '\r' >"$ssh_dir/id_ed25519"
+          printf '%s\n' "$TIMEWEB_KNOWN_HOSTS" | tr -d '\r' >"$ssh_dir/known_hosts"
+          chmod 0600 "$ssh_dir/id_ed25519" "$ssh_dir/known_hosts"
+
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null || {
+            echo "TIMEWEB_SSH_KEY is invalid or encrypted" >&2
+            exit 1
+          }
+          ssh-keygen -F "$TIMEWEB_HOST" -f "$ssh_dir/known_hosts" >/dev/null || {
+            echo "TIMEWEB_KNOWN_HOSTS does not contain TIMEWEB_HOST" >&2
+            exit 1
+          }
+          echo "dir=$ssh_dir" >>"$GITHUB_OUTPUT"
+
+      - name: Deploy verified main commit
+        if: steps.configuration.outputs.configured == 'true'
+        id: production
+        shell: bash
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.sha }}
+          SSH_DIR: ${{ steps.ssh.outputs.dir }}
+          TIMEWEB_HOST: ${{ vars.TIMEWEB_HOST }}
+          TIMEWEB_USER: ${{ vars.TIMEWEB_USER }}
+        run: |
+          set -Eeuo pipefail
+          log_file="$RUNNER_TEMP/stroios-deploy.log"
+
+          timeout --signal=TERM --kill-after=2m 50m ssh \
+            -F /dev/null \
+            -i "$SSH_DIR/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+            -o ConnectTimeout=15 \
+            -o ConnectionAttempts=2 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o RequestTTY=no \
+            "$TIMEWEB_USER@$TIMEWEB_HOST" "deploy $TARGET_SHA" | tee "$log_file"
+
+          terminal_marker="$(awk 'NF { sub(/\r$/, ""); marker=$0 } END { print marker }' "$log_file")"
+          if [[ "$terminal_marker" == "STROIOS_DEPLOY_OK $TARGET_SHA telegram=ready" ]]; then
+            echo "result=deployed" >>"$GITHUB_OUTPUT"
+            echo "telegram=ready" >>"$GITHUB_OUTPUT"
+          elif [[ "$terminal_marker" == "STROIOS_DEPLOY_OK $TARGET_SHA telegram=degraded" ]]; then
+            echo "result=deployed" >>"$GITHUB_OUTPUT"
+            echo "telegram=degraded" >>"$GITHUB_OUTPUT"
+          elif [[ "$terminal_marker" == "STROIOS_DEPLOY_SUPERSEDED $TARGET_SHA" ]]; then
+            echo "result=superseded" >>"$GITHUB_OUTPUT"
+          else
+            echo "The server did not attest the requested release SHA." >&2
+            exit 1
+          fi
+
+      - name: Publish result
+        if: always()
+        shell: bash
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.sha }}
+          CONFIGURED: ${{ steps.configuration.outputs.configured }}
+          RESULT: ${{ steps.production.outputs.result }}
+          TELEGRAM: ${{ steps.production.outputs.telegram }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$CONFIGURED" != "true" ]]; then
+            exit 0
+          fi
+          case "$RESULT" in
+            deployed) label="✅ Deployed, backed up and health-checked" ;;
+            superseded) label="⏭️ Superseded by a newer main revision" ;;
+            *) label="❌ Deployment failed; inspect the workflow log" ;;
+          esac
+          {
+            echo "### Timeweb production"
+            echo
+            echo "- Result: $label"
+            echo "- Revision: \`$TARGET_SHA\`"
+            if [[ "$RESULT" == "deployed" ]]; then
+              echo "- Telegram: \`${TELEGRAM:-unknown}\`"
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Remove SSH material
+        if: always() && steps.configuration.outputs.configured == 'true'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/stroios-ssh"

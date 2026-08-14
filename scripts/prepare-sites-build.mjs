@@ -6,6 +6,7 @@ const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 await mkdir(`${projectRoot}dist/.openai`, { recursive: true });
 await mkdir(`${projectRoot}dist/server`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/lib`, { recursive: true });
+await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
 
 await Promise.all([
   copyFile(`${projectRoot}.openai/hosting.json`, `${projectRoot}dist/.openai/hosting.json`),
@@ -15,4 +16,9 @@ await Promise.all([
   copyFile(`${projectRoot}sites/lib/date.js`, `${projectRoot}dist/server/lib/date.js`),
   copyFile(`${projectRoot}sites/lib/http.js`, `${projectRoot}dist/server/lib/http.js`),
   copyFile(`${projectRoot}sites/lib/validation.js`, `${projectRoot}dist/server/lib/validation.js`),
+  copyFile(`${projectRoot}sites/telegram/bindings.js`, `${projectRoot}dist/server/telegram/bindings.js`),
+  copyFile(`${projectRoot}sites/telegram/drafts.js`, `${projectRoot}dist/server/telegram/drafts.js`),
+  copyFile(`${projectRoot}sites/telegram/inbox.js`, `${projectRoot}dist/server/telegram/inbox.js`),
+  copyFile(`${projectRoot}sites/telegram/outbox.js`, `${projectRoot}dist/server/telegram/outbox.js`),
+  copyFile(`${projectRoot}sites/telegram/transport.js`, `${projectRoot}dist/server/telegram/transport.js`),
 ]);
