@@ -6,6 +6,7 @@ import {
   RevisionConflictError,
   saveCachedProject,
   saveRemoteProject,
+  setStorageIdentityScope,
   type RemoteSnapshot,
   type ProjectListItem,
 } from './storage';
@@ -26,7 +27,7 @@ const errorMessage = (error: unknown) => {
   return 'Нет связи с сервером. Изменения сохранены на этом устройстве и ждут синхронизации.';
 };
 
-export function useProjectState(role: UserRole, actor: string) {
+export function useProjectState(role: UserRole, actor: string, storageIdentity = '') {
   const initial = useRef(loadCachedProject());
   const [state, setState] = useState<AppState>(initial.current.state);
   const [sync, setSync] = useState<SyncView>({
@@ -230,11 +231,33 @@ export function useProjectState(role: UserRole, actor: string) {
   };
 
   useEffect(() => {
+    setStorageIdentityScope(storageIdentity);
+    if (!storageIdentity) return undefined;
+    const cached = loadCachedProject();
+    stateRef.current = cached.state;
+    baseRef.current = cached.state;
+    revisionRef.current = cached.revision;
+    updatedAtRef.current = cached.updatedAt;
+    dirtyRef.current = cached.dirty;
+    readyRef.current = false;
+    setState(cached.state);
+    setProjects([{
+      id: cached.state.project.id,
+      code: cached.state.project.code,
+      name: cached.state.project.name,
+      model: cached.state.project.model,
+      area: cached.state.project.area,
+      address: cached.state.project.address,
+      targetDate: cached.state.project.targetDate,
+      revision: cached.revision,
+      updatedAt: cached.updatedAt,
+    }]);
+    setSync({ phase: 'loading', revision: cached.revision, updatedAt: cached.updatedAt });
     void hydrateRef.current();
     return () => {
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     };
-  }, [refreshProjects]);
+  }, [refreshProjects, storageIdentity]);
 
   const updateState = useCallback((next: AppState) => {
     const previousActivityId = stateRef.current.activity[0]?.id;
@@ -340,6 +363,7 @@ export function useProjectState(role: UserRole, actor: string) {
     retry,
     useServerVersion,
     keepLocalVersion,
+    applyServerSnapshot: applyRemote,
     projects,
     switchProject,
     createProject,

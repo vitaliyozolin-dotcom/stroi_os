@@ -100,7 +100,7 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
     const remaining = Math.max(0, selected.requiredShots.length - selected.photos.length);
     const replacingRework = remaining === 0 && selected.status === 'rework';
     const slots = replacingRework ? selected.requiredShots.length : remaining;
-    const selectedFiles = Array.from(files).filter((file) => file.type.startsWith('image/')).slice(0, slots);
+    const selectedFiles = Array.from(files).filter((file) => ['image/jpeg', 'image/png', 'image/webp'].includes(file.type)).slice(0, slots);
     try {
       const photos: EvidencePhoto[] = [];
       const nextPreviews: Record<string, string> = {};
@@ -120,7 +120,7 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
       updateCheckpoint({ photos: replacingRework ? photos : [...selected.photos, ...photos] }, photos.length ? `${replacingRework ? 'Начата повторная фиксация' : `Добавлено ${photos.length} фото`}: ${selected.title}` : undefined);
       setUploadMessage(photos.length ? (replacingRework ? 'Предыдущий комплект заменён повторной фиксацией' : `Добавлено фото: ${photos.length}`) : 'Все обязательные кадры уже загружены');
     } catch {
-      setUploadMessage('Не удалось загрузить фото. Допустимы изображения до 12 МБ.');
+      setUploadMessage('Не удалось загрузить фото. Допустимы JPG, PNG или WebP до 12 МБ.');
     } finally {
       setUploading(false);
     }
@@ -142,8 +142,8 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
   const canSubmit = completedShots >= selected.requiredShots.length;
   const completionPercent = selected.requiredShots.length ? completedShots / selected.requiredShots.length * 100 : 0;
   const photoUrl = (photo: EvidencePhoto) => previewUrls[photo.id]
-    || photo.dataUrl
-    || (photo.fileKey ? `/api/quality/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(photo.fileKey)}` : '');
+    || (photo.fileKey ? `/api/quality/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(photo.fileKey)}` : '')
+    || (/^data:image\/(?:jpeg|png|webp);base64,/i.test(photo.dataUrl ?? '') ? photo.dataUrl ?? '' : '');
 
   return (
     <div className="page-stack">
@@ -229,7 +229,7 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
 
           {role !== 'client' && selected.status !== 'accepted' && (
             <div className="quality-actions">
-              <label className={`button button--secondary ${uploading ? 'button--disabled' : ''}`}><Images size={17} /> {uploading ? 'Загружаем…' : 'Добавить фото'}<input hidden disabled={uploading} type="file" accept="image/*" multiple onChange={(event) => { void uploadFiles(event.target.files); event.target.value = ''; }} /></label>
+              <label className={`button button--secondary ${uploading ? 'button--disabled' : ''}`}><Images size={17} /> {uploading ? 'Загружаем…' : 'Добавить фото'}<input hidden disabled={uploading} type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => { void uploadFiles(event.target.files); event.target.value = ''; }} /></label>
               {uploadMessage && <span className="upload-message">{uploadMessage}</span>}
               {role === 'foreman' && <button className="button button--primary" type="button" disabled={!canSubmit || selected.status === 'in_review'} onClick={submitForReview}><Send size={17} /> {selected.status === 'in_review' ? 'Отчёт на проверке' : 'Отправить на проверку'}</button>}
               {role === 'management' && selected.status === 'in_review' && <div className="action-pair"><button className="button button--danger-soft" type="button" onClick={returnForRework}><RotateCcw size={17} /> Вернуть</button><button className="button button--primary" type="button" disabled={!canSubmit} onClick={accept}><Check size={17} /> Принять</button></div>}

@@ -7,3 +7,4 @@ secure/
 compose.override.yaml
 .agents
 AGENTS.md
+.sites-runtime/

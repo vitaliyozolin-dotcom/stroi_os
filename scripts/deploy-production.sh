@@ -44,6 +44,10 @@ if [[ ! -f "$COMPOSE_FILE" || ! -f .env || ! -x "$BACKUP_COMMAND" ]]; then
   echo "STROIOS_DEPLOY_ERROR production_layout_invalid" >&2
   exit 78
 fi
+if grep -Eq "^[[:space:]]*(APP_PASSWORD|POSTGRES_PASSWORD)=['\"]?replace-with-" .env; then
+  echo "STROIOS_DEPLOY_ERROR insecure_placeholder_secret" >&2
+  exit 78
+fi
 if [[ ! -r "$INFRA_APPROVAL_FILE" ]]; then
   echo "STROIOS_DEPLOY_ERROR infrastructure_approval_missing" >&2
   exit 78

@@ -34,8 +34,18 @@ export const projectIdentity = (request, env, state) => {
   if (!authenticated) return null;
   if (authenticated.isOwner) return { ...authenticated, id: 'owner', role: 'management', status: 'active' };
 
+  if (request.headers.get('oai-authenticated-user-access-mode') === 'local-membership') {
+    const allowedProjects = clean(request.headers.get('oai-authenticated-user-projects'), 8000)
+      .split(',')
+      .filter(Boolean)
+      .map((item) => {
+        try { return decodeURIComponent(item); } catch { return ''; }
+      });
+    if (!allowedProjects.includes(clean(state?.project?.id, 100))) return null;
+  }
+
   const user = (state?.settings?.users ?? []).find((item) => normalizeEmail(item.email) === authenticated.email);
-  if (!user || user.status === 'disabled' || !ALLOWED_ROLES.has(user.role)) return null;
+  if (!user || user.status !== 'active' || !ALLOWED_ROLES.has(user.role)) return null;
   return {
     ...authenticated,
     id: clean(user.id, 100),
@@ -106,9 +116,20 @@ export const stateForRole = (state, identity) => {
   return safe;
 };
 
-export const mergeStateForRole = (previous, incoming, identity) => {
+export const mergeStateForRole = (previous, incoming, identity, { serverManagedRoster = false } = {}) => {
   const role = identity.role;
-  if (!previous || role === 'management') return incoming;
+  if (!previous || (role === 'management' && identity.isOwner && !serverManagedRoster)) return incoming;
+  if (role === 'management') {
+    return {
+      ...incoming,
+      settings: {
+        ...incoming.settings,
+        // Состав команды, email, роли и статусы — security boundary. Обычная
+        // роль «Управление» может менять настройки, но roster меняет лишь owner.
+        users: previous.settings?.users ?? [],
+      },
+    };
+  }
   if (role === 'foreman') {
     const submittedTasks = new Map((incoming.tasks ?? []).map((task) => [clean(task.id, 100), task]));
     const tasks = (previous.tasks ?? []).map((task) => {

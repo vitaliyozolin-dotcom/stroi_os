@@ -225,6 +225,7 @@ export interface SystemUser {
   telegramBoundAt?: string;
   lastActiveAt?: string;
   invitedAt?: string;
+  webActivatedAt?: string;
   inviteDelivery?: 'sent' | 'not_configured' | 'failed' | 'draft';
 }
 

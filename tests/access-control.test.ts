@@ -60,9 +60,24 @@ test('resolves active project users and rejects disabled or unknown roles', () =
   const disabled = state();
   disabled.settings.users[0].status = 'disabled';
   assert.equal(projectIdentity(requestFor('foreman@example.test'), env, disabled), null);
+  const invited = state();
+  invited.settings.users[0].status = 'invited';
+  assert.equal(projectIdentity(requestFor('foreman@example.test'), env, invited), null);
   const invalid = state();
   invalid.settings.users[0].role = 'administrator';
   assert.equal(projectIdentity(requestFor('foreman@example.test'), env, invalid), null);
+});
+
+test('local sessions are limited to explicitly active project memberships', () => {
+  const allowed = requestFor('foreman@example.test', 'Прораб');
+  allowed.headers.set('oai-authenticated-user-access-mode', 'local-membership');
+  allowed.headers.set('oai-authenticated-user-projects', 'project-1');
+  assert.equal(projectIdentity(allowed, env, state())?.role, 'foreman');
+
+  const denied = requestFor('foreman@example.test', 'Прораб');
+  denied.headers.set('oai-authenticated-user-access-mode', 'local-membership');
+  denied.headers.set('oai-authenticated-user-projects', 'another-project');
+  assert.equal(projectIdentity(denied, env, state()), null);
 });
 
 test('projects state for management, foreman and client without mutating source', () => {
@@ -100,4 +115,26 @@ test('merge preserves fields a foreman and client cannot change', () => {
   const clientMerged = mergeStateForRole(previous, clientIncoming, { role: 'client', id: 'client' });
   assert.equal(clientMerged.project.contractValue, 10_000);
   assert.deepEqual(clientMerged.decisions, [{ id: 'client-decision' }]);
+});
+
+test('non-owner management cannot change the security-sensitive user roster', () => {
+  const previous = state();
+  const incoming = structuredClone(previous);
+  incoming.settings.users[0].role = 'management';
+  incoming.settings.users[0].email = 'attacker@example.test';
+  incoming.settings.users[1].status = 'disabled';
+
+  const restricted = mergeStateForRole(previous, incoming, { role: 'management', isOwner: false });
+  assert.deepEqual(restricted.settings.users, previous.settings.users);
+
+  const owner = mergeStateForRole(previous, incoming, { role: 'management', isOwner: true });
+  assert.deepEqual(owner.settings.users, incoming.settings.users);
+
+  const localPasswordOwner = mergeStateForRole(
+    previous,
+    incoming,
+    { role: 'management', isOwner: true },
+    { serverManagedRoster: true },
+  );
+  assert.deepEqual(localPasswordOwner.settings.users, previous.settings.users);
 });

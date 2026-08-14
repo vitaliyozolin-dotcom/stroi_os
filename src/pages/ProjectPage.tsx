@@ -331,7 +331,7 @@ export function ProjectPage({
           </div>
           <div className="modal__actions">
             {selected.stageId && <button type="button" className="button button--secondary" onClick={() => { setSelectedId(null); onNavigate('schedule', selected.stageId); }}><Link2 size={16} /> Открыть этап</button>}
-            <button type="button" className="button button--primary" disabled={!selected.fileKey} onClick={() => openFile(selected)}><Download size={16} /> Открыть файл</button>
+            <button type="button" className="button button--primary" disabled={!selected.fileKey} onClick={() => openFile(selected)}><Download size={16} /> Скачать файл</button>
           </div>
         </Modal>
       )}
@@ -344,4 +344,3 @@ export function ProjectPage({
     </div>
   );
 }
-

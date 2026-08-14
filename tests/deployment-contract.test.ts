@@ -49,6 +49,7 @@ test('deploy builds exact Git content, persists image pointers and rolls back si
 
   assert.match(deploy, /git archive "\$target_commit"/);
   assert.match(deploy, /git status --porcelain --untracked-files=all/);
+  assert.match(deploy, /insecure_placeholder_secret/);
   assert.match(deploy, /"\$previous_commit" == "\$target_commit"/);
   assert.match(deploy, /candidate_tag="stroios-runtime:candidate-/);
   assert.match(deploy, /docker image tag "\$candidate_tag" "\$target_tag"/);
@@ -124,6 +125,17 @@ test('backup is verified and never performs an automatic restore', () => {
   assert.match(backup, /\/run\/lock\/stroios/);
   assert.doesNotMatch(backup, /install -d[^\n]+\/var\/lock/);
   assert.doesNotMatch(backup, /pg_restore .*--clean|docker compose down -v/);
+});
+
+test('manual database restore requires revoking resurrected access before app start', () => {
+  const script = source('scripts/revoke-restored-access.sh');
+  const implementation = source('server/revoke-restored-access.js');
+  const docs = source('docs/timeweb-autodeploy.md');
+
+  assert.match(script, /stop_app_before_access_revocation/);
+  assert.match(script, /run --rm --no-deps app node server\/revoke-restored-access\.js/);
+  assert.match(implementation, /BEGIN[\s\S]*UPDATE auth_sessions[\s\S]*UPDATE auth_tokens[\s\S]*DELETE FROM auth_login_limits[\s\S]*COMMIT/);
+  assert.match(docs, /После любого ручного восстановления PostgreSQL[\s\S]*revoke-restored-access\.sh/);
 });
 
 test('GitHub deploy key is scoped away from checkout and build steps', () => {

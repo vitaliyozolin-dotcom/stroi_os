@@ -217,7 +217,12 @@ export const createProjectState = (base: AppState, input: {
     leads: [],
     tasks: [],
     fieldReports: [],
-    settings: JSON.parse(JSON.stringify(base.settings)) as AppState['settings'],
+    settings: {
+      ...JSON.parse(JSON.stringify(base.settings)) as AppState['settings'],
+      // Доступ к каждому объекту назначается явно. Новый проект наследует только
+      // профиль владельца и никогда — клиентов или сотрудников другого объекта.
+      users: base.settings.users.filter((user) => user.id === 'user-owner').map((user) => ({ ...user })),
+    },
     checkpoints: [],
     documents: [],
     decisions: [],
@@ -230,4 +235,3 @@ export const createProjectState = (base: AppState, input: {
     }],
   };
 };
-

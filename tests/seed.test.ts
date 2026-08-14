@@ -26,7 +26,12 @@ test('starts with a clean workspace and no demo business data', () => {
 });
 
 test('creates a project without cloning operational records', () => {
-  const state = createProjectState(seedState, {
+  const base = structuredClone(seedState);
+  base.settings.users.push(
+    { id: 'user-foreman', name: 'Прораб', email: 'foreman@example.test', role: 'foreman', status: 'active' },
+    { id: 'user-client', name: 'Клиент', email: 'client@example.test', role: 'client', status: 'active' },
+  );
+  const state = createProjectState(base, {
     code: 'H-001',
     name: 'Рабочий объект',
     address: '',
@@ -47,4 +52,5 @@ test('creates a project without cloning operational records', () => {
   assert.equal(state.budgetMeta.source, 'Смета не загружена');
   for (const collection of businessCollections.filter((name) => name !== 'activity')) assert.deepEqual(state[collection], []);
   assert.equal(state.activity.length, 1);
+  assert.deepEqual(state.settings.users.map((user) => user.id), ['user-owner']);
 });

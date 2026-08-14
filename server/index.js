@@ -7,8 +7,15 @@ import worker, { flushTelegramOutbox, initializeBattleRuntime } from '../sites/w
 import { FileBucket } from './file-bucket.js';
 import { PostgresDatabase } from './postgres.js';
 import { isPublicRoute } from './public-routes.js';
-import { createSessionAuth, LoginRateLimiter } from './auth.js';
 import { loginPage } from './login-page.js';
+import { activationPage, invalidActivationPage } from './access-page.js';
+import {
+  ACCESS_BODY_LIMIT,
+  ACCESS_SCHEMA_VERSION,
+  AccessError,
+  UserAccessService,
+  accessErrorResponse,
+} from './user-access.js';
 import { ensureTelegramWebhook } from './telegram-webhook.js';
 import { createBackgroundTaskTracker, createExclusiveTaskRunner } from './background-tasks.js';
 
@@ -21,16 +28,30 @@ const appUsername = process.env.APP_USERNAME || 'vitaliy';
 const appPassword = process.env.APP_PASSWORD;
 
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
+const isPlaceholderSecret = (value) => /^replace-with(?:-|$)/i.test(String(value || '').trim());
+if (isPlaceholderSecret(appPassword)) throw new Error('APP_PASSWORD placeholder is forbidden');
+try {
+  const databasePassword = decodeURIComponent(new URL(databaseUrl).password || '');
+  if (isPlaceholderSecret(databasePassword)) throw new Error('POSTGRES_PASSWORD placeholder is forbidden');
+} catch (error) {
+  if (error instanceof Error && error.message.includes('placeholder')) throw error;
+}
 
-const auth = createSessionAuth({
-  username: appUsername,
-  password: appPassword,
-  sessionSecret: process.env.SESSION_SECRET || appPassword,
-  email: ownerEmail,
-  name: ownerName,
-});
-const loginLimiter = new LoginRateLimiter();
 const database = new PostgresDatabase(databaseUrl);
+const userAccess = new UserAccessService({
+  database,
+  ownerEmail,
+  ownerName,
+  ownerUsername: appUsername,
+  ownerPassword: appPassword,
+  publicUrl: process.env.APP_PUBLIC_URL || 'http://localhost',
+  sessionTtlMs: Number(process.env.AUTH_SESSION_TTL_HOURS) > 0
+    ? Number(process.env.AUTH_SESSION_TTL_HOURS) * 60 * 60_000
+    : undefined,
+  inviteTtlMs: Number(process.env.AUTH_INVITE_TTL_HOURS) > 0
+    ? Number(process.env.AUTH_INVITE_TTL_HOURS) * 60 * 60_000
+    : undefined,
+});
 const bucket = new FileBucket(process.env.FILE_STORAGE_PATH || '/data/files');
 const telegramOutboxIntervalMs = Math.max(15_000, Number(process.env.TELEGRAM_OUTBOX_INTERVAL_MS) || 30_000);
 
@@ -71,6 +92,7 @@ const env = {
   BUCKET: bucket,
   ASSETS: assets,
   OWNER_EMAIL: ownerEmail,
+  AUTH_ROSTER_MODE: 'local_password',
   APP_PUBLIC_URL: process.env.APP_PUBLIC_URL || 'http://localhost',
 };
 
@@ -100,6 +122,112 @@ const hasValidOrigin = (request) => {
   try { return new URL(origin).host === new URL(request.url).host; } catch { return false; }
 };
 
+const readBodyLimited = async (request, maxBytes = ACCESS_BODY_LIMIT) => {
+  const declared = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) throw new AccessError('request_too_large', 413);
+  if (!request.body) return '';
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel();
+      throw new AccessError('request_too_large', 413);
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks, size).toString('utf8');
+};
+
+const readFormLimited = async (request) => new URLSearchParams(await readBodyLimited(request));
+const readJsonLimited = async (request, maxBytes = 32 * 1024) => {
+  try { return JSON.parse(await readBodyLimited(request, maxBytes)); }
+  catch (error) {
+    if (error instanceof AccessError) throw error;
+    throw new AccessError('invalid_json', 400);
+  }
+};
+
+const jsonNoStore = (body, status = 200) => Response.json(body, {
+  status,
+  headers: { 'Cache-Control': 'no-store' },
+});
+
+const handleAccessApi = async (request, identity) => {
+  const url = new URL(request.url);
+  if (!identity?.isOwner) return jsonNoStore({ ok: false, error: 'owner_required' }, 403);
+  if (request.method !== 'GET' && !hasValidOrigin(request)) return jsonNoStore({ ok: false, error: 'forbidden_origin' }, 403);
+  try {
+    if (url.pathname === '/api/access/users' && request.method === 'GET') {
+      const projectId = String(url.searchParams.get('projectId') || '').trim();
+      const users = await userAccess.listProjectAccess(projectId);
+      return jsonNoStore({ ok: true, authMode: 'local_password', users });
+    }
+    if (url.pathname === '/api/access/users' && request.method === 'POST') {
+      const body = await readJsonLimited(request);
+      const result = await userAccess.createProjectUser({
+        projectId: String(body.projectId || '').trim(),
+        actorEmail: identity.email,
+        actorName: identity.name,
+        profile: body.user,
+      });
+      return jsonNoStore({ ok: true, ...result }, 201);
+    }
+    const profileMatch = url.pathname.match(/^\/api\/access\/users\/([^/]+)$/);
+    if (profileMatch && request.method === 'PATCH') {
+      const body = await readJsonLimited(request);
+      const result = await userAccess.updateProjectUser({
+        projectId: String(body.projectId || '').trim(),
+        userId: decodeURIComponent(profileMatch[1]),
+        actorEmail: identity.email,
+        actorName: identity.name,
+        profile: body.user,
+      });
+      return jsonNoStore({ ok: true, ...result });
+    }
+    if (url.pathname === '/api/access/web/invitations' && request.method === 'POST') {
+      const body = await readJsonLimited(request);
+      const invitation = await userAccess.issueToken({
+        projectId: String(body.projectId || '').trim(),
+        userId: String(body.userId || '').trim(),
+        actorEmail: identity.email,
+        purpose: 'activate',
+      });
+      return jsonNoStore({ ok: true, ...invitation }, 201);
+    }
+    if (url.pathname === '/api/access/web/reset' && request.method === 'POST') {
+      const body = await readJsonLimited(request);
+      const invitation = await userAccess.issueToken({
+        projectId: String(body.projectId || '').trim(),
+        userId: String(body.userId || '').trim(),
+        actorEmail: identity.email,
+        purpose: 'reset',
+      });
+      return jsonNoStore({ ok: true, ...invitation }, 201);
+    }
+    const match = url.pathname.match(/^\/api\/access\/users\/([^/]+)\/(block|unblock|sessions\/revoke)$/);
+    if (match && request.method === 'POST') {
+      const body = await readJsonLimited(request);
+      const userId = decodeURIComponent(match[1]);
+      const projectId = String(body.projectId || '').trim();
+      if (match[2] === 'sessions/revoke') {
+        const count = await userAccess.revokeUserSessions({ projectId, userId, actorEmail: identity.email });
+        return jsonNoStore({ ok: true, revokedSessions: count });
+      }
+      const result = await userAccess.setBlocked({
+        projectId, userId, actorEmail: identity.email, blocked: match[2] === 'block',
+      });
+      return jsonNoStore({ ok: true, ...result });
+    }
+    return jsonNoStore({ ok: false, error: 'not_found' }, 404);
+  } catch (error) {
+    return accessErrorResponse(error);
+  }
+};
+
 const backgroundTasks = createBackgroundTaskTracker();
 const trackBackground = backgroundTasks.waitUntil;
 let shuttingDown = false;
@@ -126,6 +254,13 @@ const server = createServer(async (incoming, outgoing) => {
       if (Array.isArray(value)) value.forEach((item) => headers.append(name, item));
       else if (value != null) headers.set(name, value);
     }
+    headers.delete('oai-authenticated-user-email');
+    headers.delete('oai-authenticated-user-full-name');
+    headers.delete('oai-authenticated-user-full-name-encoding');
+    headers.delete('oai-authenticated-user-id');
+    headers.delete('oai-authenticated-user-is-owner');
+    headers.delete('oai-authenticated-user-projects');
+    headers.delete('oai-authenticated-user-access-mode');
     headers.set('oai-client-ip', clientKey(incoming));
     const request = new Request(url, {
       method: incoming.method,
@@ -135,36 +270,82 @@ const server = createServer(async (incoming, outgoing) => {
     });
 
     if (url.pathname === '/login' && request.method === 'GET') {
-      const response = auth.fromRequest(request)
+      const response = await userAccess.fromRequest(request)
         ? redirect('/')
         : htmlResponse(loginPage());
       return writeResponse(outgoing, response);
     }
 
+    const inviteMatch = url.pathname.match(/^\/invite\/([A-Za-z0-9_-]{40,128})$/);
+    if (inviteMatch && ['GET', 'HEAD'].includes(request.method)) {
+      try {
+        const invite = await userAccess.inspectToken(inviteMatch[1]);
+        const response = htmlResponse(activationPage({ token: inviteMatch[1], invite }));
+        return writeResponse(outgoing, request.method === 'HEAD'
+          ? new Response(null, { status: response.status, headers: response.headers })
+          : response);
+      } catch {
+        const response = htmlResponse(invalidActivationPage(), 410);
+        return writeResponse(outgoing, request.method === 'HEAD'
+          ? new Response(null, { status: response.status, headers: response.headers })
+          : response);
+      }
+    }
+
     if (url.pathname === '/api/auth/login' && request.method === 'POST') {
       if (!hasValidOrigin(request)) return writeResponse(outgoing, new Response('Forbidden', { status: 403 }));
-      const key = clientKey(incoming);
-      if (loginLimiter.isBlocked(key)) {
-        return writeResponse(outgoing, htmlResponse(loginPage({ error: 'blocked', blocked: true }), 429, { 'Retry-After': '900' }));
+      let username = '';
+      try {
+        const form = await readFormLimited(request);
+        username = String(form.get('username') || '').trim();
+        const password = String(form.get('password') || '');
+        const session = await userAccess.authenticate(username, password, {
+          ip: clientKey(incoming), userAgent: request.headers.get('user-agent') || '',
+        });
+        return writeResponse(outgoing, redirect('/', { 'Set-Cookie': userAccess.cookie(session.token) }));
+      } catch (error) {
+        const blocked = error instanceof AccessError && error.code === 'rate_limited';
+        const status = error instanceof AccessError ? error.status : 500;
+        const extra = blocked ? { 'Retry-After': '900' } : {};
+        return writeResponse(outgoing, htmlResponse(loginPage({ username, error: 'invalid', blocked }), status, extra));
       }
-      const form = await request.formData();
-      const username = String(form.get('username') || '').trim();
-      const password = String(form.get('password') || '');
-      if (!auth.verifyCredentials(username, password)) {
-        loginLimiter.fail(key);
-        return writeResponse(outgoing, htmlResponse(loginPage({ username, error: 'invalid' }), 401));
+    }
+
+    if (url.pathname === '/api/auth/activate' && request.method === 'POST') {
+      if (!hasValidOrigin(request)) return writeResponse(outgoing, new Response('Forbidden', { status: 403 }));
+      let token = '';
+      try {
+        const form = await readFormLimited(request);
+        token = String(form.get('token') || '');
+        const password = String(form.get('password') || '');
+        const passwordConfirm = String(form.get('passwordConfirm') || '');
+        const session = await userAccess.activate(token, password, passwordConfirm, {
+          ip: clientKey(incoming), userAgent: request.headers.get('user-agent') || '',
+        });
+        return writeResponse(outgoing, redirect('/', { 'Set-Cookie': userAccess.cookie(session.token) }));
+      } catch (error) {
+        if (error instanceof AccessError && ['weak_password', 'password_mismatch'].includes(error.code)) {
+          try {
+            const invite = await userAccess.inspectToken(token);
+            return writeResponse(outgoing, htmlResponse(activationPage({ token, invite, error: error.code }), error.status));
+          } catch { /* Ссылка стала недействительной между проверкой и отправкой формы. */ }
+        }
+        return writeResponse(outgoing, htmlResponse(invalidActivationPage(), error instanceof AccessError ? error.status : 500));
       }
-      loginLimiter.success(key);
-      return writeResponse(outgoing, redirect('/', { 'Set-Cookie': auth.sessionCookie(request) }));
     }
 
     if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
       if (!hasValidOrigin(request)) return writeResponse(outgoing, new Response('Forbidden', { status: 403 }));
-      return writeResponse(outgoing, redirect('/login', { 'Set-Cookie': auth.clearCookie(request) }));
+      await userAccess.revokeRequestSession(request);
+      return writeResponse(outgoing, redirect('/login', {
+        'Set-Cookie': userAccess.clearCookie(),
+        'Clear-Site-Data': '"cache", "storage"',
+      }));
     }
 
+    let identity = null;
     if (!isPublicRoute(url)) {
-      const identity = auth.fromRequest(request);
+      identity = await userAccess.fromRequest(request);
       if (!identity) {
         const acceptsHtml = request.method === 'GET' && (request.headers.get('accept') || '').includes('text/html');
         const response = acceptsHtml
@@ -175,9 +356,26 @@ const server = createServer(async (incoming, outgoing) => {
       headers.set('oai-authenticated-user-email', identity.email);
       headers.set('oai-authenticated-user-full-name', encodeURIComponent(identity.name));
       headers.set('oai-authenticated-user-full-name-encoding', 'percent-encoded-utf-8');
+      if (identity.accountId) headers.set('oai-authenticated-user-id', identity.accountId);
+      headers.set('oai-authenticated-user-is-owner', identity.isOwner ? 'true' : 'false');
+      if (!identity.isOwner) {
+        headers.set('oai-authenticated-user-projects', (identity.projectIds ?? []).map((item) => encodeURIComponent(item)).join(','));
+        headers.set('oai-authenticated-user-access-mode', 'local-membership');
+      }
+    }
+
+    if (url.pathname.startsWith('/api/access/')) {
+      return writeResponse(outgoing, await handleAccessApi(request, identity));
     }
 
     const authenticatedRequest = new Request(request, { headers });
+    if (request.method === 'GET' && ['/api/health', '/api/readiness'].includes(url.pathname)) {
+      const battleResponse = await worker.fetch(authenticatedRequest, env, { waitUntil: trackBackground });
+      if (!battleResponse.ok) return writeResponse(outgoing, battleResponse);
+      const battle = await battleResponse.json();
+      const authSchemaReady = await userAccess.readiness();
+      return writeResponse(outgoing, jsonNoStore({ ...battle, authSchemaVersion: ACCESS_SCHEMA_VERSION, authSchemaReady, ok: Boolean(battle.ok && authSchemaReady) }, authSchemaReady ? 200 : 503));
+    }
     const response = await worker.fetch(authenticatedRequest, env, { waitUntil: trackBackground });
     await writeResponse(outgoing, response);
   } catch (error) {
@@ -209,6 +407,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 
 await initializeBattleRuntime(env);
+await userAccess.initialize();
 await access(clientRoot);
 server.listen(port, '0.0.0.0', () => {
   console.log(`stroios listening on ${port}`);

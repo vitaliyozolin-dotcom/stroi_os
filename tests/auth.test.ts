@@ -1,52 +1,99 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { createSessionAuth, LoginRateLimiter, SESSION_COOKIE } from '../server/auth.js';
 
-const config = {
-  username: 'vitaliy', password: '1234567890', sessionSecret: 'a-secret-at-least-10',
-  email: 'vitaliyozolin@gmail.com', name: 'Виталий Озолин',
-};
+import { activationPage } from '../server/access-page.js';
+import {
+  ACCESS_SESSION_COOKIE,
+  UserAccessService,
+  hashAccessPassword,
+  hashAccessToken,
+  normalizeAccessAddress,
+  parseCookieHeader,
+  validateAccessPassword,
+  verifyAccessPassword,
+} from '../server/user-access.js';
 
-test('valid credentials issue a verifiable secure session', () => {
-  const auth = createSessionAuth(config);
-  assert.equal(auth.verifyCredentials('vitaliy', '1234567890'), true);
-  assert.equal(auth.verifyCredentials('vitaliy', 'wrong-password'), false);
-  const request = new Request('https://example.com/');
-  const cookie = auth.sessionCookie(request);
+test('passwords use the bounded memory-hard profile and never store plaintext', async () => {
+  const password = 'correct horse battery staple';
+  const encoded = await hashAccessPassword(password);
+  assert.match(encoded, /^scrypt\$32768\$8\$3\$/);
+  assert.doesNotMatch(encoded, new RegExp(password));
+  assert.equal(await verifyAccessPassword(password, encoded), true);
+  assert.equal(await verifyAccessPassword('wrong-password-value', encoded), false);
+  assert.equal(await verifyAccessPassword(password, encoded.replace('32768', '1048576')), false);
+});
+
+test('password limits are checked before scrypt work', () => {
+  assert.equal(validateAccessPassword('short'), 'weak_password');
+  assert.equal(validateAccessPassword('a'.repeat(14)), 'weak_password');
+  assert.equal(validateAccessPassword('a'.repeat(15)), '');
+  assert.equal(validateAccessPassword('я'.repeat(129)), 'weak_password');
+});
+
+test('opaque invite and session tokens are represented only by SHA-256 hashes', () => {
+  const raw = 'one-time-secret-token';
+  const digest = hashAccessToken(raw);
+  assert.equal(digest.length, 64);
+  assert.doesNotMatch(digest, /one-time/);
+  assert.equal(hashAccessToken(raw), digest);
+});
+
+test('login rate addresses isolate IPv4 and normalize IPv6 to a source /64', () => {
+  assert.equal(normalizeAccessAddress('203.0.113.7'), '203.0.113.7');
+  assert.equal(normalizeAccessAddress('::ffff:203.0.113.7'), '203.0.113.7');
+  assert.equal(normalizeAccessAddress('2001:db8:1:2::1'), '2001:0db8:0001:0002::/64');
+  assert.equal(normalizeAccessAddress('2001:db8:1:2:ffff::9'), '2001:0db8:0001:0002::/64');
+  assert.equal(normalizeAccessAddress('2001:db8:1:3::1'), '2001:0db8:0001:0003::/64');
+});
+
+test('session cookie is server-side, HttpOnly, same-site and secure from configured origin', () => {
+  const service = new UserAccessService({
+    database: { pool: {} },
+    ownerEmail: 'owner@example.test',
+    ownerName: 'Owner',
+    ownerUsername: 'owner',
+    ownerPassword: 'owner-password-long',
+    publicUrl: 'https://os.example.test',
+  });
+  const cookie = service.cookie('opaque');
+  assert.match(cookie, new RegExp(`${ACCESS_SESSION_COOKIE}=opaque`));
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /SameSite=Lax/);
   assert.match(cookie, /Secure/);
-  const token = cookie.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))[1];
-  const authenticated = new Request('https://example.com/', { headers: { cookie: `${SESSION_COOKIE}=${token}` } });
-  assert.deepEqual(auth.fromRequest(authenticated), { email: config.email, name: config.name });
+  assert.equal(parseCookieHeader(cookie)[ACCESS_SESSION_COOKIE], 'opaque');
+  assert.match(service.clearCookie(), /Max-Age=0/);
+  assert.throws(() => new UserAccessService({
+    database: { pool: {} }, ownerEmail: 'owner@example.test', ownerName: 'Owner', ownerUsername: 'owner',
+    ownerPassword: 'owner-password-long', publicUrl: 'http://public.example.test',
+  }), /HTTPS/);
+  assert.throws(() => new UserAccessService({
+    database: { pool: {} }, ownerEmail: 'owner@example.test', ownerName: 'Owner', ownerUsername: 'owner',
+    ownerPassword: 'replace-with-a-different-long-random-secret', publicUrl: 'https://os.example.test',
+  }), /non-placeholder/);
 });
 
-test('tampered and expired sessions are rejected', () => {
-  const auth = createSessionAuth(config);
-  const cookie = auth.sessionCookie(new Request('https://example.com/'), 1_000);
-  const token = cookie.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))[1];
-  const tampered = new Request('https://example.com/', { headers: { cookie: `${SESSION_COOKIE}=${token}x` } });
-  assert.equal(auth.fromRequest(tampered), null);
-  const expiredAuth = createSessionAuth({ ...config, sessionSecret: 'another-secret-10' });
-  const oldCookie = expiredAuth.sessionCookie(new Request('https://example.com/'), 1_000);
-  const oldToken = oldCookie.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))[1];
-  const oldRequest = new Request('https://example.com/', { headers: { cookie: `${SESSION_COOKIE}=${oldToken}` } });
-  assert.equal(expiredAuth.fromRequest(oldRequest), null);
+test('activation page escapes account data and does not consume a link on GET', () => {
+  const page = activationPage({
+    token: 'token-value',
+    invite: { purpose: 'activate', name: '<script>', email: 'user@example.test', role: 'foreman', projectName: 'Дом' },
+  });
+  assert.doesNotMatch(page, /<script>/);
+  assert.match(page, /&lt;script&gt;/);
+  assert.match(page, /method="post" action="\/api\/auth\/activate"/);
+  assert.match(page, /type="hidden" name="token"/);
 });
 
-test('requests without a Cookie header are treated as unauthenticated', () => {
-  const auth = createSessionAuth(config);
-  const request = new Request('https://example.com/');
-  assert.equal(request.headers.get('cookie'), null);
-  assert.equal(auth.fromRequest(request), null);
-});
-
-test('rate limiter blocks repeated failures and resets after success', () => {
-  const limiter = new LoginRateLimiter({ limit: 2, windowMs: 1_000, blockMs: 2_000 });
-  limiter.fail('ip', 0);
-  assert.equal(limiter.isBlocked('ip', 100), false);
-  limiter.fail('ip', 200);
-  assert.equal(limiter.isBlocked('ip', 300), true);
-  limiter.success('ip');
-  assert.equal(limiter.isBlocked('ip', 300), false);
+test('server strips forged identity headers and uses revocable personal sessions', async () => {
+  const [server, access] = await Promise.all([
+    readFile(new URL('../server/index.js', import.meta.url), 'utf8'),
+    readFile(new URL('../server/user-access.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(server, /headers\.delete\('oai-authenticated-user-email'\)/);
+  assert.match(server, /headers\.delete\('oai-authenticated-user-projects'\)/);
+  assert.match(server, /await userAccess\.fromRequest\(request\)/);
+  assert.match(server, /Clear-Site-Data/);
+  assert.match(access, /UPDATE auth_sessions SET revoked_at/);
+  assert.match(access, /UPDATE auth_tokens SET revoked_at/);
+  assert.doesNotMatch(access, /password_hash\s*=\s*password/);
 });
