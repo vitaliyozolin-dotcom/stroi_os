@@ -53,6 +53,9 @@ const BATTLE_RESET_KEY = 'battle_v17_reset';
 const BATTLE_SCHEMA_KEY = 'battle_schema_version';
 const PUBLIC_LEAD_PROJECT_ID = 'ikioma-sales';
 const PUBLIC_LEAD_ORIGINS = new Set(['https://ikioma.ru', 'https://www.ikioma.ru']);
+const PUBLIC_LEAD_GLOBAL_LIMIT = 30;
+const PUBLIC_LEAD_CLIENT_LIMIT = 5;
+const PUBLIC_LEAD_RATE_WINDOW_MS = 60_000;
 const TELEGRAM_MUTATION_NOOP = Symbol('telegram_mutation_noop');
 let schemaPromise;
 let battleReadyPromise;
@@ -97,6 +100,15 @@ const ensureSchema = async (db) => {
           source TEXT NOT NULL,
           message TEXT,
           status TEXT NOT NULL
+        )
+      `).run(),
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS public_lead_rate_limits (
+          key TEXT NOT NULL,
+          window_start TEXT NOT NULL,
+          attempts INTEGER NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (key, window_start)
         )
       `).run(),
       db.prepare(`
@@ -3617,6 +3629,42 @@ const handleLeadInbox = async (request, env) => {
   } catch { return json({ ok: false, error: 'storage_error' }, 500); }
 };
 
+const incrementPublicLeadRateLimit = async (db, key, windowStart, updatedAt) => {
+  await db.prepare(`
+    INSERT INTO public_lead_rate_limits (key, window_start, attempts, updated_at)
+    VALUES (?, ?, 1, ?)
+    ON CONFLICT(key, window_start) DO UPDATE SET
+      attempts = public_lead_rate_limits.attempts + 1,
+      updated_at = excluded.updated_at
+  `).bind(key, windowStart, updatedAt).run();
+  const row = await db.prepare(`
+    SELECT attempts
+    FROM public_lead_rate_limits
+    WHERE key = ? AND window_start = ?
+  `).bind(key, windowStart).first();
+  return Number(row?.attempts) || 0;
+};
+
+export const claimPublicLeadRateLimit = async (db, clientAddress, now = Date.now()) => {
+  const windowTime = Math.floor(now / PUBLIC_LEAD_RATE_WINDOW_MS) * PUBLIC_LEAD_RATE_WINDOW_MS;
+  const windowStart = new Date(windowTime).toISOString();
+  const updatedAt = new Date(now).toISOString();
+  const retryAfter = Math.max(1, Math.ceil((windowTime + PUBLIC_LEAD_RATE_WINDOW_MS - now) / 1000));
+  const expiredBefore = new Date(windowTime - 24 * 60 * 60 * 1000).toISOString();
+  await db.prepare(`
+    DELETE FROM public_lead_rate_limits
+    WHERE window_start < ?
+  `).bind(expiredBefore).run();
+
+  const globalAttempts = await incrementPublicLeadRateLimit(db, 'global', windowStart, updatedAt);
+  if (globalAttempts > PUBLIC_LEAD_GLOBAL_LIMIT) return { allowed: false, retryAfter, scope: 'global' };
+
+  const clientHash = await sha256(clean(clientAddress, 200) || 'unknown');
+  const clientAttempts = await incrementPublicLeadRateLimit(db, `client:${clientHash}`, windowStart, updatedAt);
+  if (clientAttempts > PUBLIC_LEAD_CLIENT_LIMIT) return { allowed: false, retryAfter, scope: 'client' };
+  return { allowed: true, retryAfter, scope: '' };
+};
+
 const handlePublicLead = async (request, env) => {
   const origin = clean(request.headers.get('origin'), 500);
   if (!PUBLIC_LEAD_ORIGINS.has(origin)) return json({ ok: false, error: 'forbidden_origin' }, 403);
@@ -3633,6 +3681,25 @@ const handlePublicLead = async (request, env) => {
   if (request.method !== 'POST') return publicLeadResponse({ ok: false, error: 'method_not_allowed' }, 405, origin);
   if (!env.DB) return publicLeadResponse({ ok: false, error: 'storage_unavailable' }, 503, origin);
 
+  try {
+    await ensureSchema(env.DB);
+    const clientAddress = clean(
+      request.headers.get('oai-client-ip') || request.headers.get('cf-connecting-ip'),
+      200,
+    ) || 'unknown';
+    const rateLimit = await claimPublicLeadRateLimit(env.DB, clientAddress);
+    if (!rateLimit.allowed) {
+      return publicLeadResponse(
+        { ok: false, error: 'rate_limit_exceeded' },
+        429,
+        origin,
+        { 'Retry-After': String(rateLimit.retryAfter) },
+      );
+    }
+  } catch {
+    return publicLeadResponse({ ok: false, error: 'storage_error' }, 500, origin);
+  }
+
   let payload;
   try { payload = await request.json(); } catch { return publicLeadResponse({ ok: false, error: 'invalid_json' }, 400, origin); }
 
@@ -3648,7 +3715,6 @@ const handlePublicLead = async (request, env) => {
   }
 
   try {
-    await ensureSchema(env.DB);
     const duplicateAfter = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     const duplicate = await env.DB.prepare(`
       SELECT id FROM lead_inbox

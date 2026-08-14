@@ -126,6 +126,7 @@ const server = createServer(async (incoming, outgoing) => {
       if (Array.isArray(value)) value.forEach((item) => headers.append(name, item));
       else if (value != null) headers.set(name, value);
     }
+    headers.set('oai-client-ip', clientKey(incoming));
     const request = new Request(url, {
       method: incoming.method,
       headers,

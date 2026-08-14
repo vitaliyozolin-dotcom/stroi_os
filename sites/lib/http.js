@@ -6,7 +6,7 @@ export const json = (body, status = 200) => Response.json(body, {
   },
 });
 
-export const publicLeadResponse = (body, status, origin) => Response.json(body, {
+export const publicLeadResponse = (body, status, origin, extraHeaders = {}) => Response.json(body, {
   status,
   headers: {
     'Access-Control-Allow-Origin': origin,
@@ -16,5 +16,6 @@ export const publicLeadResponse = (body, status, origin) => Response.json(body, 
     'Cache-Control': 'no-store',
     'Vary': 'Origin',
     'X-Content-Type-Options': 'nosniff',
+    ...extraHeaders,
   },
 });

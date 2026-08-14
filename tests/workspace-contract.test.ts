@@ -35,6 +35,11 @@ test('IKIOMA lead ingress is public only for the dedicated endpoint and protecte
   assert.match(worker, /telegramNotified/);
   assert.match(worker, /duplicateAfter/);
   assert.match(worker, /timeoutMs: 3_000/);
+  assert.match(worker, /claimPublicLeadRateLimit/);
+  assert.match(worker, /rate_limit_exceeded/);
+  assert.match(worker, /request\.headers\.get\('oai-client-ip'\)/);
+  assert.match(worker, /request\.headers\.get\('cf-connecting-ip'\)/);
+  assert.match(source('server/index.js'), /headers\.set\('oai-client-ip', clientKey\(incoming\)\)/);
 });
 
 test('the user-facing product is consistently branded as IKIOMA OS', () => {
