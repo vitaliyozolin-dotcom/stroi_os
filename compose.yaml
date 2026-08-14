@@ -1,3 +1,5 @@
+name: stroios
+
 services:
   storage-init:
     image: busybox:1.37
@@ -7,7 +9,11 @@ services:
       - stroios_files:/data/files
 
   telegram-relay:
-    build: .
+    image: ${STROIOS_RELAY_IMAGE:-stroios-telegram-relay}
+    build:
+      context: .
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
     network_mode: host
     environment:
@@ -21,7 +27,11 @@ services:
       retries: 5
 
   app:
-    build: .
+    image: ${STROIOS_APP_IMAGE:-stroios-app}
+    build:
+      context: .
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
     environment:
       PORT: 3000

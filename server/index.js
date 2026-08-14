@@ -3,13 +3,14 @@ import { createReadStream } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
-import worker, { flushTelegramOutbox } from '../sites/worker.js';
+import worker, { flushTelegramOutbox, initializeBattleRuntime } from '../sites/worker.js';
 import { FileBucket } from './file-bucket.js';
 import { PostgresDatabase } from './postgres.js';
 import { isPublicRoute } from './public-routes.js';
 import { createSessionAuth, LoginRateLimiter } from './auth.js';
 import { loginPage } from './login-page.js';
 import { ensureTelegramWebhook } from './telegram-webhook.js';
+import { createBackgroundTaskTracker, createExclusiveTaskRunner } from './background-tasks.js';
 
 const port = Number(process.env.PORT) || 3000;
 const clientRoot = resolve(process.env.CLIENT_ROOT || 'dist/client');
@@ -99,6 +100,22 @@ const hasValidOrigin = (request) => {
   try { return new URL(origin).host === new URL(request.url).host; } catch { return false; }
 };
 
+const backgroundTasks = createBackgroundTaskTracker();
+const trackBackground = backgroundTasks.waitUntil;
+let shuttingDown = false;
+
+const waitWithTimeout = async (promise, timeoutMs) => {
+  let timeout;
+  const result = await Promise.race([
+    Promise.resolve(promise).then(() => true),
+    new Promise((resolve) => {
+      timeout = setTimeout(() => resolve(false), timeoutMs);
+    }),
+  ]);
+  clearTimeout(timeout);
+  return result;
+};
+
 const server = createServer(async (incoming, outgoing) => {
   try {
     const protocol = incoming.headers['x-forwarded-proto'] || 'http';
@@ -160,7 +177,7 @@ const server = createServer(async (incoming, outgoing) => {
     }
 
     const authenticatedRequest = new Request(request, { headers });
-    const response = await worker.fetch(authenticatedRequest, env, { waitUntil: (promise) => promise.catch(console.error) });
+    const response = await worker.fetch(authenticatedRequest, env, { waitUntil: trackBackground });
     await writeResponse(outgoing, response);
   } catch (error) {
     console.error(error);
@@ -177,26 +194,35 @@ const writeResponse = async (outgoing, response) => {
 
 let telegramOutboxTimer;
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.on(signal, async () => {
+  process.once(signal, async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     if (telegramOutboxTimer) clearInterval(telegramOutboxTimer);
-    server.close();
+    const closed = await waitWithTimeout(new Promise((resolveClose) => server.close(resolveClose)), 20_000);
+    if (!closed) server.closeAllConnections?.();
+    const drained = await backgroundTasks.drain(20_000);
+    if (!drained) console.error('background task drain timed out during shutdown');
     await database.close();
     process.exit(0);
   });
 }
 
+await initializeBattleRuntime(env);
 await access(clientRoot);
 server.listen(port, '0.0.0.0', () => {
   console.log(`stroios listening on ${port}`);
-  const flushOutbox = () => flushTelegramOutbox(env).catch((error) => {
-    console.error(`telegram outbox flush failed: ${error instanceof Error ? error.message : String(error)}`);
-  });
+  const flushOutbox = createExclusiveTaskRunner(
+    () => flushTelegramOutbox(env, 3).catch((error) => {
+      console.error(`telegram outbox flush failed: ${error instanceof Error ? error.message : String(error)}`);
+    }),
+    trackBackground,
+  );
   void flushOutbox();
-  telegramOutboxTimer = setInterval(flushOutbox, telegramOutboxIntervalMs);
-  ensureTelegramWebhook(process.env)
+  telegramOutboxTimer = setInterval(() => void flushOutbox(), telegramOutboxIntervalMs);
+  trackBackground(ensureTelegramWebhook(process.env)
     .then((status) => {
       if (status.skipped) console.warn(`telegram webhook skipped: ${status.reason}`);
       else console.log(`telegram webhook ready: changed=${Boolean(status.changed)} pending=${status.pendingUpdateCount}`);
     })
-    .catch((error) => console.error(`telegram webhook restore failed: ${error instanceof Error ? error.message : String(error)}`));
+    .catch((error) => console.error(`telegram webhook restore failed: ${error instanceof Error ? error.message : String(error)}`)));
 });

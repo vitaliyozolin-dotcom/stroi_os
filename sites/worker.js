@@ -1,7 +1,6 @@
 import {
   authenticatedIdentity,
   mergeStateForRole,
-  normalizeEmail,
   projectIdentity,
   stateForRole,
 } from './access-control.js';
@@ -51,11 +50,12 @@ const MAX_QUALITY_PHOTO_BYTES = 12 * 1024 * 1024;
 const TELEGRAM_CONFIG_PROJECT_ID = '__integration__:telegram';
 const BATTLE_SCHEMA_VERSION = 17;
 const BATTLE_RESET_KEY = 'battle_v17_reset';
+const BATTLE_SCHEMA_KEY = 'battle_schema_version';
 const PUBLIC_LEAD_PROJECT_ID = 'ikioma-sales';
 const PUBLIC_LEAD_ORIGINS = new Set(['https://ikioma.ru', 'https://www.ikioma.ru']);
 const TELEGRAM_MUTATION_NOOP = Symbol('telegram_mutation_noop');
 let schemaPromise;
-let battleResetPromise;
+let battleReadyPromise;
 
 const changes = (result) => Number(result?.meta?.changes ?? result?.changes ?? 0);
 
@@ -235,7 +235,13 @@ const ensureSchema = async (db) => {
         CREATE INDEX IF NOT EXISTS data_reset_backups_created_at
         ON data_reset_backups (created_at DESC)
       `).run(),
-    ])).catch((error) => {
+    ])).then(() => db.prepare(`
+      INSERT INTO system_meta (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `).bind(BATTLE_SCHEMA_KEY, String(BATTLE_SCHEMA_VERSION), new Date().toISOString()).run()).catch((error) => {
       schemaPromise = undefined;
       throw error;
     });
@@ -243,232 +249,65 @@ const ensureSchema = async (db) => {
   await schemaPromise;
 };
 
-const cleanWorkspaceState = (env) => {
-  const today = isoDate();
-  const target = isoDate(addCalendarDays(new Date(`${today}T12:00:00Z`), 120));
-  const stageTemplates = [
-    ['prebuild', 'Подготовка участка и временные сети', 'Подготовка', 5, 7],
-    ['foundation', 'Фундамент', 'Фундамент', 10, 10],
-    ['floor', 'Перекрытие и нижняя обвязка', 'Перекрытие', 6, 7],
-    ['sip', 'Сборка силового и SIP-контура', 'SIP-контур', 15, 14],
-    ['roof', 'Кровля', 'Кровля', 8, 10],
-    ['openings', 'Окна и входные двери', 'Окна', 6, 7],
-    ['facade', 'Фасад и защита контура', 'Фасад', 7, 14],
-    ['electric', 'Электрика', 'Электрика', 7, 10],
-    ['engineering', 'Вода, канализация, ОВиК', 'Инженерия', 10, 14],
-    ['rough', 'Черновая отделка', 'Черновая', 7, 12],
-    ['finish', 'Чистовая отделка', 'Чистовая', 7, 14],
-    ['commissioning', 'Пусконаладка и испытания', 'Испытания', 7, 7],
-    ['handover', 'Сдача дома клиенту', 'Сдача', 5, 4],
-  ];
-  const availableDays = 120;
-  const templateDays = stageTemplates.reduce((sum, item) => sum + item[4], 0);
-  let cursor = 0;
-  const stages = stageTemplates.map((template, index) => {
-    const startOffset = Math.min(availableDays - 1, Math.round(cursor / templateDays * availableDays));
-    cursor += template[4];
-    const endOffset = index === stageTemplates.length - 1
-      ? availableDays
-      : Math.max(startOffset + 1, Math.round(cursor / templateDays * availableDays));
+export const battleReadiness = async (env) => {
+  const buildSha = clean(env.BUILD_SHA, 64) || 'unknown';
+  if (!env.DB) {
     return {
-      id: template[0],
-      order: index + 1,
-      name: template[1],
-      shortName: template[2],
-      status: 'not_ready',
-      weight: template[3],
-      progress: 0,
-      planStart: isoDate(addCalendarDays(new Date(`${today}T12:00:00Z`), startOffset)),
-      planEnd: isoDate(addCalendarDays(new Date(`${today}T12:00:00Z`), endOffset)),
-      forecastEnd: isoDate(addCalendarDays(new Date(`${today}T12:00:00Z`), endOffset)),
-      responsible: 'Не назначен',
-      dependencyId: index ? stageTemplates[index - 1][0] : undefined,
-      dependency: index ? stageTemplates[index - 1][2] : undefined,
-    };
-  });
-  const budgetLines = [
-    ['bl-prebuild', ['prebuild'], 'Подготовка участка'],
-    ['bl-foundation', ['foundation'], 'Фундамент'],
-    ['bl-structure', ['floor', 'sip'], 'Силовой контур и SIP'],
-    ['bl-roof', ['roof'], 'Кровля'],
-    ['bl-openings', ['openings'], 'Окна и двери'],
-    ['bl-facade', ['facade'], 'Фасад'],
-    ['bl-engineering', ['electric', 'engineering'], 'Инженерные системы'],
-    ['bl-finish', ['rough', 'finish'], 'Отделка'],
-    ['bl-management', ['commissioning', 'handover'], 'Управление и резерв'],
-  ].map(([id, stageIds, name]) => ({ id, stageIds, name, plan: 0, forecast: 0 }));
-  const ownerEmail = normalizeEmail(env.OWNER_EMAIL) || 'vitaliyozolin@gmail.com';
-  const ownerName = clean(env.OWNER_NAME, 120) || 'Виталий Озолин';
-  return {
-    version: 1,
-    schemaVersion: BATTLE_SCHEMA_VERSION,
-    project: {
-      id: 'workspace-initial',
-      code: 'NEW',
-      name: 'Новый проект',
-      address: '',
-      model: '',
-      area: 0,
-      clientNames: '',
-      contractValue: 0,
-      targetCost: 0,
-      startDate: today,
-      targetDate: target,
-      forecastDate: target,
-      foreman: '',
-      cameraStatus: 'offline',
-      createdAt: new Date().toISOString(),
-      source: 'Чистое рабочее пространство',
-      status: 'workspace',
-    },
-    budgetMeta: {
-      version: '—',
-      source: 'Смета не загружена',
-      note: 'План появится после загрузки или ручного подтверждения сметы.',
-    },
-    stages,
-    budgetLines,
-    financeEntries: [],
-    procurement: [],
-    counterparties: [],
-    supplierQuotes: [],
-    leads: [],
-    tasks: [],
-    fieldReports: [],
-    settings: {
+      ok: false,
+      database: false,
       schemaVersion: BATTLE_SCHEMA_VERSION,
-      users: [{
-        id: 'user-owner',
-        name: ownerName,
-        email: ownerEmail,
-        role: 'management',
-        status: 'active',
-      }],
-      notifications: {
-        channels: { email: false, telegram: false, browser: true },
-        events: {
-          financeApproval: true,
-          supplyRisk: true,
-          qualityRework: true,
-          leadWithoutAction: true,
-          scheduleDelay: true,
-          taskAssigned: true,
-          taskOverdue: true,
-          projectActivity: true,
-        },
-      },
-      dashboardWidgets: ['project', 'progress', 'finance', 'decisions', 'cashflow', 'quality', 'supply', 'tasks', 'activity'],
-    },
-    checkpoints: [],
-    documents: [],
-    decisions: [],
-    activity: [],
-  };
-};
-
-const waitForBattleReset = async (db) => {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    const marker = await db.prepare(`SELECT value FROM system_meta WHERE key = ?`).bind(BATTLE_RESET_KEY).first();
-    if (marker?.value === 'done') return;
+      schemaReady: false,
+      battleReady: false,
+      buildSha,
+    };
   }
-  throw new Error('battle_reset_in_progress');
-};
-
-const runBattleReset = async (env) => {
-  if (!env.DB) throw new Error('storage_unavailable');
-  await ensureSchema(env.DB);
-  const existing = await env.DB.prepare(`SELECT value FROM system_meta WHERE key = ?`).bind(BATTLE_RESET_KEY).first();
-  if (existing?.value === 'done') return;
-
-  const lockValue = `running:${crypto.randomUUID()}`;
-  const now = new Date().toISOString();
-  await env.DB.prepare(`
-    INSERT OR IGNORE INTO system_meta (key, value, updated_at)
-    VALUES (?, ?, ?)
-  `).bind(BATTLE_RESET_KEY, lockValue, now).run();
-  const lock = await env.DB.prepare(`SELECT value FROM system_meta WHERE key = ?`).bind(BATTLE_RESET_KEY).first();
-  if (lock?.value === 'done') return;
-  if (lock?.value !== lockValue) {
-    await waitForBattleReset(env.DB);
-    return;
-  }
-
   try {
-    const [projectRows, leadRows] = await Promise.all([
+    const [battleMarker, schemaMarker] = await Promise.all([
       env.DB.prepare(`
-        SELECT project_id, state_json, revision, created_at, updated_at, updated_by, updated_role
-        FROM project_state
-        WHERE substr(project_id, 1, 2) != '__'
-      `).all(),
+        SELECT value FROM system_meta WHERE key = ?
+      `).bind(BATTLE_RESET_KEY).first(),
       env.DB.prepare(`
-        SELECT id, project_id, created_at, name, phone, email, source, message, status
-        FROM lead_inbox
-      `).all(),
+        SELECT value FROM system_meta WHERE key = ?
+      `).bind(BATTLE_SCHEMA_KEY).first(),
     ]);
-    for (const row of projectRows?.results ?? []) {
-      await env.DB.prepare(`
-        INSERT INTO data_reset_backups (id, kind, record_key, payload_json, created_at, reason)
-        VALUES (?, 'project_state', ?, ?, ?, 'Удаление демонстрационных данных перед боевым запуском v17')
-      `).bind(crypto.randomUUID(), row.project_id, JSON.stringify(row), now).run();
-    }
-    for (const row of leadRows?.results ?? []) {
-      await env.DB.prepare(`
-        INSERT INTO data_reset_backups (id, kind, record_key, payload_json, created_at, reason)
-        VALUES (?, 'lead_inbox', ?, ?, ?, 'Удаление демонстрационных данных перед боевым запуском v17')
-      `).bind(crypto.randomUUID(), row.id, JSON.stringify(row), now).run();
-    }
-
-    const workspace = cleanWorkspaceState(env);
-    const workspaceJson = JSON.stringify(workspace);
-    const workspaceBytes = new TextEncoder().encode(workspaceJson).byteLength;
-    await env.DB.batch([
-      env.DB.prepare(`DELETE FROM project_state WHERE substr(project_id, 1, 2) != '__'`),
-      env.DB.prepare(`DELETE FROM audit_log WHERE substr(project_id, 1, 2) != '__'`),
-      env.DB.prepare(`DELETE FROM lead_inbox`),
-      env.DB.prepare(`DELETE FROM telegram_link_codes`),
-      env.DB.prepare(`DELETE FROM telegram_bindings`),
-      env.DB.prepare(`DELETE FROM telegram_chat_projects`),
-      env.DB.prepare(`DELETE FROM telegram_user_chat_projects`),
-      env.DB.prepare(`DELETE FROM telegram_chat_candidates`),
-      env.DB.prepare(`DELETE FROM telegram_drafts`),
-      env.DB.prepare(`DELETE FROM telegram_updates`),
-      env.DB.prepare(`DELETE FROM telegram_outbox`),
-      env.DB.prepare(`
-        INSERT INTO project_state (
-          project_id, state_json, revision, created_at, updated_at, updated_by, updated_role
-        ) VALUES ('workspace-initial', ?, 1, ?, ?, 'Система', 'management')
-      `).bind(workspaceJson, now, now),
-      env.DB.prepare(`
-        INSERT INTO audit_log (
-          id, project_id, revision, created_at, actor, role, action, summary, state_bytes
-        ) VALUES (?, 'workspace-initial', 1, ?, 'Система', 'management', 'battle_reset', 'Демонстрационные данные удалены, создано чистое рабочее пространство', ?)
-      `).bind(crypto.randomUUID(), now, workspaceBytes),
-      env.DB.prepare(`
-        UPDATE system_meta SET value = 'done', updated_at = ? WHERE key = ? AND value = ?
-      `).bind(now, BATTLE_RESET_KEY, lockValue),
-    ]);
-    console.log(JSON.stringify({
-      event: 'battle_reset_completed',
-      version: BATTLE_SCHEMA_VERSION,
-      projectBackups: projectRows?.results?.length ?? 0,
-      leadBackups: leadRows?.results?.length ?? 0,
-    }));
-  } catch (error) {
-    await env.DB.prepare(`DELETE FROM system_meta WHERE key = ? AND value = ?`).bind(BATTLE_RESET_KEY, lockValue).run();
-    throw error;
+    const battleReady = battleMarker?.value === 'done';
+    const schemaReady = schemaMarker?.value === String(BATTLE_SCHEMA_VERSION);
+    return {
+      ok: battleReady && schemaReady,
+      database: true,
+      schemaVersion: BATTLE_SCHEMA_VERSION,
+      schemaReady,
+      battleReady,
+      buildSha,
+    };
+  } catch {
+    return {
+      ok: false,
+      database: false,
+      schemaVersion: BATTLE_SCHEMA_VERSION,
+      schemaReady: false,
+      battleReady: false,
+      buildSha,
+    };
   }
 };
 
-const ensureBattleReset = async (env) => {
-  if (!battleResetPromise) {
-    battleResetPromise = runBattleReset(env).catch((error) => {
-      battleResetPromise = undefined;
+const ensureBattleReady = async (env) => {
+  if (!battleReadyPromise) {
+    battleReadyPromise = (async () => {
+      if (!env.DB) throw new Error('storage_unavailable');
+      await ensureSchema(env.DB);
+      const readiness = await battleReadiness(env);
+      if (!readiness.ok) throw new Error('battle_manual_initialization_required');
+    })().catch((error) => {
+      battleReadyPromise = undefined;
       throw error;
     });
   }
-  await battleResetPromise;
+  await battleReadyPromise;
 };
+
+export const initializeBattleRuntime = async (env) => ensureBattleReady(env);
 
 const readSnapshot = async (db, projectId) => {
   const row = await db.prepare(`
@@ -3898,15 +3737,6 @@ const handleApi = async (request, env, context) => {
   const origin = request.headers.get('origin');
   if (origin && origin !== url.origin) return json({ ok: false, error: 'forbidden_origin' }, 403);
 
-  if (url.pathname === '/api/health' && request.method === 'GET') {
-    if (!env.DB) return json({ ok: false, database: false }, 503);
-    try {
-      await ensureBattleReset(env);
-      return json({ ok: true, database: true, schemaVersion: BATTLE_SCHEMA_VERSION, battleReady: true });
-    } catch {
-      return json({ ok: false, database: false, schemaVersion: BATTLE_SCHEMA_VERSION, battleReady: false }, 503);
-    }
-  }
   if (url.pathname === '/api/session' && request.method === 'GET') return handleSession(request, env);
   if (url.pathname === '/api/state' && request.method === 'GET') return handleGetState(request, env);
   if (url.pathname === '/api/state' && request.method === 'PUT') return handlePutState(request, env, context);
@@ -3943,16 +3773,22 @@ const serveSpa = async (request, env) => {
 
 export default {
   async fetch(request, env, context) {
+    const requestEnv = context?.waitUntil
+      ? { ...env, WAIT_UNTIL: (promise) => context.waitUntil(promise) }
+      : env;
+    const url = new URL(request.url);
+    if ((url.pathname === '/api/readiness' || url.pathname === '/api/health') && request.method === 'GET') {
+      const readiness = await battleReadiness(requestEnv);
+      return json(readiness, readiness.ok ? 200 : 503);
+    }
     try {
-      await ensureBattleReset(env);
-      if (env.DB && env.TELEGRAM_BOT_TOKEN && context?.waitUntil) {
-        context.waitUntil(flushTelegramOutbox(env).catch(() => null));
+      await ensureBattleReady(requestEnv);
+      if (requestEnv.DB && requestEnv.TELEGRAM_BOT_TOKEN && context?.waitUntil) {
+        context.waitUntil(flushTelegramOutbox(requestEnv).catch(() => null));
       }
-      const url = new URL(request.url);
-      if (url.pathname.startsWith('/api/')) return handleApi(request, env, context);
-      return serveSpa(request, env);
+      if (url.pathname.startsWith('/api/')) return handleApi(request, requestEnv, context);
+      return serveSpa(request, requestEnv);
     } catch {
-      const url = new URL(request.url);
       if (url.pathname.startsWith('/api/')) return json({ ok: false, error: 'battle_initialization_failed' }, 503);
       return new Response('ИКИОМА ОС временно завершает подготовку рабочего пространства. Обновите страницу через минуту.', {
         status: 503,
@@ -3964,7 +3800,10 @@ export default {
     }
   },
   async scheduled(_controller, env, context) {
-    await ensureBattleReset(env);
-    context.waitUntil(flushTelegramOutbox(env));
+    const scheduledEnv = context?.waitUntil
+      ? { ...env, WAIT_UNTIL: (promise) => context.waitUntil(promise) }
+      : env;
+    await ensureBattleReady(scheduledEnv);
+    context.waitUntil(flushTelegramOutbox(scheduledEnv));
   },
 };

@@ -1,0 +1,159 @@
+# Автоматическое развёртывание ИКИОМА ОС на Timeweb
+
+После одноразовой настройки каждый успешно проверенный коммит `main` разворачивается на Timeweb автоматически. GitHub не получает root-пароль, пароли приложения, PostgreSQL, `.env` или токен Telegram.
+
+## Модель доступа
+
+В GitHub хранится только отдельный отзывной SSH deploy-ключ. Он принадлежит пользователю `stroios-deploy` и принимает ровно одну команду:
+
+```text
+deploy <40-символьный SHA>
+```
+
+Для ключа запрещены shell, PTY, SFTP/SCP, port forwarding и agent forwarding. Пользователь не входит в группу `docker` и не может запускать произвольный `sudo`. Root выполняет только установленную копию `/usr/local/sbin/stroios-deploy`; код кандидата не становится root-скриптом автоматически.
+
+## Что делает релиз
+
+1. принимает только exact SHA актуального `origin/main` после успешного CI;
+2. проверяет чистую рабочую копию, активные сервисы, marker данных и свободное место на файловых системах репозитория, backup и Docker;
+3. проверяет Telegram `getMe` и `getWebhookInfo` через production relay до изменения сервиса и запоминает исходное состояние канала;
+4. строит image из `git archive` exact SHA, поэтому случайный файл VPS не попадёт в образ;
+5. останавливает запись приложения и создаёт проверенную копию PostgreSQL и файлов;
+6. постоянно записывает SHA-образы app и relay в локальный `.env`, поэтому обычный `docker compose up` не откатывает релиз на старый образ;
+7. до открытия HTTP-порта завершает миграцию схемы, записывает её version marker, затем проверяет внутренний и внешний read-only readiness с exact SHA;
+8. повторно проверяет Telegram: регрессия работавшего канала откатывает релиз, а уже существующая внешняя недоступность помечается `degraded` и обслуживается durable outbox без ложного отката здоровой ОС;
+9. при ошибке или сигнале HUP/INT/TERM возвращает предыдущий Git HEAD и точные image ID app/relay, затем проверяет предыдущий `buildSha`. PostgreSQL и файлы автоматически никогда не восстанавливаются.
+
+Изменения `compose.yaml` и `deploy/Caddyfile` автоматически не применяются: это отдельный контролируемый инфраструктурный rollout.
+Разрешённые SHA-256 Compose, Caddy и установленных deploy/backup/gate-скриптов хранятся отдельно от репозитория в root-owned файле `/var/lib/stroios-deploy/approved-infra.sha256`. Поэтому один `git pull` не может ни применить инфраструктурное изменение, ни незаметно заменить root-команды деплоя.
+
+## Одноразовая настройка
+
+### 1. Создать ключ на своём компьютере
+
+В PowerShell Windows:
+
+```powershell
+$KeyPath = "$env:USERPROFILE\.ssh\stroios-timeweb-deploy"
+ssh-keygen -t ed25519 -f $KeyPath -C "github-actions-stroios"
+Get-Content "$KeyPath.pub"
+```
+
+Приватный файл `stroios-timeweb-deploy` не отправляйте в чат, почту или репозиторий.
+
+### 2. Обновить исходники без перезапуска контейнеров
+
+В серийной консоли Timeweb выполните от root:
+
+```bash
+cd /opt/stroios
+git pull --ff-only
+git status --short
+```
+
+`git status --short` должен быть пустым. На этом шаге не запускайте `docker compose up` и не пересобирайте контейнеры.
+
+### 3. Установить ограниченный доступ
+
+Сначала отдельно выведите SHA и визуально сверьте его с последним зелёным `main` в GitHub:
+
+```bash
+cd /opt/stroios
+git rev-parse HEAD
+git diff HEAD^ -- compose.yaml deploy/Caddyfile
+```
+
+Затем подставьте полученный SHA буквально (не вычисляйте его внутри команды) и одну строку из `stroios-timeweb-deploy.pub`:
+
+```bash
+cd /opt/stroios
+sudo env \
+  DEPLOY_PUBLIC_KEY='ssh-ed25519 AAAA... github-actions-stroios' \
+  TIMEWEB_HOST='188.225.38.55' \
+  APPROVE_INFRA_SHA='40-символьный SHA из предыдущей команды' \
+  bash ./scripts/install-timeweb-deploy.sh
+```
+
+Установщик:
+
+- фиксирует текущие app/relay images как rollback-образы;
+- сохраняет их постоянные указатели в локальном `.env`;
+- создаёт проверенную исходную копию в `/var/backups/stroios`;
+- разрешает первый bootstrap только для встроенного точного безопасного отпечатка: добавляются стабильное имя Compose-проекта и SHA-указатели app/relay, без изменений БД, томов, портов, сетей и Caddy;
+- записывает root-owned отпечатки инфраструктуры и ops-скриптов только после успешного backup;
+- устанавливает root-owned deploy/backup/gate;
+- только после успешной копии активирует `authorized_keys`.
+
+Он выведет `TIMEWEB_HOST`, `TIMEWEB_USER`, `TIMEWEB_KNOWN_HOSTS` и путь к backup. Сверьте fingerprint host key с консолью Timeweb.
+
+### 4. Создать GitHub Environment
+
+В приватном репозитории откройте `Settings → Environments` и создайте `production-timeweb`.
+
+Environment variables:
+
+- `TIMEWEB_HOST` — `188.225.38.55`;
+- `TIMEWEB_USER` — `stroios-deploy`;
+- `TIMEWEB_KNOWN_HOSTS` — точная строка установщика.
+
+Environment secret:
+
+- `TIMEWEB_SSH_KEY` — полное содержимое локального приватного файла `stroios-timeweb-deploy`.
+
+Это единственный секрет GitHub для production deployment. Runtime-секреты остаются только на VPS. Для полностью автоматического режима не добавляйте обязательное ручное подтверждение Environment.
+
+### 5. Защитить `main`
+
+В `Settings → Rules → Rulesets` включите для `main`:
+
+- изменения только через pull request;
+- обязательную проверку `Check StroiOS / validate`;
+- запрет force push и удаления ветки;
+- отсутствие bypass, кроме аварийного действия владельца.
+
+### 6. Выполнить первый релиз
+
+Откройте `Actions → Deploy Timeweb Production → Run workflow` на `main`. Ручной запуск повторит тесты, TypeScript, Vite и Docker build до SSH.
+
+Успех подтверждают:
+
+- `STROIOS_BACKUP /var/backups/stroios/…`;
+- `STROIOS_DEPLOY_OK <exact SHA> telegram=ready|degraded`;
+- зелёный workflow;
+- `https://<production>/api/readiness` с `"ok":true` и тем же `buildSha`;
+- тест уведомления из ИКИОМА ОС и команда Telegram → ОС.
+
+Если магистральный маршрут к Telegram уже был недоступен до релиза, workflow отдельно покажет `Telegram: degraded`. Сохранённые уведомления останутся в outbox и будут повторяться каждые 30 секунд; это не маскируется как успешная доставка.
+
+## Обычная работа
+
+Codex создаёт PR, CI проходит, PR сливается в `main`. После успешного `Check StroiOS` workflow сам разворачивает ровно проверенный SHA. GitHub concurrency и серверный `flock` исключают два одновременных релиза; устаревший SHA не ставится.
+
+Если deploy/backup/gate-скрипты меняются, автодеплой машинно остановится до повторного запуска установщика из консоли Timeweb. Установщик обновит root-owned копии и их отпечатки только после новой проверенной резервной копии.
+
+Любое последующее изменение Compose или Caddy установщик и автодеплой отклоняют даже при переданном SHA. Для него нужен отдельный ручной инфраструктурный план с резервной копией, применением всех затронутых сервисов, проверкой Telegram и долговечным rollback-конфигом. Не начинайте такой rollout с `git pull` в live-каталог: Caddy использует bind mount этого файла.
+
+## Backup и восстановление
+
+Копия содержит:
+
+- `database.dump` в PostgreSQL custom format;
+- `files.tar.gz`;
+- `database.list`;
+- `manifest.txt` с source/target SHA и image IDs;
+- `SHA256SUMS`;
+- маркер `COMPLETE`.
+
+До остановки приложения и повторно после неё скрипт проверяет, что свободного места хватит как минимум на полный необжатый размер БД и файлов плюс резерв 5 ГиБ и технический запас; при возможности сначала удаляются старые копии. Архивы проверяются и синхронизируются с диском до переключения, а `COMPLETE` появляется только после повторной проверки уже переименованного каталога. Политика оставляет не более 14 завершённых копий и удаляет копии старше 30 дней; при нехватке места удаляются самые старые, но последняя проверенная копия `COMPLETE` сохраняется всегда. Незавершённые каталоги после аварии очищаются под общим maintenance-lock. Копии находятся на том же VPS и защищают релиз, но не заменяют disaster recovery: периодически переносите завершённые каталоги во внешнее хранилище и проводите restore drill в изолированные volumes.
+
+Автоматический rollback меняет только код и Docker images. Restore БД или файлов — отдельная подтверждаемая процедура.
+
+## Отзыв и ротация
+
+Сначала удалите `TIMEWEB_SSH_KEY` из Environment. Для немедленного отзыва на сервере:
+
+```bash
+sudo truncate -s 0 /home/stroios-deploy/.ssh/authorized_keys
+```
+
+Для нового ключа повторите генерацию и установщик. Старый приватный ключ после проверки нового удалите локально.

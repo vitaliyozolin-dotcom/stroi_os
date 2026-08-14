@@ -85,7 +85,9 @@ export const telegramDurableSend = async (env, chatId, text, options = {}, stabl
   `).bind(id).first();
   if (row?.status === 'sent') return true;
   if (!waitForDelivery) {
-    void deliverTelegramOutbox(env, row).catch(() => null);
+    const delivery = deliverTelegramOutbox(env, row).catch(() => null);
+    if (typeof env.WAIT_UNTIL === 'function') env.WAIT_UNTIL(delivery);
+    else void delivery;
     return true;
   }
   return deliverTelegramOutbox(env, row);
