@@ -33,6 +33,9 @@ type IntegrationStatus = {
   telegramIssue?: string;
   telegramInbound?: boolean;
   telegramBoundUsers?: number;
+  telegramPendingMessages?: number;
+  telegramDeadMessages?: number;
+  telegramLastDeliveryError?: string;
   camera: boolean;
   websiteForm: boolean;
   publicWebsiteForm: boolean;
@@ -278,7 +281,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
                     <strong>Telegram-бот и общий чат</strong>
                     <p>{integrationStatus?.telegramCommon
                       ? integrationStatus.telegramInbound
-                        ? `Полевой штаб работает: изменения уходят в «${integrationStatus.telegramCommonTitle || 'общий чат'}», а команды, задачи и файлы принимаются обратно.`
+                        ? `Полевой штаб работает: изменения уходят в «${integrationStatus.telegramCommonTitle || 'общий чат'}», а команды, задачи и файлы принимаются обратно.${integrationStatus.telegramDeadMessages ? ` Требуют проверки: ${integrationStatus.telegramDeadMessages}.` : integrationStatus.telegramPendingMessages ? ` В очереди доставки: ${integrationStatus.telegramPendingMessages}.` : ' Очередь доставки пуста.'}`
                         : `Исходящие уведомления работают; входящие команды ещё не подключены.`
                       : `Добавьте бота в общий чат, отправьте там ${telegramCommand} — ИКИОМА ОС найдёт группу автоматически.`}</p>
                   </div>
@@ -312,7 +315,7 @@ export function SettingsPage({ state, actor, onChange }: { state: AppState; acto
                 </article>
               </div>
               {integrationMessage && <div className="integration-result" role="status" aria-live="polite">{integrationMessage}</div>}
-              <div className="settings-note"><ShieldCheck size={18} /><span>Токен бота хранится как закрытый серверный секрет. Общий чат фиксируется только после успешного проверочного сообщения; личный chat ID используется только для адресных задач.</span></div>
+              <div className="settings-note"><ShieldCheck size={18} /><span>Токен бота хранится как закрытый серверный секрет. Общий чат фиксируется только после успешного проверочного сообщения; личный chat ID используется только для адресных задач. Чтобы бот получал обычные обращения @ikioma_bot в группе, отключите Group Privacy через @BotFather → /setprivacy → Disable и заново добавьте бота в группу.</span></div>
             </section>
           )}
         </div>

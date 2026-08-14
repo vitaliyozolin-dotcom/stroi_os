@@ -140,10 +140,10 @@ test('Telegram explains exactly what is read, drafted, saved or ignored', () => 
 test('Telegram webhook retries failures and reclaims only stale processing updates', () => {
   const worker = source('sites/worker.js');
 
-  assert.match(worker, /TELEGRAM_PROCESSING_TTL_MS = 2 \* 60 \* 1000/);
+  assert.match(worker, /TELEGRAM_UPDATE_LEASE_MS = TELEGRAM_DRAFT_LEASE_MS \+ 60_000/);
   assert.match(worker, /export const claimTelegramUpdate/);
-  assert.match(worker, /WHERE update_id = \? AND status = \? AND received_at = \?/);
-  assert.match(worker, /return json\(\{ ok: false, error: 'telegram_processing_failed' \}, 500\)/);
+  assert.match(worker, /WHERE update_id = \? AND status = 'processing' AND received_at = \?/);
+  assert.match(worker, /return json\(\{ ok: false, error: 'telegram_update_failed' \}, 503\)/);
   assert.doesNotMatch(worker, /context\.waitUntil\(work\)/);
   assert.match(worker, /signal: AbortSignal\.timeout\(timeoutMs\)/);
 });
