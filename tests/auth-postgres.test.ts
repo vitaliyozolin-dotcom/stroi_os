@@ -435,13 +435,15 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
           (reason: AccessError) => ({ status: 'rejected' as const, reason }),
         )
         .finally(() => { gateCompletions += 1; }));
-    for (let attempt = 0; attempt < 100 && gateCompletions < 18; attempt += 1) {
+    for (let attempt = 0; attempt < 500 && (gateCompletions < 18 || gateChecks < 2); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    assert.equal(gateChecks, 2);
-    assert.equal(gateCompletions, 18);
+    const gateChecksBeforeRelease = gateChecks;
+    const gateCompletionsBeforeRelease = gateCompletions;
     releaseGate();
     const distributedOutcomes = await Promise.all(distributedBurst);
+    assert.equal(gateChecksBeforeRelease, 2);
+    assert.equal(gateCompletionsBeforeRelease, 18);
     assert.equal(distributedOutcomes.filter((item) => item.status === 'rejected' && (item.reason as AccessError).code === 'rate_limited').length, 18);
     await pool.query('DELETE FROM auth_login_limits');
 
