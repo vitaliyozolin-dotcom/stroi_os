@@ -12,6 +12,7 @@ import { clean, safeFileName, supportedDocument, validProjectId } from './lib/va
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_QUALITY_PHOTO_BYTES = 12 * 1024 * 1024;
+const TELEGRAM_PROCESSING_TTL_MS = 2 * 60 * 1000;
 const TELEGRAM_CONFIG_PROJECT_ID = '__integration__:telegram';
 const BATTLE_SCHEMA_VERSION = 17;
 const BATTLE_RESET_KEY = 'battle_v17_reset';
@@ -681,9 +682,10 @@ const telegramSend = (token, chatId, text, options = {}) => {
   });
 };
 
-const telegramRequest = (token, method, payload = {}) => fetch(telegramApiUrl(`/bot${token}/${method}`), {
+const telegramRequest = (token, method, payload = {}, { timeoutMs = 10_000 } = {}) => fetch(telegramApiUrl(`/bot${token}/${method}`), {
   method: 'POST',
   headers: telegramTransportHeaders({ 'Content-Type': 'application/json' }),
+  signal: AbortSignal.timeout(timeoutMs),
   body: JSON.stringify(payload),
 });
 
@@ -2114,28 +2116,73 @@ const telegramHandleCallback = async (callback, env) => {
   }
 };
 
+export const claimTelegramUpdate = async (db, updateId, {
+  now = new Date(),
+  processingTtlMs = TELEGRAM_PROCESSING_TTL_MS,
+} = {}) => {
+  const receivedAt = now.toISOString();
+  const inserted = await db.prepare(`
+    INSERT INTO telegram_updates (update_id, received_at, processed_at, status, error)
+    VALUES (?, ?, NULL, 'processing', NULL)
+    ON CONFLICT(update_id) DO NOTHING
+  `).bind(updateId, receivedAt).run();
+  if (changes(inserted) === 1) return { claimed: true, duplicate: false };
+
+  const existing = await db.prepare(`
+    SELECT status, received_at
+    FROM telegram_updates
+    WHERE update_id = ?
+  `).bind(updateId).first();
+  if (!existing || existing.status === 'done') return { claimed: false, duplicate: true };
+
+  const claimedAt = Date.parse(clean(existing.received_at, 80));
+  const processingExpired = existing.status === 'processing'
+    && (!Number.isFinite(claimedAt) || now.getTime() - claimedAt > processingTtlMs);
+  if (existing.status === 'processing' && !processingExpired) {
+    return { claimed: false, duplicate: true };
+  }
+  if (existing.status !== 'error' && !processingExpired) {
+    return { claimed: false, duplicate: true };
+  }
+
+  const claimed = await db.prepare(`
+    UPDATE telegram_updates
+    SET received_at = ?, processed_at = NULL, status = 'processing', error = NULL
+    WHERE update_id = ? AND status = ? AND received_at = ?
+  `).bind(receivedAt, updateId, existing.status, existing.received_at).run();
+  const wonClaim = changes(claimed) === 1;
+  return { claimed: wonClaim, duplicate: !wonClaim };
+};
+
 const processTelegramUpdate = async (update, env) => {
+  if (update.callback_query) {
+    await telegramHandleCallback(update.callback_query, env);
+    return;
+  }
+  if (update.message) await telegramHandleMessage(update.message, env);
+};
+
+const notifyTelegramProcessingError = async (update, env, error) => {
+  const message = error instanceof Error ? error.message : 'processing_failed';
+  const userText = message === 'telegram_file_too_large'
+    ? 'Файл больше 20 МБ и не может быть сохранён.'
+    : message === 'storage_unavailable'
+      ? 'Хранилище проекта временно недоступно.'
+      : message === 'action_denied'
+        ? 'Для этого действия недостаточно прав.'
+        : 'Не удалось выполнить действие. Ничего нового не сохранено. Повторите через минуту.';
   try {
-    if (update.callback_query) return await telegramHandleCallback(update.callback_query, env);
-    if (update.message) return await telegramHandleMessage(update.message, env);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'processing_failed';
-    const userText = message === 'telegram_file_too_large'
-      ? 'Файл больше 20 МБ и не может быть сохранён.'
-      : message === 'storage_unavailable'
-        ? 'Хранилище проекта временно недоступно.'
-        : message === 'action_denied'
-          ? 'Для этого действия недостаточно прав.'
-          : 'Не удалось выполнить действие. Повторите через минуту.';
     if (update.callback_query?.id) {
       await telegramAnswerCallback(env.TELEGRAM_BOT_TOKEN, update.callback_query.id, userText, true);
     } else if (update.message?.chat?.id) {
       await telegramSend(env.TELEGRAM_BOT_TOKEN, update.message.chat.id, userText);
     }
+  } catch {
+    // Ошибка уведомления не должна скрывать исходную ошибку обработки.
   }
 };
 
-const handleTelegramUpdate = async (request, env, context) => {
+const handleTelegramUpdate = async (request, env) => {
   const suppliedSecret = clean(request.headers.get('x-telegram-bot-api-secret-token'), 256);
   const expectedSecret = clean(env.TELEGRAM_WEBHOOK_SECRET, 256);
   if (!expectedSecret || suppliedSecret !== expectedSecret) return json({ ok: false, error: 'webhook_authorization_required' }, 403);
@@ -2146,23 +2193,30 @@ const handleTelegramUpdate = async (request, env, context) => {
   if (!updateId) return json({ ok: false, error: 'invalid_update' }, 422);
   await ensureSchema(env.DB);
   await rememberTelegramChatCandidates(env.DB, update);
-  const existing = await env.DB.prepare(`SELECT status FROM telegram_updates WHERE update_id = ?`).bind(updateId).first();
-  if (existing?.status === 'done' || existing?.status === 'processing') return json({ ok: true, duplicate: true });
-  const now = new Date().toISOString();
-  await env.DB.prepare(`
-    INSERT INTO telegram_updates (update_id, received_at, processed_at, status, error)
-    VALUES (?, ?, NULL, 'processing', NULL)
-    ON CONFLICT(update_id) DO UPDATE SET
-      received_at = excluded.received_at,
-      processed_at = NULL,
-      status = 'processing',
-      error = NULL
-  `).bind(updateId, now).run();
-  const work = processTelegramUpdate(update, env)
-    .then(() => env.DB.prepare(`UPDATE telegram_updates SET status = 'done', processed_at = ?, error = NULL WHERE update_id = ?`).bind(new Date().toISOString(), updateId).run())
-    .catch((error) => env.DB.prepare(`UPDATE telegram_updates SET status = 'error', processed_at = ?, error = ? WHERE update_id = ?`).bind(new Date().toISOString(), clean(error instanceof Error ? error.message : 'processing_failed', 300), updateId).run());
-  context.waitUntil(work);
-  return json({ ok: true, accepted: true }, 202);
+  const claim = await claimTelegramUpdate(env.DB, updateId);
+  if (!claim.claimed) return json({ ok: true, duplicate: true });
+
+  try {
+    await processTelegramUpdate(update, env);
+    await env.DB.prepare(`
+      UPDATE telegram_updates
+      SET status = 'done', processed_at = ?, error = NULL
+      WHERE update_id = ? AND status = 'processing'
+    `).bind(new Date().toISOString(), updateId).run();
+    return json({ ok: true, processed: true });
+  } catch (error) {
+    await env.DB.prepare(`
+      UPDATE telegram_updates
+      SET status = 'error', processed_at = ?, error = ?
+      WHERE update_id = ? AND status = 'processing'
+    `).bind(
+      new Date().toISOString(),
+      clean(error instanceof Error ? error.message : 'processing_failed', 300),
+      updateId,
+    ).run();
+    await notifyTelegramProcessingError(update, env, error);
+    return json({ ok: false, error: 'telegram_processing_failed' }, 500);
+  }
 };
 
 const dispatchNotifications = async (previous, next, env, actor, origin, summary) => {
@@ -3114,7 +3168,7 @@ const handleApi = async (request, env, context) => {
   if (url.pathname === '/api/integrations/telegram/select' && request.method === 'POST') return handleTelegramChatSelect(request, env);
   if (url.pathname === '/api/integrations/telegram/link' && request.method === 'POST') return handleTelegramLink(request, env);
   if (url.pathname === '/api/integrations/telegram/bootstrap' && request.method === 'POST') return handleTelegramBootstrap(request, env);
-  if (url.pathname === '/api/integrations/telegram/update' && request.method === 'POST') return handleTelegramUpdate(request, env, context);
+  if (url.pathname === '/api/integrations/telegram/update' && request.method === 'POST') return handleTelegramUpdate(request, env);
   if (url.pathname === '/api/camera/status' && request.method === 'GET') return handleCameraStatus(request, env);
   if (url.pathname === '/api/camera/view' && request.method === 'GET') return handleCameraView(request, env);
   if (url.pathname === '/api/quality/upload' && request.method === 'POST') return handleQualityPhotoUpload(request, env);
