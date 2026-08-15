@@ -157,10 +157,14 @@ jobs:
           printf '%s\n' "$TIMEWEB_KNOWN_HOSTS" | tr -d '\r' >"$ssh_dir/known_hosts"
           chmod 0600 "$ssh_dir/id_ed25519" "$ssh_dir/known_hosts"
 
-          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null || {
+          if ! secret_public_key="$(ssh-keygen -y -f "$ssh_dir/id_ed25519" 2>/dev/null)"; then
             echo "TIMEWEB_SSH_KEY is invalid or encrypted" >&2
             exit 1
-          }
+          fi
+          key_fingerprint="$(printf '%s\n' "$secret_public_key" | ssh-keygen -lf - | awk '{print $2}')"
+          echo "TIMEWEB_SSH_KEY fingerprint: $key_fingerprint"
+          echo "fingerprint=$key_fingerprint" >>"$GITHUB_OUTPUT"
+
           ssh-keygen -F "$TIMEWEB_HOST" -f "$ssh_dir/known_hosts" >/dev/null || {
             echo "TIMEWEB_KNOWN_HOSTS does not contain TIMEWEB_HOST" >&2
             exit 1
