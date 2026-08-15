@@ -31,7 +31,7 @@ if [[ "$deploy_public_key" == *$'\n'* || ! "$deploy_public_key" =~ ^ssh-ed25519[
   exit 64
 fi
 
-for command in awk chmod chown cut docker flock getent git gpasswd install mktemp mv passwd rm sed sha256sum sudo sync visudo useradd; do
+for command in awk chmod chown cut docker flock getent git gpasswd install mktemp mv openssl rm sed sha256sum sudo sync useradd usermod visudo; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Не найдена обязательная команда: $command" >&2
     exit 69
@@ -101,7 +101,11 @@ fi
 if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash --comment "StroiOS restricted deploy" "$DEPLOY_USER"
 fi
-passwd --lock "$DEPLOY_USER" >/dev/null 2>&1 || true
+# Полностью заблокированная учётная запись отклоняется sshd до проверки authorized_keys.
+# Неизвестный случайный пароль сохраняет вход по ключу, не открывая практический вход по паролю.
+deploy_password_hash="$(openssl rand -base64 48 | openssl passwd -6 -stdin)"
+usermod --password "$deploy_password_hash" "$DEPLOY_USER"
+unset deploy_password_hash
 
 deploy_home="$(getent passwd "$DEPLOY_USER" | cut -d: -f6)"
 chown root:root "$deploy_home"
