@@ -200,7 +200,11 @@ bootstrap_backup="$(
 )"
 
 install -d -o root -g root -m 0750 "$INFRA_STATE_DIR"
-install -o root -g root -m 0600 "$authorized_keys_tmp" "$deploy_home/.ssh/authorized_keys"
+install -o root -g root -m 0644 "$authorized_keys_tmp" "$deploy_home/.ssh/authorized_keys"
+if ! sudo -u "$DEPLOY_USER" test -r "$deploy_home/.ssh/authorized_keys"; then
+  echo "Пользователь $DEPLOY_USER не может прочитать authorized_keys." >&2
+  exit 73
+fi
 install -o root -g root -m 0640 "$infra_approval_tmp" "$INFRA_APPROVAL_FILE"
 
 echo "Ограниченный пользователь $DEPLOY_USER настроен."
