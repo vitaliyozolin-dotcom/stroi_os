@@ -78,6 +78,13 @@ test('deploy builds exact Git content, persists image pointers and rolls back si
   assert.match(deploy, /prune_abandoned_candidate_tags/);
   assert.match(deploy, /docker builder prune --all --force/);
   assert.match(deploy, /STROIOS_BACKUP_PRUNE_ONLY=1/);
+  assert.equal(
+    (deploy.match(/\benv \\\n\s+BACKUP_DIR="\$BACKUP_DIR"/g) ?? []).length,
+    2,
+    'backup subprocesses must receive readonly names through env',
+  );
+  assert.doesNotMatch(deploy, /prune_backup_storage\(\) \{\n\s+BACKUP_DIR=/);
+  assert.doesNotMatch(deploy, /backup_path="\$\( \\\n\s+BACKUP_DIR=/);
   assert.match(deploy, /\.env\.deploy\.\*/);
   assert.match(deploy, /STROIOS_BACKUP \$backup_path[\s\S]*backups_after_snapshot[\s\S]*docker_after_snapshot/);
   assert.match(deploy, /webhookUrl\.protocol !== "https:"/);
