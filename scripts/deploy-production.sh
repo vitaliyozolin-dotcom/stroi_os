@@ -163,11 +163,12 @@ prune_abandoned_candidate_tags() {
 }
 
 prune_backup_storage() {
-  BACKUP_DIR="$BACKUP_DIR" \
-  COMPOSE_FILE="$COMPOSE_FILE" \
-  BACKUP_MIN_FREE_KB="$MIN_FREE_KB" \
-  STROIOS_MAINTENANCE_LOCK_HELD=1 \
-  STROIOS_BACKUP_PRUNE_ONLY=1 \
+  env \
+    BACKUP_DIR="$BACKUP_DIR" \
+    COMPOSE_FILE="$COMPOSE_FILE" \
+    BACKUP_MIN_FREE_KB="$MIN_FREE_KB" \
+    STROIOS_MAINTENANCE_LOCK_HELD=1 \
+    STROIOS_BACKUP_PRUNE_ONLY=1 \
     "$BACKUP_COMMAND" >/dev/null
 }
 
@@ -513,15 +514,16 @@ live_services_touched=1
 docker compose -f "$COMPOSE_FILE" stop -t 45 app
 
 backup_path="$( \
-  BACKUP_DIR="$BACKUP_DIR" \
-  COMPOSE_FILE="$COMPOSE_FILE" \
-  BACKUP_MIN_FREE_KB="$MIN_FREE_KB" \
-  STROIOS_MAINTENANCE_LOCK_HELD=1 \
-  SOURCE_COMMIT="$source_commit" \
-  TARGET_COMMIT="$target_commit" \
-  SOURCE_APP_IMAGE="$previous_app_image" \
-  SOURCE_RELAY_IMAGE="$previous_relay_image" \
-  "$BACKUP_COMMAND" \
+  env \
+    BACKUP_DIR="$BACKUP_DIR" \
+    COMPOSE_FILE="$COMPOSE_FILE" \
+    BACKUP_MIN_FREE_KB="$MIN_FREE_KB" \
+    STROIOS_MAINTENANCE_LOCK_HELD=1 \
+    SOURCE_COMMIT="$source_commit" \
+    TARGET_COMMIT="$target_commit" \
+    SOURCE_APP_IMAGE="$previous_app_image" \
+    SOURCE_RELAY_IMAGE="$previous_relay_image" \
+    "$BACKUP_COMMAND" \
 )"
 echo "STROIOS_BACKUP $backup_path"
 require_free_space "$BACKUP_DIR" backups_after_snapshot
