@@ -1,7 +1,8 @@
 import type { AppState, Stage } from './types';
 
-const IMPORT_MARKER = 'ppr-kelosi-2026-08-17-v1';
-const IMPORTED_AT = '2026-08-17T07:21:00.000Z';
+const IMPORT_MARKER = 'ppr-kelosi-2026-08-17-v2-exact';
+const PREVIOUS_IMPORT_MARKER = 'ppr-kelosi-2026-08-17-v1';
+const IMPORTED_AT = '2026-08-17T07:27:00.000Z';
 
 const includesKelosi = (value?: string) => String(value || '').trim().toLocaleLowerCase('ru-RU').includes('келози');
 
@@ -11,47 +12,36 @@ const isKelosiProject = (state: AppState) => [
   state.project.address,
 ].some(includesKelosi);
 
-const earlierDate = (current: string, candidate: string) => !current || candidate < current ? candidate : current;
-const laterDate = (current: string, candidate: string) => !current || candidate > current ? candidate : current;
-
-const stage = ({
+const pprStage = ({
   id,
   order,
   name,
   shortName,
-  weight,
   planStart,
   planEnd,
   responsible,
-  dependencyId,
-  dependency,
-  ready = false,
 }: {
   id: string;
   order: number;
   name: string;
   shortName: string;
-  weight: number;
   planStart: string;
   planEnd: string;
   responsible: string;
-  dependencyId?: string;
-  dependency?: string;
-  ready?: boolean;
 }): Stage => ({
   id,
   order,
   name,
   shortName,
-  status: ready ? 'ready' : 'not_ready',
-  weight,
+  status: 'not_ready',
+  // В исходном ППР нет весов. Единица нужна только технически для расчёта общего прогресса,
+  // поэтому все строки равнозначны и не получают придуманного приоритета.
+  weight: 1,
   progress: 0,
   planStart,
   planEnd,
   forecastEnd: planEnd,
   responsible,
-  dependencyId,
-  dependency,
 });
 
 export const applyKelosiPpr = (state: AppState): AppState => {
@@ -59,39 +49,33 @@ export const applyKelosiPpr = (state: AppState): AppState => {
 
   const responsible = state.project.foreman.trim() || 'Не назначен';
   const stages: Stage[] = [
-    stage({ id: 'kelosi-deal', order: 1, name: 'Оформление сделки / покупка земельного участка / подписание договоров долевого участия в проекте', shortName: 'Сделка и участок', weight: 3, planStart: '2026-08-10', planEnd: '2026-08-10', responsible, ready: true }),
-    stage({ id: 'kelosi-site-prep', order: 2, name: 'Подготовка участка / выравнивание / вырубка деревьев / вывоз мусора', shortName: 'Подготовка участка', weight: 6, planStart: '2026-08-10', planEnd: '2026-08-25', responsible, ready: true }),
-    stage({ id: 'kelosi-contracts', order: 3, name: 'Заключение основных договоров на ТМЦ / изготовление СИП / окна ПВХ / поставка ТМЦ и пр.', shortName: 'Договоры и ТМЦ', weight: 6, planStart: '2026-08-10', planEnd: '2026-08-25', responsible, ready: true }),
-    stage({ id: 'kelosi-foundation', order: 4, name: 'Устройство фундамента — ЖБ сваи', shortName: 'ЖБ сваи', weight: 12, planStart: '2026-08-10', planEnd: '2026-08-15', responsible, ready: true }),
-    stage({ id: 'kelosi-lumber', order: 5, name: 'Доставка основных пиломатериалов / крепежа / пены', shortName: 'Пиломатериалы', weight: 5, planStart: '2026-08-10', planEnd: '2026-08-15', responsible, ready: true }),
-    stage({ id: 'kelosi-pile-strapping', order: 6, name: 'Устройство обвязки свайного поля', shortName: 'Обвязка свай', weight: 8, planStart: '2026-08-14', planEnd: '2026-08-16', responsible, ready: true }),
-    stage({ id: 'kelosi-sip-floor', order: 7, name: 'Доставка СИП панелей. Сборка СИП перекрытия на отметке «0»', shortName: 'СИП перекрытие 0', weight: 10, planStart: '2026-08-16', planEnd: '2026-08-20', responsible, dependencyId: 'kelosi-pile-strapping', dependency: 'Обвязка свай' }),
-    stage({ id: 'kelosi-sip-walls', order: 8, name: 'Доставка СИП панелей. Сборка наружных стен и каркасных перегородок', shortName: 'Стены и перегородки', weight: 14, planStart: '2026-08-20', planEnd: '2026-08-27', responsible, dependencyId: 'kelosi-sip-floor', dependency: 'СИП перекрытие 0' }),
-    stage({ id: 'kelosi-roof-floor', order: 9, name: 'Доставка СИП панелей. Сборка перекрытия под кровлю', shortName: 'Перекрытие кровли', weight: 12, planStart: '2026-08-27', planEnd: '2026-09-10', responsible, dependencyId: 'kelosi-sip-walls', dependency: 'Стены и перегородки' }),
-    stage({ id: 'kelosi-profsheet', order: 10, name: 'Доставка профлиста (кровля + фасад)', shortName: 'Профлист', weight: 5, planStart: '2026-08-25', planEnd: '2026-08-27', responsible, ready: true }),
-    stage({ id: 'kelosi-windows', order: 11, name: 'Монтаж окон ПВХ', shortName: 'Окна ПВХ', weight: 10, planStart: '2026-08-27', planEnd: '2026-09-10', responsible, dependencyId: 'kelosi-sip-walls', dependency: 'Стены и перегородки' }),
-    stage({ id: 'kelosi-insulation', order: 12, name: 'Утепление перегородок внутри', shortName: 'Утепление перегородок', weight: 9, planStart: '2026-08-27', planEnd: '2026-09-10', responsible, dependencyId: 'kelosi-sip-walls', dependency: 'Стены и перегородки' }),
+    pprStage({ id: 'kelosi-ppr-1', order: 1, name: '1.Оформление сделки/покупка З/у/подписание договоров долевого участия в проекте', shortName: '1. Оформление сделки', planStart: '2026-08-10', planEnd: '2026-08-10', responsible }),
+    pprStage({ id: 'kelosi-ppr-2', order: 2, name: '2.подготовка участка/выравнивание/вырубка деревьев/вывоз мусора', shortName: '2. Подготовка участка', planStart: '2026-08-10', planEnd: '2026-08-25', responsible }),
+    pprStage({ id: 'kelosi-ppr-2-2', order: 3, name: '2.2 Заключение основных договоров на ТМЦ/изготовление СИП/окна ПВХ/поставка ТМЦ и пр.', shortName: '2.2 Договоры на ТМЦ', planStart: '2026-08-10', planEnd: '2026-08-25', responsible }),
+    pprStage({ id: 'kelosi-ppr-3', order: 4, name: '3.Устройство фундамента ЖБ сваи', shortName: '3. ЖБ сваи', planStart: '2026-08-10', planEnd: '2026-08-15', responsible }),
+    pprStage({ id: 'kelosi-ppr-3-1', order: 5, name: '3.1.Доставка  основных пиломатериалов/крепежа+пены', shortName: '3.1 Пиломатериалы', planStart: '2026-08-10', planEnd: '2026-08-15', responsible }),
+    pprStage({ id: 'kelosi-ppr-4', order: 6, name: '4. Устройство обвязки свайного поля', shortName: '4. Обвязка свай', planStart: '2026-08-14', planEnd: '2026-08-16', responsible }),
+    pprStage({ id: 'kelosi-ppr-5', order: 7, name: '5.Доставка СИП панелей .Сборка СИП перекрытия на отметке "0"', shortName: '5. СИП перекрытие «0»', planStart: '2026-08-16', planEnd: '2026-08-20', responsible }),
+    pprStage({ id: 'kelosi-ppr-6', order: 8, name: '6.Доставка СИП панелей. Сборка наружных стен и каркасных перегородок', shortName: '6. Стены и перегородки', planStart: '2026-08-20', planEnd: '2026-08-27', responsible }),
+    pprStage({ id: 'kelosi-ppr-7', order: 9, name: '7.Доставка СИП панелей. Сборка перекрытия под кровлю', shortName: '7. Перекрытие под кровлю', planStart: '2026-08-27', planEnd: '2026-09-10', responsible }),
+    pprStage({ id: 'kelosi-ppr-7-1', order: 10, name: '7.1 Доставка профлиста(кровля+фасад)', shortName: '7.1 Профлист', planStart: '2026-08-25', planEnd: '2026-08-27', responsible }),
+    pprStage({ id: 'kelosi-ppr-8', order: 11, name: '8. Монтаж окон ПВХ', shortName: '8. Окна ПВХ', planStart: '2026-08-27', planEnd: '2026-09-10', responsible }),
+    pprStage({ id: 'kelosi-ppr-9', order: 12, name: '9. Утепление перегородок внутри.', shortName: '9. Утепление перегородок', planStart: '2026-08-27', planEnd: '2026-09-10', responsible }),
   ];
 
   return {
     ...state,
     schemaVersion: Math.max(Number(state.schemaVersion) || 0, 18),
-    project: {
-      ...state.project,
-      startDate: earlierDate(state.project.startDate, '2026-08-10'),
-      targetDate: laterDate(state.project.targetDate, '2026-09-10'),
-      forecastDate: laterDate(state.project.forecastDate, '2026-09-10'),
-    },
     stages,
     activity: [
       {
         id: IMPORT_MARKER,
         timestamp: IMPORTED_AT,
         actor: 'Система',
-        text: 'Импортирован график производства работ из ППР.xlsx для проекта Келози',
+        text: 'ППР.xlsx перенесён в проект Келози 1:1: 12 строк, исходные периоды, без добавленных зависимостей и весов',
         tone: 'neutral',
       },
-      ...state.activity,
+      ...state.activity.filter((event) => event.id !== PREVIOUS_IMPORT_MARKER),
     ],
   };
 };
