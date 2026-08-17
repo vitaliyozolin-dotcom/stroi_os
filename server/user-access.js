@@ -589,6 +589,205 @@ export class UserAccessService {
     return { name, email, role, telegram: telegram || undefined };
   }
 
+  parseProjectDirectory(rows) {
+    const projects = rows.flatMap((row) => {
+      try {
+        const state = JSON.parse(row.state_json);
+        const id = clean(state?.project?.id || row.project_id, 100);
+        if (!id || id.startsWith('__')) return [];
+        return [{
+          id,
+          code: clean(state?.project?.code, 40) || id,
+          name: clean(state?.project?.name, 160) || clean(state?.project?.code, 40) || id,
+          status: clean(state?.project?.status, 40),
+          state,
+          revision: Number(row.revision) || 0,
+        }];
+      } catch {
+        return [];
+      }
+    });
+    return projects.some((project) => project.status !== 'workspace')
+      ? projects.filter((project) => project.status !== 'workspace')
+      : projects;
+  }
+
+  async loadProjectDirectory(client = this.pool, lock = false) {
+    const result = await client.query(`
+      SELECT project_id,state_json,revision
+      FROM project_state
+      ORDER BY project_id
+      ${lock ? 'FOR UPDATE' : ''}
+    `);
+    return this.parseProjectDirectory(result.rows);
+  }
+
+  projectUsersByEmail(state, email) {
+    return (state?.settings?.users ?? []).filter((item) => normalizeAccessEmail(item.email) === email);
+  }
+
+  async listUserProjectAccess({ projectId, userId }) {
+    const sourceProject = await this.loadProject(this.pool, clean(projectId, 100));
+    const sourceUser = this.validateProjectUser(sourceProject.state, userId);
+    const [directory, accountResult] = await Promise.all([
+      this.loadProjectDirectory(),
+      this.pool.query(
+        'SELECT id,status,password_hash FROM auth_users WHERE email_normalized=$1 LIMIT 1',
+        [sourceUser.email],
+      ),
+    ]);
+    const account = accountResult.rows[0] || null;
+    const membershipResult = account
+      ? await this.pool.query(
+        'SELECT project_id,system_user_id,role,status FROM auth_memberships WHERE auth_user_id=$1 ORDER BY project_id',
+        [account.id],
+      )
+      : { rows: [] };
+    const memberships = new Map(membershipResult.rows.map((row) => [clean(row.project_id, 100), row]));
+    const accountActive = Boolean(account?.status === 'active' && account?.password_hash);
+    return {
+      accountActive,
+      projects: directory.map((project) => {
+        const localUsers = this.projectUsersByEmail(project.state, sourceUser.email);
+        const localUser = localUsers[0] || null;
+        const membership = memberships.get(project.id);
+        const selected = Boolean(membership && membership.status !== 'disabled');
+        let status = 'not_issued';
+        if (membership?.status === 'disabled') status = 'blocked';
+        else if (selected && accountActive && membership?.status === 'active' && localUser?.status === 'active') status = 'active';
+        else if (selected) status = 'pending';
+        return {
+          id: project.id,
+          code: project.code,
+          name: project.name,
+          selected,
+          status,
+          role: allowedRole(localUser?.role) ? localUser.role : sourceUser.role,
+        };
+      }),
+    };
+  }
+
+  async setUserProjectAccess({ projectId, userId, projectIds, actorEmail, actorName }) {
+    const sourceProjectId = clean(projectId, 100);
+    const requestedProjectIds = [...new Set((Array.isArray(projectIds) ? projectIds : [])
+      .map((item) => clean(item, 100)).filter(Boolean))];
+    if (requestedProjectIds.length > 100) throw new AccessError('invalid_projects', 422);
+
+    const currentSnapshot = await this.transaction(async (client) => {
+      const directory = await this.loadProjectDirectory(client, true);
+      const byId = new Map(directory.map((project) => [project.id, project]));
+      const sourceProject = byId.get(sourceProjectId);
+      if (!sourceProject) throw new AccessError('project_not_found', 404);
+      const sourceUser = this.validateProjectUser(sourceProject.state, userId);
+      const unknownProject = requestedProjectIds.find((id) => !byId.has(id));
+      if (unknownProject) throw new AccessError('invalid_projects', 422);
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`access-matrix:${sourceUser.email}`]);
+
+      let account = (await client.query(
+        'SELECT * FROM auth_users WHERE email_normalized=$1 FOR UPDATE',
+        [sourceUser.email],
+      )).rows[0] || null;
+      const now = new Date().toISOString();
+      if (!account && requestedProjectIds.length) {
+        account = {
+          id: randomUUID(), email_normalized: sourceUser.email, email: sourceUser.email,
+          name: sourceUser.name, password_hash: null, status: 'pending',
+        };
+        await client.query(`
+          INSERT INTO auth_users (
+            id,email_normalized,email,name,password_hash,status,activated_at,password_changed_at,
+            last_login_at,created_at,updated_at
+          ) VALUES ($1,$2,$2,$3,NULL,'pending',NULL,NULL,NULL,$4,$4)
+        `, [account.id, sourceUser.email, sourceUser.name, now]);
+      }
+      const accountActive = Boolean(account?.status === 'active' && account?.password_hash);
+      const selected = new Set(requestedProjectIds);
+      let sourceSnapshot = null;
+
+      for (const project of directory) {
+        const matchingUsers = this.projectUsersByEmail(project.state, sourceUser.email);
+        if (matchingUsers.length > 1) throw new AccessError('duplicate_email', 409);
+        let localUser = matchingUsers[0] || null;
+
+        if (!selected.has(project.id)) {
+          if (!account) continue;
+          const removed = await client.query(
+            'DELETE FROM auth_memberships WHERE project_id=$1 AND auth_user_id=$2 RETURNING id,system_user_id',
+            [project.id, account.id],
+          );
+          if (removed.rowCount) {
+            await this.audit(client, {
+              actorEmail, targetUserId: account.id, projectId: project.id,
+              action: 'access.project_revoked', metadata: { systemUserId: removed.rows[0].system_user_id },
+            });
+          }
+          continue;
+        }
+
+        const nextState = structuredClone(project.state);
+        let rosterChanged = false;
+        if (!localUser) {
+          localUser = {
+            id: `user-${randomUUID()}`,
+            name: sourceUser.name,
+            email: sourceUser.email,
+            role: sourceUser.role,
+            status: accountActive ? 'active' : 'invited',
+            invitedAt: now,
+            inviteDelivery: accountActive ? 'sent' : 'draft',
+          };
+          nextState.settings = {
+            ...nextState.settings,
+            users: [...(nextState.settings?.users ?? []), localUser],
+          };
+          rosterChanged = true;
+        } else {
+          const nextStatus = accountActive ? 'active' : 'invited';
+          if (localUser.status !== nextStatus) {
+            nextState.settings.users = nextState.settings.users.map((item) => item.id === localUser.id ? {
+              ...item,
+              status: nextStatus,
+              invitedAt: item.invitedAt || now,
+              inviteDelivery: accountActive ? 'sent' : item.inviteDelivery || 'draft',
+            } : item);
+            localUser = nextState.settings.users.find((item) => item.id === localUser.id);
+            rosterChanged = true;
+          }
+        }
+        const normalizedLocalUser = this.validateProjectUser(nextState, localUser.id);
+        await this.ensureAccountAndMembership(
+          client,
+          project.id,
+          normalizedLocalUser,
+          now,
+          accountActive ? 'active' : 'pending',
+        );
+        if (rosterChanged) {
+          const summary = `Доступ к проекту ${accountActive ? 'выдан' : 'подготовлен'}: ${normalizedLocalUser.name}`;
+          this.addProfileActivity(nextState, actorName || actorEmail, summary, now);
+          const snapshot = await this.saveProjectAccessMutation(client, project.id, project.revision, nextState, {
+            actor: actorName || actorEmail,
+            action: 'access.project_grant',
+            summary,
+          });
+          if (project.id === sourceProjectId) sourceSnapshot = snapshot;
+        }
+        await this.audit(client, {
+          actorEmail, targetUserId: account.id, projectId: project.id,
+          action: 'access.project_granted',
+          metadata: { systemUserId: normalizedLocalUser.id, accountActive },
+        });
+      }
+      return sourceSnapshot;
+    });
+
+    return {
+      ...(await this.listUserProjectAccess({ projectId: sourceProjectId, userId })),
+      snapshot: currentSnapshot,
+    };
+  }
+
   addProfileActivity(state, actor, text, now) {
     state.activity = [{
       id: randomUUID(), timestamp: now, actor: clean(actor, 160) || 'Владелец', text, tone: 'neutral',
@@ -905,7 +1104,26 @@ export class UserAccessService {
     const passwordHash = await this.runPasswordWork(() => this.passwordHasher(password));
     const now = new Date().toISOString();
     return this.transaction(async (client) => {
-      const project = await this.loadProject(client, inspected.projectId, true);
+      const projectRows = await client.query(`
+        SELECT project_id,state_json,revision
+        FROM project_state
+        WHERE project_id IN (
+          SELECT m.project_id
+          FROM auth_memberships m
+          WHERE m.auth_user_id=$1 AND (
+            m.status='pending' OR m.id=(SELECT membership_id FROM auth_tokens WHERE token_hash=$2)
+          )
+        )
+        ORDER BY project_id
+        FOR UPDATE
+      `, [inspected.accountId, hashAccessToken(rawToken)]);
+      const lockedProjects = new Map(projectRows.rows.map((row) => {
+        let state;
+        try { state = JSON.parse(row.state_json); } catch { throw new AccessError('project_state_invalid', 500); }
+        return [clean(row.project_id, 100), { state, revision: Number(row.revision) || 0 }];
+      }));
+      const project = lockedProjects.get(inspected.projectId);
+      if (!project) throw new AccessError('invite_invalid', 410);
       const account = (await client.query(
         'SELECT id,email_normalized,name,status FROM auth_users WHERE id=$1 FOR UPDATE',
         [inspected.accountId],
@@ -924,7 +1142,34 @@ export class UserAccessService {
         UPDATE auth_users SET password_hash=$1,status='active',activated_at=COALESCE(activated_at,$2),
           password_changed_at=$2,updated_at=$2 WHERE id=$3
       `, [passwordHash, now, token.auth_user_id]);
-      await client.query("UPDATE auth_memberships SET status='active',role=$1,updated_at=$2 WHERE id=$3", [user.role, now, token.membership_id]);
+      const activationTargets = token.purpose === 'activate'
+        ? (await client.query(`
+          SELECT id,project_id,system_user_id,role
+          FROM auth_memberships
+          WHERE auth_user_id=$1 AND status='pending'
+          ORDER BY project_id
+          FOR UPDATE
+        `, [token.auth_user_id])).rows
+        : [{
+          id: token.membership_id,
+          project_id: token.project_id,
+          system_user_id: token.system_user_id,
+          role: token.role,
+        }];
+      if (!activationTargets.some((item) => item.id === token.membership_id)) {
+        activationTargets.push({
+          id: token.membership_id,
+          project_id: token.project_id,
+          system_user_id: token.system_user_id,
+          role: token.role,
+        });
+      }
+      for (const membership of activationTargets) {
+        await client.query(
+          "UPDATE auth_memberships SET status='active',updated_at=$1 WHERE id=$2",
+          [now, membership.id],
+        );
+      }
       await client.query(`
         UPDATE auth_tokens SET revoked_at=$1
         WHERE auth_user_id=$2 AND token_hash<>$3 AND used_at IS NULL AND revoked_at IS NULL
@@ -933,19 +1178,38 @@ export class UserAccessService {
       await client.query('UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,$1) WHERE auth_user_id=$2', [now, token.auth_user_id]);
       await this.clearLoginLimits([this.loginRateKey(user.email)], client);
 
-      const nextState = structuredClone(project.state);
-      nextState.settings.users = nextState.settings.users.map((item) => item.id === user.id ? {
-        ...item, status: 'active', webActivatedAt: now, inviteDelivery: 'sent',
-      } : item);
-      await this.saveProjectAccessMutation(client, token.project_id, project.revision, nextState, {
-        actor: user.name, action: token.purpose === 'reset' ? 'access.password_reset' : 'access.activate',
-        summary: token.purpose === 'reset' ? `Пароль обновлён: ${user.name}` : `Веб-доступ активирован: ${user.name}`,
-      });
-      await this.audit(client, {
-        actorEmail: user.email, targetUserId: token.auth_user_id, projectId: token.project_id,
-        action: token.purpose === 'reset' ? 'password_reset_completed' : 'invite_activated',
-        metadata: { systemUserId: user.id },
-      });
+      for (const membership of activationTargets) {
+        const targetProject = lockedProjects.get(clean(membership.project_id, 100));
+        if (!targetProject) throw new AccessError('invite_invalid', 410);
+        const targetUser = this.validateProjectUser(targetProject.state, membership.system_user_id);
+        if (targetUser.status === 'disabled' || targetUser.email !== normalizeAccessEmail(account.email_normalized)) {
+          throw new AccessError('invite_invalid', 410);
+        }
+        const nextState = structuredClone(targetProject.state);
+        nextState.settings.users = nextState.settings.users.map((item) => item.id === targetUser.id ? {
+          ...item, status: 'active', webActivatedAt: now, inviteDelivery: 'sent',
+        } : item);
+        const isTokenProject = membership.project_id === token.project_id;
+        const summary = token.purpose === 'reset'
+          ? `Пароль обновлён: ${targetUser.name}`
+          : `Веб-доступ активирован: ${targetUser.name}`;
+        await this.saveProjectAccessMutation(client, membership.project_id, targetProject.revision, nextState, {
+          actor: user.name,
+          action: token.purpose === 'reset'
+            ? 'access.password_reset'
+            : isTokenProject ? 'access.activate' : 'access.activate_membership',
+          summary,
+        });
+        await this.audit(client, {
+          actorEmail: user.email,
+          targetUserId: token.auth_user_id,
+          projectId: membership.project_id,
+          action: token.purpose === 'reset'
+            ? 'password_reset_completed'
+            : isTokenProject ? 'invite_activated' : 'membership_activated_with_account',
+          metadata: { systemUserId: targetUser.id, activationProjectId: token.project_id },
+        });
+      }
       const identity = { accountId: token.auth_user_id, email: user.email, name: user.name, isOwner: false };
       return this.createSession(identity, context, client);
     });

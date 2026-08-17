@@ -103,6 +103,18 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
       `INSERT INTO project_state VALUES ($1,$2,1,$3,$3,'owner','management')`,
       ['project-profile', JSON.stringify(emptyProfileProject), now],
     );
+    await pool.query(
+      `INSERT INTO project_state VALUES ($1,$2,1,$3,$3,'owner','management')`,
+      ['project-matrix-a', JSON.stringify(profileState('project-matrix-a', 'invited', {
+        id: 'user-matrix', name: 'Матрица Доступа', email: 'matrix@example.test', role: 'management',
+      })), now],
+    );
+    const matrixSecondProject = profileState('project-matrix-b');
+    matrixSecondProject.settings.users = [];
+    await pool.query(
+      `INSERT INTO project_state VALUES ($1,$2,1,$3,$3,'owner','management')`,
+      ['project-matrix-b', JSON.stringify(matrixSecondProject), now],
+    );
 
     const service = new UserAccessService({
       database,
@@ -115,6 +127,79 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
     await service.initialize();
     assert.equal(await service.readiness(), true);
     assert.equal((await pool.query("SELECT value FROM system_meta WHERE key='auth_schema_version'")).rows[0].value, String(ACCESS_SCHEMA_VERSION));
+
+    const initialMatrix = await service.listUserProjectAccess({
+      projectId: 'project-matrix-a', userId: 'user-matrix',
+    });
+    assert.equal(initialMatrix.accountActive, false);
+    assert.equal(initialMatrix.projects.find((project) => project.id === 'project-matrix-a')?.selected, false);
+    const selectedMatrix = await service.setUserProjectAccess({
+      projectId: 'project-matrix-a',
+      userId: 'user-matrix',
+      projectIds: ['project-matrix-a', 'project-matrix-b'],
+      actorEmail: 'owner@example.test',
+      actorName: 'Владелец',
+    });
+    assert.deepEqual(
+      selectedMatrix.projects.filter((project) => project.selected).map((project) => project.id),
+      ['project-matrix-a', 'project-matrix-b'],
+    );
+    const copiedMatrixState = JSON.parse((await pool.query(
+      "SELECT state_json FROM project_state WHERE project_id='project-matrix-b'",
+    )).rows[0].state_json);
+    const copiedMatrixUser = copiedMatrixState.settings.users.find((user) => user.email === 'matrix@example.test');
+    assert.equal(copiedMatrixUser.status, 'invited');
+    assert.equal(copiedMatrixUser.role, 'management');
+    assert.equal((await pool.query(`
+      SELECT COUNT(*)::int AS count FROM auth_memberships
+      WHERE project_id IN ('project-matrix-a','project-matrix-b') AND status='pending'
+    `)).rows[0].count, 2);
+
+    const matrixInvitation = await service.issueToken({
+      projectId: 'project-matrix-a', userId: 'user-matrix', actorEmail: 'owner@example.test',
+    });
+    const matrixToken = new URL(matrixInvitation.url).pathname.split('/').pop()!;
+    const matrixSession = await service.activate(
+      matrixToken,
+      'matrix-password-strong-123',
+      'matrix-password-strong-123',
+      { ip: '198.51.100.245' },
+    );
+    assert.deepEqual(
+      (await service.fromRequest(sessionRequest(matrixSession.token)))?.projectIds,
+      ['project-matrix-a', 'project-matrix-b'],
+    );
+    const activatedMatrixB = JSON.parse((await pool.query(
+      "SELECT state_json FROM project_state WHERE project_id='project-matrix-b'",
+    )).rows[0].state_json);
+    assert.equal(activatedMatrixB.settings.users.find((user) => user.email === 'matrix@example.test')?.status, 'active');
+
+    const matrixFutureProject = profileState('project-matrix-future');
+    matrixFutureProject.settings.users = [];
+    await pool.query(
+      `INSERT INTO project_state VALUES ($1,$2,1,$3,$3,'owner','management')`,
+      ['project-matrix-future', JSON.stringify(matrixFutureProject), now],
+    );
+    const matrixWithFuture = await service.listUserProjectAccess({
+      projectId: 'project-matrix-a', userId: 'user-matrix',
+    });
+    assert.equal(matrixWithFuture.projects.find((project) => project.id === 'project-matrix-future')?.selected, false);
+    const reducedMatrix = await service.setUserProjectAccess({
+      projectId: 'project-matrix-a',
+      userId: 'user-matrix',
+      projectIds: ['project-matrix-a'],
+      actorEmail: 'owner@example.test',
+      actorName: 'Владелец',
+    });
+    assert.equal(reducedMatrix.projects.find((project) => project.id === 'project-matrix-b')?.selected, false);
+    assert.equal((await pool.query(`
+      SELECT COUNT(*)::int AS count FROM auth_memberships
+      WHERE project_id='project-matrix-b' AND auth_user_id=(SELECT id FROM auth_users WHERE email_normalized='matrix@example.test')
+    `)).rows[0].count, 0);
+    assert.deepEqual(
+      (await service.fromRequest(sessionRequest(matrixSession.token)))?.projectIds,
+      ['project-matrix-a'],
+    );
 
     const createdProfile = await service.createProjectUser({
       projectId: 'project-profile',
@@ -271,22 +356,25 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
     const issueDuringActivation = service.issueToken({
       projectId: 'project-pending-b', userId: 'user-pending-b', actorEmail: 'owner@example.test',
     });
-    let issueWaitedForAccountLock = false;
-    for (let attempt = 0; attempt < 100 && !issueWaitedForAccountLock; attempt += 1) {
+    let issueWaitedForActivationLock = false;
+    for (let attempt = 0; attempt < 100 && !issueWaitedForActivationLock; attempt += 1) {
       const waiting = await pool.query(`
         SELECT 1 FROM pg_stat_activity
         WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'
-          AND query LIKE '%SELECT id,password_hash,status,activated_at FROM auth_users%'
+          AND (
+            query LIKE '%SELECT id,password_hash,status,activated_at FROM auth_users%'
+            OR query LIKE '%SELECT state_json, revision FROM project_state%'
+          )
         LIMIT 1
       `);
-      issueWaitedForAccountLock = Boolean(waiting.rowCount);
-      if (!issueWaitedForAccountLock) await new Promise((resolve) => setTimeout(resolve, 10));
+      issueWaitedForActivationLock = Boolean(waiting.rowCount);
+      if (!issueWaitedForActivationLock) await new Promise((resolve) => setTimeout(resolve, 10));
     }
     releaseActivationSession();
     const activations = await activationsPromise;
     const issuedDuringActivation = await issueDuringActivation;
     service.createSession = initialCreateSession;
-    assert.equal(issueWaitedForAccountLock, true);
+    assert.equal(issueWaitedForActivationLock, true);
     assert.equal(issuedDuringActivation.existingAccount, true);
     assert.equal(activations.filter((item) => item.status === 'fulfilled').length, 1);
     assert.equal(activations.filter((item) => item.status === 'rejected').length, 1);
@@ -728,6 +816,26 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
       assert.equal(httpProfileCreate.status, 201);
       const httpProfileBody = await httpProfileCreate.json() as { user: { id: string }; snapshot: { revision: number; state: ReturnType<typeof profileState> } };
       assert.equal((await pool.query("SELECT COUNT(*)::int AS count FROM auth_memberships WHERE project_id='project-http' AND system_user_id=$1", [httpProfileBody.user.id])).rows[0].count, 0);
+      const httpProjectAccess = await fetch(
+        `${origin}/api/access/users/${encodeURIComponent(httpProfileBody.user.id)}/projects?projectId=project-http`,
+        { headers: { cookie: ownerCookie } },
+      );
+      assert.equal(httpProjectAccess.status, 200);
+      const httpProjectAccessBody = await httpProjectAccess.json() as { projects: Array<{ id: string; selected: boolean }> };
+      assert.equal(httpProjectAccessBody.projects.find((project) => project.id === 'project-http')?.selected, false);
+      const httpProjectAccessUpdate = await fetch(
+        `${origin}/api/access/users/${encodeURIComponent(httpProfileBody.user.id)}/projects`,
+        {
+          method: 'PUT',
+          headers: { cookie: ownerCookie, 'content-type': 'application/json' },
+          body: JSON.stringify({ projectId: 'project-http', projectIds: ['project-http'] }),
+        },
+      );
+      assert.equal(httpProjectAccessUpdate.status, 200);
+      assert.equal((await pool.query(
+        "SELECT status FROM auth_memberships WHERE project_id='project-http' AND system_user_id=$1",
+        [httpProfileBody.user.id],
+      )).rows[0].status, 'pending');
       const forgedRosterState = structuredClone(httpProfileBody.snapshot.state);
       const forgedRosterUser = forgedRosterState.settings.users.find((user) => user.id === httpProfileBody.user.id)!;
       forgedRosterUser.role = 'management';

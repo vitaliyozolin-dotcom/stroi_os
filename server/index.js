@@ -176,6 +176,26 @@ const handleAccessApi = async (request, identity) => {
       });
       return jsonNoStore({ ok: true, ...result }, 201);
     }
+    const projectAccessMatch = url.pathname.match(/^\/api\/access\/users\/([^/]+)\/projects$/);
+    if (projectAccessMatch && request.method === 'GET') {
+      const projectId = String(url.searchParams.get('projectId') || '').trim();
+      const result = await userAccess.listUserProjectAccess({
+        projectId,
+        userId: decodeURIComponent(projectAccessMatch[1]),
+      });
+      return jsonNoStore({ ok: true, ...result });
+    }
+    if (projectAccessMatch && request.method === 'PUT') {
+      const body = await readJsonLimited(request);
+      const result = await userAccess.setUserProjectAccess({
+        projectId: String(body.projectId || '').trim(),
+        userId: decodeURIComponent(projectAccessMatch[1]),
+        projectIds: body.projectIds,
+        actorEmail: identity.email,
+        actorName: identity.name,
+      });
+      return jsonNoStore({ ok: true, ...result });
+    }
     const profileMatch = url.pathname.match(/^\/api\/access\/users\/([^/]+)$/);
     if (profileMatch && request.method === 'PATCH') {
       const body = await readJsonLimited(request);

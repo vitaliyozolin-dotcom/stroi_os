@@ -5447,6 +5447,67 @@ p {
   margin: 14px 0 0;
 }
 
+.project-access-list {
+  display: flex;
+  max-height: min(52vh, 520px);
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.project-access-item {
+  display: grid;
+  grid-template-columns: auto 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.project-access-item--selected {
+  border-color: color-mix(in srgb, var(--green) 35%, var(--border));
+  background: var(--green-light);
+}
+
+.project-access-item input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--green);
+}
+
+.project-access-item__icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: var(--green);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.project-access-item__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.project-access-item__copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-access-item__copy small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .permission-table {
   margin-top: 14px;
   border: 1px solid var(--border);
@@ -6788,6 +6849,15 @@ p {
   .permission-table__head,
   .permission-table__row {
     min-width: 520px;
+  }
+
+  .project-access-item {
+    grid-template-columns: auto 34px minmax(0, 1fr);
+  }
+
+  .project-access-item .status-badge {
+    grid-column: 3;
+    justify-self: start;
   }
 
   .channel-grid {
