@@ -4,6 +4,7 @@ import {
   Bot,
   Camera,
   Check,
+  FolderKanban,
   Globe2,
   LayoutDashboard,
   Link2,
@@ -29,6 +30,15 @@ type AccessUser = {
   telegram: { status: 'connected' | 'not_connected'; boundAt?: string; username?: string };
 };
 type AccessSnapshot = { authMode: 'local_password' | 'sites_sso'; users: AccessUser[] };
+type UserProjectAccess = {
+  id: string;
+  code: string;
+  name: string;
+  selected: boolean;
+  status: WebAccessStatus;
+  role: UserRole;
+};
+type UserProjectAccessSnapshot = { accountActive: boolean; projects: UserProjectAccess[] };
 type TelegramCandidate = { id: string; title: string; type: string };
 type IntegrationStatus = {
   email: boolean;
@@ -89,6 +99,13 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
   const [accessBusy, setAccessBusy] = useState<{ userId: string; action: string } | null>(null);
   const [accessErrors, setAccessErrors] = useState<Record<string, string>>({});
   const [accessLink, setAccessLink] = useState<{ userName: string; login: string; url: string; expiresAt?: string; purpose: 'activate' | 'reset' | 'existing' } | null>(null);
+  const [projectAccess, setProjectAccess] = useState<{
+    user: SystemUser;
+    mode: 'issue' | 'manage';
+    accountActive: boolean;
+    projects: UserProjectAccess[];
+    selected: string[];
+  } | null>(null);
 
   const accessErrorText = (code?: string) => ({
     profile_not_saved: 'Профиль ещё сохраняется. Повторите через несколько секунд.',
@@ -101,6 +118,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     owner_required: 'Выдавать и отзывать веб-доступ может только владелец.',
     invalid_user_profile: 'Проверьте имя, email и роль пользователя.',
     revision_conflict: 'Профиль уже изменён. Обновите страницу и повторите.',
+    invalid_projects: 'Список проектов изменился. Обновите страницу и выберите проекты заново.',
   }[code ?? ''] ?? 'Не удалось изменить веб-доступ. Обновите страницу и повторите.');
 
   const refreshAccess = async () => {
@@ -206,7 +224,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
           setShowInvite(false);
           setInvite({ name: '', email: '', role: 'foreman', telegram: '' });
           setAccessErrors((current) => ({ ...current, new: '' }));
-          await issueWebLink(body.user);
+          await openProjectAccess(body.user, 'issue');
           return;
         }
       } catch (error) {
@@ -271,6 +289,69 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
   const telegramAccessFor = (user: SystemUser): AccessUser['telegram'] => accessSnapshot?.users
     .find((item) => item.userId === user.id)?.telegram
     ?? { status: 'not_connected' };
+
+  const openProjectAccess = async (user: SystemUser, mode: 'issue' | 'manage') => {
+    setAccessBusy({ userId: user.id, action: 'projects' });
+    setAccessErrors((current) => ({ ...current, [user.id]: '' }));
+    try {
+      const response = await fetch(
+        `/api/access/users/${encodeURIComponent(user.id)}/projects?projectId=${encodeURIComponent(state.project.id)}`,
+        { cache: 'no-store' },
+      );
+      const body = await response.json() as UserProjectAccessSnapshot & { ok?: boolean; error?: string };
+      if (!response.ok || !body.ok || !Array.isArray(body.projects)) throw new Error(body.error || 'access_error');
+      const alreadySelected = body.projects.filter((project) => project.selected).map((project) => project.id);
+      const selected = mode === 'issue' && !body.accountActive && alreadySelected.length === 0
+        ? body.projects.map((project) => project.id)
+        : mode === 'issue' && body.accountActive
+          ? [...new Set([...alreadySelected, state.project.id])]
+          : alreadySelected;
+      setProjectAccess({ user, mode, accountActive: body.accountActive, projects: body.projects, selected });
+    } catch (error) {
+      setAccessErrors((current) => ({
+        ...current,
+        [user.id]: accessErrorText(error instanceof Error ? error.message : ''),
+      }));
+    } finally {
+      setAccessBusy(null);
+    }
+  };
+
+  const saveProjectAccess = async () => {
+    if (!projectAccess) return;
+    if (projectAccess.mode === 'issue' && !projectAccess.selected.includes(state.project.id)) {
+      setAccessErrors((current) => ({
+        ...current,
+        [projectAccess.user.id]: 'Оставьте текущий проект выбранным, чтобы выпустить ссылку активации.',
+      }));
+      return;
+    }
+    if (!projectAccess.selected.length && !window.confirm(`Закрыть ${projectAccess.user.name} доступ ко всем проектам?`)) return;
+    setAccessBusy({ userId: projectAccess.user.id, action: 'projects' });
+    setAccessErrors((current) => ({ ...current, [projectAccess.user.id]: '' }));
+    try {
+      const response = await fetch(`/api/access/users/${encodeURIComponent(projectAccess.user.id)}/projects`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: state.project.id, projectIds: projectAccess.selected }),
+      });
+      const body = await response.json() as UserProjectAccessSnapshot & { ok?: boolean; error?: string; snapshot?: RemoteSnapshot | null };
+      if (!response.ok || !body.ok) throw new Error(body.error || 'access_error');
+      if (body.snapshot?.projectId === state.project.id) onServerSnapshot(body.snapshot);
+      const user = projectAccess.user;
+      const shouldIssue = projectAccess.mode === 'issue';
+      setProjectAccess(null);
+      await refreshAccess();
+      if (shouldIssue) await issueWebLink(user);
+    } catch (error) {
+      setAccessErrors((current) => ({
+        ...current,
+        [projectAccess.user.id]: accessErrorText(error instanceof Error ? error.message : ''),
+      }));
+    } finally {
+      setAccessBusy(null);
+    }
+  };
 
   const issueWebLink = async (user: SystemUser, reset = false, retryOnce = false) => {
     setAccessBusy({ userId: user.id, action: reset ? 'reset' : 'invite' });
@@ -482,8 +563,9 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
                       <span className="user-row__telegram"><StatusBadge label={telegram.status === 'connected' ? 'Подключён' : 'Не подключён'} tone={telegram.status === 'connected' ? 'positive' : 'neutral'} /></span>
                       <small className="user-row__last">{web.lastLoginAt ? formatDateTime(web.lastLoginAt) : 'Ещё не входил'}</small>
                       <span className="user-row__actions access-actions">
-                        {localAccess && ['not_issued', 'expired'].includes(web.status) && <button type="button" disabled={busy} onClick={() => void issueWebLink(user)}>{web.status === 'expired' ? 'Новая ссылка' : 'Выдать доступ'}</button>}
+                        {localAccess && ['not_issued', 'expired'].includes(web.status) && <button type="button" disabled={busy} onClick={() => void openProjectAccess(user, 'issue')}>{web.status === 'expired' ? 'Новая ссылка' : 'Выдать доступ'}</button>}
                         {localAccess && web.status === 'pending' && <button type="button" disabled={busy} onClick={() => void issueWebLink(user)}>Перевыпустить</button>}
+                        {localAccess && ['pending', 'active', 'blocked'].includes(web.status) && <button type="button" disabled={busy} onClick={() => void openProjectAccess(user, 'manage')}>Проекты</button>}
                         {localAccess && web.status === 'active' && <button type="button" disabled={busy} onClick={() => void issueWebLink(user, true)}>Сбросить пароль</button>}
                         {localAccess && web.status === 'active' && <button type="button" disabled={busy} onClick={() => void changeWebAccess(user, 'sessions/revoke')}>Завершить сессии</button>}
                         {localAccess && web.status === 'active' && <button type="button" className="danger" disabled={busy} onClick={() => void changeWebAccess(user, 'block')}>Заблокировать</button>}
@@ -574,6 +656,41 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
 
       {showInvite && <Modal title="Добавить пользователя" subtitle={accessSnapshot?.authMode === 'sites_sso' ? 'Создадим профиль. Вход на резервный стенд управляется защищённым списком сайта.' : 'Email станет логином. После сохранения система выпустит одноразовую ссылку для установки пароля.'} onClose={() => setShowInvite(false)}><form className="modal-form" onSubmit={inviteUser}><div className="form-grid"><Field label="Имя"><input required value={invite.name} onChange={(event) => setInvite({ ...invite, name: event.target.value })} /></Field><Field label="Email — логин"><input required type="email" value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} /></Field></div><div className="form-grid"><Field label="Роль"><select value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Telegram"><input value={invite.telegram} onChange={(event) => setInvite({ ...invite, telegram: event.target.value })} placeholder="@username, необязательно" /></Field></div>{accessErrors.new && <div className="access-inline-error" role="alert">{accessErrors.new}</div>}<div className="settings-note"><Link2 size={18} /><span>{accessSnapshot?.authMode === 'sites_sso' ? 'Веб-доступ и Telegram — разные подключения. Добавьте email в защищённый доступ сайта; Telegram можно связать после создания профиля.' : 'Веб-доступ и Telegram — разные подключения. Сотрудник сам задаст пароль по ссылке; Telegram можно связать после создания профиля.'}</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowInvite(false)}>Отмена</button><button type="submit" className="button button--primary" disabled={accessBusy?.userId === 'new'}><Plus size={17} /> {accessSnapshot?.authMode === 'sites_sso' ? 'Создать профиль' : 'Создать и выдать доступ'}</button></div></form></Modal>}
       {editingUser && <Modal title={`Редактировать: ${editingUser.name}`} subtitle="Email является логином. При его смене потребуется выпустить новую ссылку активации." onClose={() => setEditingUser(null)}><form className="modal-form" onSubmit={saveUser}><div className="form-grid"><Field label="Имя"><input required value={editingUser.name} onChange={(event) => setEditingUser({ ...editingUser, name: event.target.value })} /></Field><Field label="Email — логин"><input required type="email" value={editingUser.email} onChange={(event) => setEditingUser({ ...editingUser, email: event.target.value })} /></Field><Field label="Роль"><select value={editingUser.role} onChange={(event) => setEditingUser({ ...editingUser, role: event.target.value as UserRole })}><option value="management">Управление</option><option value="foreman">Прораб</option><option value="client">Клиент</option></select></Field><Field label="Telegram"><input value={editingUser.telegram ?? ''} onChange={(event) => setEditingUser({ ...editingUser, telegram: event.target.value })} placeholder="@username" /></Field></div><div className="settings-note"><Link2 size={18} /><span>Блокировка и разблокировка выполняются отдельными кнопками в списке, чтобы веб-сессии отзывались на сервере.</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingUser(null)}>Отмена</button><button type="submit" className="button button--primary" disabled={accessBusy?.userId === editingUser.id}>Сохранить</button></div></form></Modal>}
+      {projectAccess && <Modal
+        title={`Проекты: ${projectAccess.user.name}`}
+        subtitle={projectAccess.mode === 'issue'
+          ? projectAccess.accountActive
+            ? 'Пароль уже создан. Добавьте нужные проекты — сотрудник войдёт с прежним логином и паролем.'
+            : 'При первой выдаче выбраны все существующие проекты. Ненужные можно снять сейчас или позже.'
+          : 'Отметьте проекты, которые сотрудник должен видеть. Снятые проекты закрываются сразу.'}
+        onClose={() => setProjectAccess(null)}
+      >
+        <div className="project-access-list">
+          {projectAccess.projects.map((project) => {
+            const checked = projectAccess.selected.includes(project.id);
+            const currentProjectRequired = projectAccess.mode === 'issue' && project.id === state.project.id;
+            return <label key={project.id} className={checked ? 'project-access-item project-access-item--selected' : 'project-access-item'}>
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={currentProjectRequired}
+                onChange={() => setProjectAccess((current) => current ? {
+                  ...current,
+                  selected: checked
+                    ? current.selected.filter((id) => id !== project.id)
+                    : [...current.selected, project.id],
+                } : current)}
+              />
+              <span className="project-access-item__icon"><FolderKanban size={18} /></span>
+              <span className="project-access-item__copy"><strong>{project.code} · {project.name}</strong><small>{roleLabels[project.role]}{project.id === state.project.id ? ' · текущий проект' : ''}</small></span>
+              <StatusBadge label={checked ? 'Доступ есть' : 'Нет доступа'} tone={checked ? 'positive' : 'neutral'} />
+            </label>;
+          })}
+        </div>
+        <div className="settings-note"><ShieldCheck size={18} /><span>Новые проекты не добавляются автоматически. Их можно выдать позже здесь же. Telegram-привязка от выбора проектов не меняется.</span></div>
+        {accessErrors[projectAccess.user.id] && <div className="access-inline-error" role="alert">{accessErrors[projectAccess.user.id]}</div>}
+        <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setProjectAccess(null)}>Отмена</button><button type="button" className="button button--primary" disabled={accessBusy?.userId === projectAccess.user.id} onClick={() => void saveProjectAccess()}><Check size={17} /> {projectAccess.mode === 'issue' ? 'Выдать и получить ссылку' : 'Сохранить доступы'}</button></div>
+      </Modal>}
       {accessLink && <Modal title={`${accessLink.purpose === 'reset' ? 'Сброс пароля' : 'Доступ'} для ${accessLink.userName}`} subtitle={accessLink.purpose === 'existing' ? 'У пользователя уже есть пароль ИКИОМА ОС; доступ к этому проекту добавлен.' : `Одноразовая ссылка действует до ${formatDateTime(accessLink.expiresAt ?? '')}.`} onClose={() => setAccessLink(null)}><div className="telegram-link-card access-link-card"><p>{accessLink.purpose === 'existing' ? 'Отправьте человеку ссылку на вход. Он использует прежний пароль и свой email.' : 'Отправьте ссылку именно выбранному человеку. Он задаст пароль и войдёт в ИКИОМА ОС по своему email.'}</p><Field label="Логин"><input readOnly value={accessLink.login} onFocus={(event) => event.currentTarget.select()} /></Field><Field label={accessLink.purpose === 'existing' ? 'Ссылка на вход' : 'Ссылка активации'}><input readOnly value={accessLink.url} onFocus={(event) => event.currentTarget.select()} /></Field><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setAccessLink(null)}>Закрыть</button><button type="button" className="button button--primary" onClick={() => { void navigator.clipboard.writeText(accessLink.url); }}><Link2 size={16} /> Скопировать ссылку</button></div></div></Modal>}
       {telegramLink && <Modal title={`Telegram для ${telegramLink.userName}`} subtitle={`Персональная одноразовая ссылка действует до ${formatDateTime(telegramLink.expiresAt)}.`} onClose={() => setTelegramLink(null)}><div className="telegram-link-card"><p>Отправьте эту ссылку именно выбранному сотруднику. После нажатия «Запустить» его Telegram автоматически свяжется с профилем в ИКИОМА ОС.</p><input readOnly value={telegramLink.url} onFocus={(event) => event.currentTarget.select()} /><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setTelegramLink(null)}>Закрыть</button><button type="button" className="button button--primary" onClick={() => { void navigator.clipboard.writeText(telegramLink.url); setIntegrationMessage('Ссылка скопирована.'); }}><Link2 size={16} /> Скопировать ссылку</button></div></div></Modal>}
     </div>
