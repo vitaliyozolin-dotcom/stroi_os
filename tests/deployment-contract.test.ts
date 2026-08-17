@@ -102,6 +102,12 @@ test('deploy builds exact Git content, persists image pointers and rolls back si
   const installer = source('scripts/install-timeweb-deploy.sh');
   assert.match(installer, /APPROVE_INFRA_SHA/);
   assert.match(installer, /approved-infra\.sha256/);
+  assert.match(installer, /infrastructure_changed=1/);
+  assert.match(installer, /Compose\/Caddy изменились\. Выполните ручной инфраструктурный rollout/);
+  assert.ok(
+    installer.indexOf('candidate_caddy_sha') <
+      installer.indexOf('APPROVE_INFRA_SHA'),
+  );
   assert.match(installer, /SAFE_BOOTSTRAP_COMPOSE_SHA256/);
   assert.match(installer, /SAFE_BOOTSTRAP_CADDY_SHA256/);
   assert.match(installer, /не разрешает неизвестную версию Compose\/Caddy/);

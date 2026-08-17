@@ -71,6 +71,7 @@ infra_approval_tmp="$(mktemp)"
   printf 'backup_sha256=%s\n' "$(git -C "$APP_DIR" show "$target_commit:scripts/backup.sh" | sha256sum | cut -d' ' -f1)"
   printf 'gate_sha256=%s\n' "$(git -C "$APP_DIR" show "$target_commit:scripts/stroios-deploy-gate.sh" | sha256sum | cut -d' ' -f1)"
 } >"$infra_approval_tmp"
+infrastructure_changed=0
 if [[ -f "$INFRA_APPROVAL_FILE" ]]; then
   approved_compose_sha="$(sed -n 's/^compose_sha256=//p' "$INFRA_APPROVAL_FILE")"
   approved_caddy_sha="$(sed -n 's/^caddy_sha256=//p' "$INFRA_APPROVAL_FILE")"
@@ -78,14 +79,16 @@ if [[ -f "$INFRA_APPROVAL_FILE" ]]; then
   candidate_caddy_sha="$(sed -n 's/^caddy_sha256=//p' "$infra_approval_tmp")"
   if [[ "$candidate_compose_sha" != "$approved_compose_sha" || \
         "$candidate_caddy_sha" != "$approved_caddy_sha" ]]; then
-    rm -f "$infra_approval_tmp"
-    echo "Compose/Caddy изменились после bootstrap. Нужен отдельный ручной инфраструктурный rollout." >&2
-    exit 78
+    infrastructure_changed=1
   fi
 else
+  infrastructure_changed=1
+fi
+
+if [[ "$infrastructure_changed" == "1" ]]; then
   if [[ "${APPROVE_INFRA_SHA:-}" != "$target_commit" ]]; then
     rm -f "$infra_approval_tmp"
-    echo "Инфраструктура изменилась. Сначала выполните отдельный rollout, затем повторите с APPROVE_INFRA_SHA=$target_commit." >&2
+    echo "Compose/Caddy изменились. Выполните ручной инфраструктурный rollout с APPROVE_INFRA_SHA=$target_commit." >&2
     exit 78
   fi
   bootstrap_compose_sha="$(sed -n 's/^compose_sha256=//p' "$infra_approval_tmp")"
