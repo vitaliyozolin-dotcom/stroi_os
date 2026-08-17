@@ -1,4 +1,5 @@
 import type { AppState, BudgetLine, ExpenseStatus, StageStatus, TaskPriority, TaskStatus } from './types';
+import { projectProgressTotals } from './progressEngine.ts';
 
 export const acceptedAmountFor = (entry: AppState['financeEntries'][number]) => entry.acceptedAmount ?? (entry.status === 'accepted' || entry.status === 'paid' ? entry.amount : 0);
 export const paidAmountFor = (entry: AppState['financeEntries'][number]) => entry.paidAmount ?? (entry.status === 'paid' ? entry.amount : 0);
@@ -57,12 +58,7 @@ export const lineTotals = (state: AppState, line: BudgetLine) => {
   };
 };
 
-export const progressTotals = (state: AppState) => {
-  const weight = state.stages.reduce((sum, stage) => sum + stage.weight, 0);
-  const physical = state.stages.reduce((sum, stage) => sum + stage.weight * stage.progress, 0) / weight;
-  const accepted = state.stages.filter((stage) => stage.status === 'accepted').reduce((sum, stage) => sum + stage.weight, 0) / weight * 100;
-  return { physical: Math.round(physical), accepted: Math.round(accepted) };
-};
+export const progressTotals = (state: AppState) => projectProgressTotals(state);
 
 export const stageStatusLabel: Record<StageStatus, string> = {
   not_ready: 'Не готов',
