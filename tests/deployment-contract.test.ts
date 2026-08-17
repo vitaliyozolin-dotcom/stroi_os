@@ -10,6 +10,7 @@ const sha256 = (path: string) =>
 test('production images are SHA-addressable and include Telegram modules', () => {
   const dockerfile = source('Dockerfile');
   const compose = source('compose.yaml');
+  const caddy = source('deploy/Caddyfile');
 
   assert.match(dockerfile, /ARG BUILD_SHA=unknown/);
   assert.match(dockerfile, /ENV BUILD_SHA=\$BUILD_SHA/);
@@ -17,6 +18,8 @@ test('production images are SHA-addressable and include Telegram modules', () =>
   assert.match(compose, /^name: stroios/m);
   assert.match(compose, /STROIOS_APP_IMAGE/);
   assert.match(compose, /STROIOS_RELAY_IMAGE/);
+  assert.match(caddy, /dynamic a app 3000/);
+  assert.match(caddy, /refresh 5s/);
 });
 
 test('Sites artifact includes every Telegram module imported by its Worker entrypoint', () => {
@@ -62,6 +65,10 @@ test('deploy builds exact Git content, persists image pointers and rolls back si
   assert.match(deploy, /STROIOS_TELEGRAM_DEGRADED/);
   assert.match(deploy, /telegram_regressed/);
   assert.match(deploy, /public_readiness_check "\$target_commit"/);
+  assert.match(deploy, /reload_caddy/);
+  assert.match(deploy, /caddy validate --config \/etc\/caddy\/Caddyfile/);
+  assert.match(deploy, /STROIOS_DEPLOY_ERROR internal_readiness_failed/);
+  assert.match(deploy, /STROIOS_DEPLOY_ERROR public_readiness_failed status=/);
   assert.match(deploy, /INFRA_APPROVAL_FILE="\/var\/lib\/stroios-deploy\/approved-infra\.sha256"/);
   assert.match(deploy, /candidate_compose_sha.*approved_compose_sha/);
   assert.match(deploy, /candidate_caddy_sha.*approved_caddy_sha/);
