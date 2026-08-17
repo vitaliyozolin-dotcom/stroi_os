@@ -11,6 +11,7 @@ import {
   type ProjectListItem,
 } from './storage';
 import { mergeProjectStates } from './conflict';
+import { synchronizeDerivedProgress } from './progressEngine';
 import type { AppState, UserRole } from './types';
 
 export type SyncPhase = 'loading' | 'saved' | 'saving' | 'offline' | 'conflict';
@@ -29,6 +30,7 @@ const errorMessage = (error: unknown) => {
 
 export function useProjectState(role: UserRole, actor: string, storageIdentity = '') {
   const initial = useRef(loadCachedProject());
+  initial.current.state = synchronizeDerivedProgress(initial.current.state);
   const [state, setState] = useState<AppState>(initial.current.state);
   const [sync, setSync] = useState<SyncView>({
     phase: 'loading',
@@ -78,14 +80,15 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   }, [actor, role]);
 
   const applyRemote = useCallback((remote: RemoteSnapshot) => {
-    stateRef.current = remote.state;
-    baseRef.current = remote.state;
+    const normalized = synchronizeDerivedProgress(remote.state);
+    stateRef.current = normalized;
+    baseRef.current = normalized;
     revisionRef.current = remote.revision;
     updatedAtRef.current = remote.updatedAt;
     dirtyRef.current = false;
-    setState(remote.state);
+    setState(normalized);
     setSync({ phase: 'saved', revision: remote.revision, updatedAt: remote.updatedAt });
-    saveCachedProject({ state: remote.state, revision: remote.revision, dirty: false, updatedAt: remote.updatedAt });
+    saveCachedProject({ state: normalized, revision: remote.revision, dirty: false, updatedAt: remote.updatedAt });
   }, []);
 
   flushRef.current = async () => {
@@ -95,7 +98,8 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     try {
       while (dirtyRef.current && !conflictRef.current) {
         dirtyRef.current = false;
-        const snapshot = stateRef.current;
+        const snapshot = synchronizeDerivedProgress(stateRef.current);
+        stateRef.current = snapshot;
         const expectedRevision = revisionRef.current;
         const summary = pendingSummaryRef.current;
         setSync({ phase: 'saving', revision: expectedRevision, updatedAt: updatedAtRef.current });
@@ -110,15 +114,16 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
           });
           revisionRef.current = result.revision;
           updatedAtRef.current = result.updatedAt;
-          const serverState = result.state ?? snapshot;
+          const serverState = synchronizeDerivedProgress(result.state ?? snapshot);
           if (stateRef.current === snapshot) {
             stateRef.current = serverState;
             setState(serverState);
           } else if (result.state) {
-            const merged = mergeProjectStates(snapshot, stateRef.current, result.state);
+            const merged = mergeProjectStates(snapshot, stateRef.current, serverState);
             if (!merged.conflicts.length) {
-              stateRef.current = merged.state;
-              setState(merged.state);
+              const normalizedMerged = synchronizeDerivedProgress(merged.state);
+              stateRef.current = normalizedMerged;
+              setState(normalizedMerged);
             }
           }
           baseRef.current = serverState;
@@ -134,14 +139,15 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
           if (error instanceof RevisionConflictError) {
             const merged = mergeProjectStates(baseRef.current, snapshot, error.current.state);
             if (!merged.conflicts.length) {
-              stateRef.current = merged.state;
-              baseRef.current = error.current.state;
+              const normalizedMerged = synchronizeDerivedProgress(merged.state);
+              stateRef.current = normalizedMerged;
+              baseRef.current = synchronizeDerivedProgress(error.current.state);
               revisionRef.current = error.current.revision;
               updatedAtRef.current = error.current.updatedAt;
               dirtyRef.current = true;
-              setState(merged.state);
+              setState(normalizedMerged);
               saveCachedProject({
-                state: merged.state,
+                state: normalizedMerged,
                 revision: error.current.revision,
                 dirty: true,
                 updatedAt: error.current.updatedAt,
@@ -192,12 +198,13 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         }
         const merged = mergeProjectStates(baseRef.current, stateRef.current, remote.state);
         if (!merged.conflicts.length) {
-          stateRef.current = merged.state;
-          baseRef.current = remote.state;
+          const normalizedMerged = synchronizeDerivedProgress(merged.state);
+          stateRef.current = normalizedMerged;
+          baseRef.current = synchronizeDerivedProgress(remote.state);
           revisionRef.current = remote.revision;
           updatedAtRef.current = remote.updatedAt;
           dirtyRef.current = true;
-          setState(merged.state);
+          setState(normalizedMerged);
           await flushRef.current();
           await refreshProjects();
           return;
@@ -234,21 +241,22 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     setStorageIdentityScope(storageIdentity);
     if (!storageIdentity) return undefined;
     const cached = loadCachedProject();
-    stateRef.current = cached.state;
-    baseRef.current = cached.state;
+    const normalizedCached = synchronizeDerivedProgress(cached.state);
+    stateRef.current = normalizedCached;
+    baseRef.current = normalizedCached;
     revisionRef.current = cached.revision;
     updatedAtRef.current = cached.updatedAt;
     dirtyRef.current = cached.dirty;
     readyRef.current = false;
-    setState(cached.state);
+    setState(normalizedCached);
     setProjects([{
-      id: cached.state.project.id,
-      code: cached.state.project.code,
-      name: cached.state.project.name,
-      model: cached.state.project.model,
-      area: cached.state.project.area,
-      address: cached.state.project.address,
-      targetDate: cached.state.project.targetDate,
+      id: normalizedCached.project.id,
+      code: normalizedCached.project.code,
+      name: normalizedCached.project.name,
+      model: normalizedCached.project.model,
+      area: normalizedCached.project.area,
+      address: normalizedCached.project.address,
+      targetDate: normalizedCached.project.targetDate,
       revision: cached.revision,
       updatedAt: cached.updatedAt,
     }]);
@@ -260,15 +268,16 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   }, [refreshProjects, storageIdentity]);
 
   const updateState = useCallback((next: AppState) => {
+    const normalized = synchronizeDerivedProgress(next);
     const previousActivityId = stateRef.current.activity[0]?.id;
-    const nextActivity = next.activity[0];
+    const nextActivity = normalized.activity[0];
     if (nextActivity && nextActivity.id !== previousActivityId) pendingSummaryRef.current = nextActivity.text;
 
-    stateRef.current = next;
+    stateRef.current = normalized;
     dirtyRef.current = true;
-    setState(next);
+    setState(normalized);
     saveCachedProject({
-      state: next,
+      state: normalized,
       revision: revisionRef.current,
       dirty: true,
       updatedAt: updatedAtRef.current,
@@ -326,31 +335,33 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         setSync((current) => ({ ...current, phase: 'offline', message: 'Не удалось загрузить выбранный проект.' }));
         return;
       }
-      stateRef.current = cached.state;
-      baseRef.current = cached.state;
+      const normalizedCached = synchronizeDerivedProgress(cached.state);
+      stateRef.current = normalizedCached;
+      baseRef.current = normalizedCached;
       revisionRef.current = cached.revision;
       updatedAtRef.current = cached.updatedAt;
       dirtyRef.current = cached.dirty;
       readyRef.current = false;
-      setState(cached.state);
+      setState(normalizedCached);
       setSync({ phase: 'offline', revision: cached.revision, updatedAt: cached.updatedAt, message: 'Показана локальная копия проекта.' });
     }
   }, [applyRemote]);
 
   const createProject = useCallback(async (nextState: AppState) => {
     if (dirtyRef.current && readyRef.current) await flushRef.current();
-    stateRef.current = nextState;
-    baseRef.current = nextState;
+    const normalized = synchronizeDerivedProgress(nextState);
+    stateRef.current = normalized;
+    baseRef.current = normalized;
     revisionRef.current = 0;
     updatedAtRef.current = undefined;
     dirtyRef.current = true;
     readyRef.current = true;
     conflictRef.current = null;
     setConflict(null);
-    setState(nextState);
+    setState(normalized);
     setSync({ phase: 'saving', revision: 0 });
-    saveCachedProject({ state: nextState, revision: 0, dirty: true });
-    pendingSummaryRef.current = `Создан проект ${nextState.project.code}`;
+    saveCachedProject({ state: normalized, revision: 0, dirty: true });
+    pendingSummaryRef.current = `Создан проект ${normalized.project.code}`;
     await flushRef.current();
     await refreshProjects();
   }, [refreshProjects]);
