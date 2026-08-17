@@ -1,4 +1,5 @@
 import { seedState } from './seed';
+import { applyKelosiPpr } from './kelosiPpr';
 import type { AppState, UserRole } from './types';
 
 const CACHE_ROOT = 'stroios.work.v17.';
@@ -155,7 +156,7 @@ export const loadCachedProject = (projectId?: string): CachedProject => {
     const parsed = JSON.parse(raw) as Partial<CachedProject>;
     if (!isAppState(parsed.state)) return { state: cloneSeed(), revision: 0, dirty: false };
     return {
-      state: normalizeAppState(parsed.state),
+      state: applyKelosiPpr(normalizeAppState(parsed.state)),
       revision: Number.isInteger(parsed.revision) && Number(parsed.revision) >= 0 ? Number(parsed.revision) : 0,
       dirty: parsed.dirty === true,
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
@@ -220,7 +221,33 @@ export const fetchRemoteProject = async (projectId: string): Promise<RemoteSnaps
 
   const body = await response.json() as { snapshot?: RemoteSnapshot };
   if (!body.snapshot || !isAppState(body.snapshot.state)) throw new StorageRequestError('invalid_response');
-  return { ...body.snapshot, state: normalizeAppState(body.snapshot.state) };
+
+  const normalizedState = normalizeAppState(body.snapshot.state);
+  const migratedState = applyKelosiPpr(normalizedState);
+  if (migratedState !== normalizedState) {
+    try {
+      const saved = await saveRemoteProject({
+        state: migratedState,
+        expectedRevision: body.snapshot.revision,
+        actor: 'Система',
+        role: 'management',
+        action: 'schedule_import',
+        summary: 'Импортирован ППР.xlsx в проект Келози',
+      });
+      return {
+        ...body.snapshot,
+        ...saved,
+        state: saved.state ?? migratedState,
+      };
+    } catch (error) {
+      if (error instanceof RevisionConflictError) {
+        return { ...error.current, state: applyKelosiPpr(normalizeAppState(error.current.state)) };
+      }
+      return { ...body.snapshot, state: migratedState };
+    }
+  }
+
+  return { ...body.snapshot, state: normalizedState };
 };
 
 export const saveRemoteProject = async ({
