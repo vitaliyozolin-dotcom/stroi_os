@@ -1104,7 +1104,26 @@ export class UserAccessService {
     const passwordHash = await this.runPasswordWork(() => this.passwordHasher(password));
     const now = new Date().toISOString();
     return this.transaction(async (client) => {
-      const project = await this.loadProject(client, inspected.projectId, true);
+      const projectRows = await client.query(`
+        SELECT project_id,state_json,revision
+        FROM project_state
+        WHERE project_id IN (
+          SELECT m.project_id
+          FROM auth_memberships m
+          WHERE m.auth_user_id=$1 AND (
+            m.status='pending' OR m.id=(SELECT membership_id FROM auth_tokens WHERE token_hash=$2)
+          )
+        )
+        ORDER BY project_id
+        FOR UPDATE
+      `, [inspected.accountId, hashAccessToken(rawToken)]);
+      const lockedProjects = new Map(projectRows.rows.map((row) => {
+        let state;
+        try { state = JSON.parse(row.state_json); } catch { throw new AccessError('project_state_invalid', 500); }
+        return [clean(row.project_id, 100), { state, revision: Number(row.revision) || 0 }];
+      }));
+      const project = lockedProjects.get(inspected.projectId);
+      if (!project) throw new AccessError('invite_invalid', 410);
       const account = (await client.query(
         'SELECT id,email_normalized,name,status FROM auth_users WHERE id=$1 FOR UPDATE',
         [inspected.accountId],
@@ -1160,9 +1179,8 @@ export class UserAccessService {
       await this.clearLoginLimits([this.loginRateKey(user.email)], client);
 
       for (const membership of activationTargets) {
-        const targetProject = membership.project_id === token.project_id
-          ? project
-          : await this.loadProject(client, membership.project_id, true);
+        const targetProject = lockedProjects.get(clean(membership.project_id, 100));
+        if (!targetProject) throw new AccessError('invite_invalid', 410);
         const targetUser = this.validateProjectUser(targetProject.state, membership.system_user_id);
         if (targetUser.status === 'disabled' || targetUser.email !== normalizeAccessEmail(account.email_normalized)) {
           throw new AccessError('invite_invalid', 410);
