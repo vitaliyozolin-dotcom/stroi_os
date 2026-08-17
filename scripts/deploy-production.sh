@@ -263,7 +263,7 @@ readiness_response() {
 }
 
 readiness_check() {
-  local expected_sha="$1" max_attempts="${2:-$HEALTH_ATTEMPTS}" attempt response
+  local expected_sha="$1" max_attempts="${2:-$HEALTH_ATTEMPTS}" attempt response diagnostic
   for ((attempt = 1; attempt <= max_attempts; attempt += 1)); do
     response="$(readiness_response)"
     if [[ "$response" == *'"ok":true'* && \
@@ -273,27 +273,47 @@ readiness_check() {
     fi
     sleep "$HEALTH_INTERVAL_SECONDS"
   done
+  diagnostic="$(printf '%s' "$response" | tr '\r\n' ' ' | cut -c1-600)"
+  echo "STROIOS_DEPLOY_ERROR internal_readiness_failed response=${diagnostic:-empty}" >&2
   return 1
 }
 
 public_readiness_check() {
   local expected_sha="$1" max_attempts="${2:-$HEALTH_ATTEMPTS}" public_url attempt response
+  local response_file http_status diagnostic
   public_url="$(docker compose -f "$COMPOSE_FILE" exec -T app printenv APP_PUBLIC_URL | tr -d '\r\n')"
   if [[ ! "$public_url" =~ ^https://[^/[:space:]]+/?$ ]]; then
     echo "STROIOS_DEPLOY_ERROR public_url_invalid" >&2
     return 1
   fi
   public_url="${public_url%/}"
+  response_file="$(mktemp)"
   for ((attempt = 1; attempt <= max_attempts; attempt += 1)); do
-    response="$(curl --fail --silent --show-error --max-time 10 "$public_url/api/readiness" 2>/dev/null || true)"
-    if [[ "$response" == *'"ok":true'* && \
+    http_status="$(curl --silent --show-error --max-time 10 \
+      --output "$response_file" --write-out '%{http_code}' \
+      "$public_url/api/readiness" 2>/dev/null || true)"
+    response="$(head -c 2048 "$response_file")"
+    if [[ "$http_status" == "200" && \
+          "$response" == *'"ok":true'* && \
           "$response" == *'"database":true'* && \
           "$response" == *"\"buildSha\":\"$expected_sha\""* ]]; then
+      rm -f -- "$response_file"
       return 0
     fi
     sleep "$HEALTH_INTERVAL_SECONDS"
   done
+  diagnostic="$(printf '%s' "$response" | tr '\r\n' ' ' | cut -c1-600)"
+  echo "STROIOS_DEPLOY_ERROR public_readiness_failed status=${http_status:-000} response=${diagnostic:-empty}" >&2
+  rm -f -- "$response_file"
   return 1
+}
+
+reload_caddy() {
+  docker compose -f "$COMPOSE_FILE" exec -T caddy \
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+  docker compose -f "$COMPOSE_FILE" exec -T caddy \
+    caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+  echo "STROIOS_CADDY_RELOADED"
 }
 
 telegram_probe() {
@@ -431,6 +451,7 @@ rollback() {
       telegram-relay app >&2 || rollback_failed=1
     service_health_check telegram-relay "$ROLLBACK_HEALTH_ATTEMPTS" >&2 || rollback_failed=1
     service_health_check app "$ROLLBACK_HEALTH_ATTEMPTS" >&2 || rollback_failed=1
+    reload_caddy >&2 || rollback_failed=1
     restored_app_container="$(docker compose -f "$COMPOSE_FILE" ps -q app 2>/dev/null)"
     restored_relay_container="$(docker compose -f "$COMPOSE_FILE" ps -q telegram-relay 2>/dev/null)"
     restored_app_image="$(docker inspect --format '{{.Image}}' "$restored_app_container" 2>/dev/null)"
@@ -543,6 +564,7 @@ service_health_check telegram-relay
 docker compose -f "$COMPOSE_FILE" up -d --no-deps --no-build --force-recreate app
 service_health_check app
 readiness_check "$target_commit"
+reload_caddy
 public_readiness_check "$target_commit"
 if telegram_probe; then
   telegram_state="ready"

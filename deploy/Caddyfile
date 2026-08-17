@@ -1,6 +1,13 @@
 {$APP_DOMAIN} {
   encode zstd gzip
-  reverse_proxy app:3000
+  reverse_proxy {
+    dynamic a app 3000 {
+      refresh 5s
+      versions ipv4
+    }
+    lb_try_duration 10s
+    lb_try_interval 250ms
+  }
   header {
     Strict-Transport-Security "max-age=31536000; includeSubDomains"
     X-Frame-Options "DENY"
