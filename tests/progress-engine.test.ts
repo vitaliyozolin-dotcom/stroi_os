@@ -14,7 +14,7 @@ const state = (tasks: ProjectTask[], stageStatus: AppState['stages'][number]['st
   version: 1,
   project: { id: 'p', code: 'P', name: 'Дом', address: '', model: '', area: 100, clientNames: '', contractValue: 0, targetCost: 0, startDate: '2026-08-03', targetDate: '2026-12-01', forecastDate: '2026-12-01', foreman: '', cameraStatus: 'offline' },
   budgetMeta: { version: '1', source: 'test' },
-  stages: [{ id: 's1', order: 1, name: 'Фундамент', shortName: 'Фундамент', status: stageStatus, weight: 25, progress: 99, planStart: '2026-08-03', planEnd: '2026-08-20', forecastEnd: '2026-08-20', responsible: 'Прораб' },
+  stages: [{ id: 's1', order: 1, name: 'Фундамент', shortName: 'Фундамент', status: stageStatus, weight: 25, progress: 99, planStart: '2026-08-03', planEnd: '2026-08-20', forecastEnd: '2026-08-20', responsible: 'Прораб' }],
   budgetLines: [], financeEntries: [], procurement: [], counterparties: [], supplierQuotes: [], leads: [], tasks,
   fieldReports: [], settings: { users: [], notifications: { channels: { email: false, telegram: false, browser: false }, events: { financeApproval: true, supplyRisk: true, qualityRework: true, leadWithoutAction: true, scheduleDelay: true, taskAssigned: true, taskOverdue: true, projectActivity: true } }, dashboardWidgets: [] },
   checkpoints: [], documents: [], decisions: [], activity: [],
