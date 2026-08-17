@@ -356,22 +356,25 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
     const issueDuringActivation = service.issueToken({
       projectId: 'project-pending-b', userId: 'user-pending-b', actorEmail: 'owner@example.test',
     });
-    let issueWaitedForAccountLock = false;
-    for (let attempt = 0; attempt < 100 && !issueWaitedForAccountLock; attempt += 1) {
+    let issueWaitedForActivationLock = false;
+    for (let attempt = 0; attempt < 100 && !issueWaitedForActivationLock; attempt += 1) {
       const waiting = await pool.query(`
         SELECT 1 FROM pg_stat_activity
         WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'
-          AND query LIKE '%SELECT id,password_hash,status,activated_at FROM auth_users%'
+          AND (
+            query LIKE '%SELECT id,password_hash,status,activated_at FROM auth_users%'
+            OR query LIKE '%SELECT state_json, revision FROM project_state%'
+          )
         LIMIT 1
       `);
-      issueWaitedForAccountLock = Boolean(waiting.rowCount);
-      if (!issueWaitedForAccountLock) await new Promise((resolve) => setTimeout(resolve, 10));
+      issueWaitedForActivationLock = Boolean(waiting.rowCount);
+      if (!issueWaitedForActivationLock) await new Promise((resolve) => setTimeout(resolve, 10));
     }
     releaseActivationSession();
     const activations = await activationsPromise;
     const issuedDuringActivation = await issueDuringActivation;
     service.createSession = initialCreateSession;
-    assert.equal(issueWaitedForAccountLock, true);
+    assert.equal(issueWaitedForActivationLock, true);
     assert.equal(issuedDuringActivation.existingAccount, true);
     assert.equal(activations.filter((item) => item.status === 'fulfilled').length, 1);
     assert.equal(activations.filter((item) => item.status === 'rejected').length, 1);
