@@ -1,5 +1,5 @@
 import type { AppState, BudgetLine, ExpenseStatus, StageStatus, TaskPriority, TaskStatus } from './types';
-import { projectProgressTotals } from './progressEngine';
+import { projectProgressTotals } from './progressEngine.ts';
 
 export const acceptedAmountFor = (entry: AppState['financeEntries'][number]) => entry.acceptedAmount ?? (entry.status === 'accepted' || entry.status === 'paid' ? entry.amount : 0);
 export const paidAmountFor = (entry: AppState['financeEntries'][number]) => entry.paidAmount ?? (entry.status === 'paid' ? entry.amount : 0);
