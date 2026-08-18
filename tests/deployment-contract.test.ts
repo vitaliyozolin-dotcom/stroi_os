@@ -26,7 +26,7 @@ test('production images are SHA-addressable and include Telegram modules', () =>
 test('Sites artifact includes every Telegram module imported by its Worker entrypoint', () => {
   const prepare = source('scripts/prepare-sites-build.mjs');
 
-  for (const moduleName of ['bindings', 'commands', 'drafts', 'inbox', 'outbox', 'transport']) {
+  for (const moduleName of ['bindings', 'commands', 'connection', 'drafts', 'inbox', 'outbox', 'rendering', 'transport']) {
     assert.match(
       prepare,
       new RegExp(`sites/telegram/${moduleName}\\.js.*dist/server/telegram/${moduleName}\\.js`),

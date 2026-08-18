@@ -12,6 +12,8 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   const drafts = source('sites/telegram/drafts.js');
   const bindings = source('sites/telegram/bindings.js');
   const commands = source('sites/telegram/commands.js');
+  const connection = source('sites/telegram/connection.js');
+  const rendering = source('sites/telegram/rendering.js');
 
   assert.ok(worker.includes("from './telegram/transport.js'"));
   assert.ok(worker.includes("from './telegram/inbox.js'"));
@@ -19,6 +21,8 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.ok(worker.includes("from './telegram/drafts.js'"));
   assert.ok(worker.includes("from './telegram/bindings.js'"));
   assert.ok(worker.includes("from './telegram/commands.js'"));
+  assert.ok(worker.includes("from './telegram/connection.js'"));
+  assert.ok(worker.includes("from './telegram/rendering.js'"));
   assert.match(worker, /export const flushTelegramOutbox = \(env, limit = 10\) => flushTelegramOutboxModule\(env, limit, ensureSchema\)/);
   assert.doesNotMatch(worker, /const queueTelegramMessage/);
   assert.doesNotMatch(worker, /const readTelegramUpdateStatus/);
@@ -27,6 +31,9 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.doesNotMatch(worker, /INSERT INTO telegram_drafts/);
   assert.doesNotMatch(worker, /SELECT project_id\s+FROM telegram_user_chat_projects/);
   assert.doesNotMatch(worker, /const telegramCommandDistance/);
+  assert.doesNotMatch(worker, /const resolveTelegramConnection/);
+  assert.doesNotMatch(worker, /const renderTaskDraft/);
+  assert.doesNotMatch(worker, /INSERT INTO telegram_chat_candidates/);
   assert.match(transport, /export const telegramSend/);
   assert.match(outbox, /export const telegramDurableSend/);
   assert.match(inbox, /export const claimTelegramUpdate/);
@@ -42,5 +49,9 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.match(commands, /export const commandFromText/);
   assert.match(commands, /export const naturalTelegramCommand/);
   assert.match(commands, /export const parseTelegramExpense/);
+  assert.match(connection, /export const createTelegramConnection/);
+  assert.match(connection, /TELEGRAM_COMMON_CHAT_ID/);
+  assert.match(rendering, /export const renderTaskDraft/);
+  assert.match(rendering, /export const renderExpenseDraft/);
   assert.match(outbox, /WHERE id = \? AND status = \? AND updated_at = \? AND attempts = \?/);
 });

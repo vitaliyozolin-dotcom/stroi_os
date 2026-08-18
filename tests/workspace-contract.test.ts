@@ -130,12 +130,13 @@ test('Telegram webhook is restored safely when the app starts', () => {
 
 test('Telegram explains exactly what is read, drafted, saved or ignored', () => {
   const worker = source('sites/worker.js');
+  const rendering = source('sites/telegram/rendering.js');
 
   assert.match(worker, /command\.name === 'note'/);
   assert.match(worker, /action === 'nc'/);
   assert.match(worker, /state\.fieldReports = \[report/);
   assert.match(worker, /Ничего не записано в ИКИОМА ОС/);
-  assert.match(worker, /Молчание никогда не означает сохранение/);
+  assert.match(rendering, /Молчание никогда не означает сохранение/);
   assert.match(worker, /telegramCommandSuggestion/);
   assert.match(worker, /command: 'note'/);
   assert.match(worker, /naturalTelegramCommand/);
