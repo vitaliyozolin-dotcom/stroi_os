@@ -8,3 +8,4 @@ compose.override.yaml
 .agents
 AGENTS.md
 .sites-runtime/
+docs/architecture/layered-refactoring-plan.md
