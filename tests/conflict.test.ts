@@ -142,3 +142,51 @@ test('keeps a remote addition together with a local addition', () => {
   assert.equal(result.state.documents.length, 1);
   assert.equal(result.state.decisions.length, 1);
 });
+
+test('merges independent task progress without a derived stage conflict', () => {
+  const base = clone();
+  base.stages = [{
+    id: 'foundation', order: 1, name: 'Фундамент', shortName: 'Фундамент', status: 'in_progress',
+    weight: 100, progress: 0, planStart: '2026-08-01', planEnd: '2026-08-20', forecastEnd: '2026-08-20', responsible: 'Прораб',
+  }];
+  base.tasks = [
+    {
+      id: 'task-local', title: 'Первая работа', status: 'todo', priority: 'normal', progressWeight: 25,
+      assigneeId: 'u1', assigneeName: 'Прораб', createdBy: 'Система', createdAt: '2026-08-01T00:00:00Z',
+      updatedAt: '2026-08-01T00:00:00Z', dueDate: '2026-08-10', originalDueDate: '2026-08-10', stageId: 'foundation', rescheduleCount: 0, history: [],
+    },
+    {
+      id: 'task-remote', title: 'Вторая работа', status: 'todo', priority: 'normal', progressWeight: 75,
+      assigneeId: 'u1', assigneeName: 'Прораб', createdBy: 'Система', createdAt: '2026-08-01T00:00:00Z',
+      updatedAt: '2026-08-01T00:00:00Z', dueDate: '2026-08-10', originalDueDate: '2026-08-10', stageId: 'foundation', rescheduleCount: 0, history: [],
+    },
+  ];
+  const local = structuredClone(base);
+  const remote = structuredClone(base);
+  local.tasks[0].status = 'done';
+  local.stages[0].progress = 25;
+  remote.tasks[1].status = 'done';
+  remote.stages[0].progress = 75;
+
+  const result = mergeProjectStates(base, local, remote);
+
+  assert.deepEqual(result.conflicts, []);
+  assert.equal(result.state.tasks.every((current) => current.status === 'done'), true);
+  assert.equal(result.state.stages[0].progress, 100);
+});
+
+test('still reports conflicting source fields on the same stage', () => {
+  const base = clone();
+  base.stages = [{
+    id: 'foundation', order: 1, name: 'Фундамент', shortName: 'Фундамент', status: 'in_progress',
+    weight: 100, progress: 0, planStart: '2026-08-01', planEnd: '2026-08-20', forecastEnd: '2026-08-20', responsible: 'Прораб',
+  }];
+  const local = structuredClone(base);
+  const remote = structuredClone(base);
+  local.stages[0].forecastEnd = '2026-08-22';
+  remote.stages[0].forecastEnd = '2026-08-25';
+
+  const result = mergeProjectStates(base, local, remote);
+
+  assert.deepEqual(result.conflicts, ['stages.foundation']);
+});

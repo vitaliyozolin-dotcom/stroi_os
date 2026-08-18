@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { projectProgressTotals, stageProgressTotals, taskPhysicalProgress } from '../src/progressEngine.ts';
+import { projectProgressTotals, stageProgressTotals, synchronizeDerivedProgress, taskPhysicalProgress } from '../src/progressEngine.ts';
 import type { AppState, ProjectTask } from '../src/types.ts';
 
 const task = (overrides: Partial<ProjectTask> & Record<string, unknown>): ProjectTask => ({
@@ -42,4 +42,18 @@ test('stage progress uses task weights and accepted progress stays zero until st
   assert.deepEqual(stageProgressTotals(current, 's1'), { physical: 55, accepted: 0 });
   assert.deepEqual(projectProgressTotals(current), { physical: 55, accepted: 0 });
   assert.deepEqual(stageProgressTotals(state(current.tasks, 'accepted'), 's1'), { physical: 55, accepted: 100 });
+});
+
+test('synchronization derives every stage from its own active tasks', () => {
+  const current = state([
+    task({ id: 'active', stageId: 's1', status: 'done' }),
+    task({ id: 'canceled', stageId: 's1', status: 'canceled' }),
+    task({ id: 'unassigned', status: 'done' }),
+  ]);
+  current.stages.push({ ...current.stages[0], id: 's2', order: 2, progress: 75, status: 'accepted' });
+
+  const synchronized = synchronizeDerivedProgress(current);
+
+  assert.equal(synchronized.stages.find((stage) => stage.id === 's1')?.progress, 100);
+  assert.equal(synchronized.stages.find((stage) => stage.id === 's2')?.progress, 100);
 });

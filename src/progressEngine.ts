@@ -28,10 +28,18 @@ const taskWeight = (task: ProjectTask) => {
   return Number.isFinite(value) && value > 0 ? value : 1;
 };
 
-export const stageProgressTotals = (state: AppState, stageId: string) => {
-  const stage = state.stages.find((item) => item.id === stageId);
-  if (!stage) return { physical: 0, accepted: 0 };
-  const tasks = state.tasks.filter((task) => task.stageId === stageId && task.status !== 'canceled');
+const tasksByStage = (tasks: ProjectTask[]) => {
+  const grouped = new Map<string, ProjectTask[]>();
+  for (const task of tasks) {
+    if (!task.stageId || task.status === 'canceled') continue;
+    const stageTasks = grouped.get(task.stageId);
+    if (stageTasks) stageTasks.push(task);
+    else grouped.set(task.stageId, [task]);
+  }
+  return grouped;
+};
+
+const progressForStage = (stage: AppState['stages'][number], tasks: ProjectTask[]) => {
   if (!tasks.length) {
     const completed = stage.status === 'accepted' ? 100 : 0;
     return { physical: completed, accepted: completed };
@@ -44,11 +52,19 @@ export const stageProgressTotals = (state: AppState, stageId: string) => {
   };
 };
 
+export const stageProgressTotals = (state: AppState, stageId: string) => {
+  const stage = state.stages.find((item) => item.id === stageId);
+  if (!stage) return { physical: 0, accepted: 0 };
+  const tasks = state.tasks.filter((task) => task.stageId === stageId && task.status !== 'canceled');
+  return progressForStage(stage, tasks);
+};
+
 export const projectProgressTotals = (state: AppState) => {
   const totalWeight = state.stages.reduce((sum, stage) => sum + Math.max(0, Number(stage.weight) || 0), 0);
   if (!totalWeight) return { physical: 0, accepted: 0 };
+  const groupedTasks = tasksByStage(state.tasks);
   const totals = state.stages.reduce((result, stage) => {
-    const stageProgress = stageProgressTotals(state, stage.id);
+    const stageProgress = progressForStage(stage, groupedTasks.get(stage.id) ?? []);
     return {
       physical: result.physical + stage.weight * stageProgress.physical,
       accepted: result.accepted + stage.weight * stageProgress.accepted,
@@ -62,8 +78,9 @@ export const projectProgressTotals = (state: AppState) => {
 
 export const synchronizeDerivedProgress = (state: AppState): AppState => {
   let changed = false;
+  const groupedTasks = tasksByStage(state.tasks);
   const stages = state.stages.map((stage) => {
-    const physical = stageProgressTotals(state, stage.id).physical;
+    const physical = progressForStage(stage, groupedTasks.get(stage.id) ?? []).physical;
     if (stage.progress === physical) return stage;
     changed = true;
     return { ...stage, progress: physical };

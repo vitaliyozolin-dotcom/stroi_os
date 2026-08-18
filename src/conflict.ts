@@ -1,7 +1,7 @@
-import type { AppState } from './types';
+import { synchronizeDerivedProgress } from './progressEngine.ts';
+import type { AppState, Stage } from './types';
 
-type KeyedCollection = 'stages'
-  | 'budgetLines'
+type KeyedCollection = 'budgetLines'
   | 'financeEntries'
   | 'procurement'
   | 'counterparties'
@@ -14,7 +14,6 @@ type KeyedCollection = 'stages'
   | 'decisions';
 
 const keyedCollections: KeyedCollection[] = [
-  'stages',
   'budgetLines',
   'financeEntries',
   'procurement',
@@ -30,6 +29,13 @@ const keyedCollections: KeyedCollection[] = [
 
 const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 
+const equalStage = (left: Stage | undefined, right: Stage | undefined) => {
+  if (!left || !right) return left === right;
+  const { progress: _leftProgress, ...leftSource } = left;
+  const { progress: _rightProgress, ...rightSource } = right;
+  return equal(leftSource, rightSource);
+};
+
 const mergeObject = <T>(path: string, base: T, local: T, remote: T, conflicts: string[]): T => {
   const localChanged = !equal(local, base);
   const remoteChanged = !equal(remote, base);
@@ -43,6 +49,7 @@ const mergeCollection = <T extends { id: string }>(
   local: T[],
   remote: T[],
   conflicts: string[],
+  equalItem: (left: T | undefined, right: T | undefined) => boolean = equal,
 ): T[] => {
   const baseMap = new Map(base.map((item) => [item.id, item]));
   const localMap = new Map(local.map((item) => [item.id, item]));
@@ -57,9 +64,9 @@ const mergeCollection = <T extends { id: string }>(
     const baseItem = baseMap.get(id);
     const localItem = localMap.get(id);
     const remoteItem = remoteMap.get(id);
-    const localChanged = !equal(localItem, baseItem);
-    const remoteChanged = !equal(remoteItem, baseItem);
-    if (localChanged && remoteChanged && !equal(localItem, remoteItem)) conflicts.push(`${name}.${id}`);
+    const localChanged = !equalItem(localItem, baseItem);
+    const remoteChanged = !equalItem(remoteItem, baseItem);
+    if (localChanged && remoteChanged && !equalItem(localItem, remoteItem)) conflicts.push(`${name}.${id}`);
     const chosen = localChanged ? localItem : remoteItem;
     return chosen ? [chosen] : [];
   });
@@ -74,6 +81,7 @@ export const mergeProjectStates = (base: AppState, local: AppState, remote: AppS
     project: mergeObject('project', base.project, local.project, remote.project, conflicts),
     budgetMeta: mergeObject('budgetMeta', base.budgetMeta, local.budgetMeta, remote.budgetMeta, conflicts),
     settings: mergeObject('settings', base.settings, local.settings, remote.settings, conflicts),
+    stages: mergeCollection('stages', base.stages, local.stages, remote.stages, conflicts, equalStage),
     activity: [...local.activity, ...remote.activity]
       .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
@@ -90,5 +98,5 @@ export const mergeProjectStates = (base: AppState, local: AppState, remote: AppS
     );
   }
 
-  return { state, conflicts };
+  return { state: synchronizeDerivedProgress(state), conflicts };
 };
