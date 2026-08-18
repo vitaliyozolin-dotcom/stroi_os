@@ -22,6 +22,7 @@ await Promise.all([
   copyFile(`${projectRoot}sites/lib/upload-admission.js`, `${projectRoot}dist/server/lib/upload-admission.js`),
   copyFile(`${projectRoot}sites/lib/validation.js`, `${projectRoot}dist/server/lib/validation.js`),
   copyFile(`${projectRoot}sites/telegram/bindings.js`, `${projectRoot}dist/server/telegram/bindings.js`),
+  copyFile(`${projectRoot}sites/telegram/commands.js`, `${projectRoot}dist/server/telegram/commands.js`),
   copyFile(`${projectRoot}sites/telegram/drafts.js`, `${projectRoot}dist/server/telegram/drafts.js`),
   copyFile(`${projectRoot}sites/telegram/inbox.js`, `${projectRoot}dist/server/telegram/inbox.js`),
   copyFile(`${projectRoot}sites/telegram/outbox.js`, `${projectRoot}dist/server/telegram/outbox.js`),
