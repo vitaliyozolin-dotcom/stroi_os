@@ -44,7 +44,7 @@ import type { AuthenticatedUser, PageId, UserRole } from './types';
 import { useProjectState, type SyncPhase } from './useProjectState';
 import { createProjectState } from './seed';
 import { isTaskOverdue } from './domain';
-import { clearProjectCache } from './storage';
+import { clearProjectCache } from './projectCache';
 
 const roleLabels: Record<UserRole, string> = {
   management: 'Управление',
@@ -105,6 +105,7 @@ function App() {
     state,
     updateState,
     sync,
+    localCache,
     conflict,
     retry,
     useServerVersion,
@@ -177,7 +178,7 @@ function App() {
       } catch {
         return;
       }
-      clearProjectCache();
+      await clearProjectCache();
       window.location.assign('/login');
     };
     const verifyVisibleSession = () => {
@@ -320,6 +321,12 @@ function App() {
               <span><strong>{syncLabels[sync.phase]}</strong><small>{sync.phase === 'offline' ? 'нажмите повторить' : `рев. ${sync.revision} · ${shortTime(sync.updatedAt)}`}</small></span>
               {sync.phase === 'offline' && <RefreshCw size={14} />}
             </button>
+            {localCache.phase === 'failed' && (
+              <div className="local-cache-alert" role="status" aria-live="assertive" title={localCache.message}>
+                <AlertTriangle size={16} />
+                <span><strong>Локальная копия не сохранена</strong><small>{sync.phase === 'offline' ? 'не закрывайте вкладку' : 'серверная копия работает'}</small></span>
+              </div>
+            )}
             <span className="session-role"><ShieldCheck size={15} /> {roleLabels[role]}</span>
             <button type="button" className="notification-button" aria-label={`Уведомления: ${notificationCount}`} onClick={() => setNotificationsOpen(true)}><Bell size={19} />{notificationCount > 0 && <i />}</button>
             <div className="profile-menu">

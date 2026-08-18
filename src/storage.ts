@@ -1,33 +1,7 @@
 import { seedState } from './seed';
 import { applyKelosiPpr } from './kelosiPpr';
 import type { AppState, UserRole } from './types';
-
-const CACHE_ROOT = 'stroios.work.v17.';
-let identityScope = '';
-
-const scopeHash = (value: string) => {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-};
-
-export const setStorageIdentityScope = (identity: string) => {
-  identityScope = identity ? scopeHash(identity.trim().toLocaleLowerCase('en-US')) : '';
-};
-
-const cachePrefix = () => `${CACHE_ROOT}${identityScope}.project.`;
-const activeProjectKey = () => `${CACHE_ROOT}${identityScope}.active-project`;
-
-export const clearProjectCache = () => {
-  try {
-    Object.keys(window.localStorage).filter((key) => key.startsWith(CACHE_ROOT)).forEach((key) => window.localStorage.removeItem(key));
-  } catch {
-    // Серверная сессия всё равно остаётся источником истины.
-  }
-};
+import { clearProjectCache } from './projectCache';
 
 const redirectAfterAuthenticationFailure = (response: Response) => {
   if (response.status !== 401) return;
@@ -63,13 +37,6 @@ export interface SaveResult {
   updatedBy: string;
   updatedRole: UserRole;
   state?: AppState;
-}
-
-export interface CachedProject {
-  state: AppState;
-  revision: number;
-  dirty: boolean;
-  updatedAt?: string;
 }
 
 export class RevisionConflictError extends Error {
@@ -136,7 +103,7 @@ export const normalizeAppState = (state: AppState): AppState => {
   };
 };
 
-const isAppState = (value: unknown): value is AppState => {
+export const isAppState = (value: unknown): value is AppState => {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<AppState>;
   return candidate.version === 1
@@ -145,35 +112,6 @@ const isAppState = (value: unknown): value is AppState => {
     && Array.isArray(candidate.financeEntries)
     && Array.isArray(candidate.procurement)
     && Array.isArray(candidate.checkpoints);
-};
-
-export const loadCachedProject = (projectId?: string): CachedProject => {
-  if (!identityScope) return { state: cloneSeed(), revision: 0, dirty: false };
-  try {
-    const activeProjectId = projectId ?? window.localStorage.getItem(activeProjectKey()) ?? seedState.project.id;
-    const raw = window.localStorage.getItem(`${cachePrefix()}${activeProjectId}`);
-    if (!raw) return { state: cloneSeed(), revision: 0, dirty: false };
-    const parsed = JSON.parse(raw) as Partial<CachedProject>;
-    if (!isAppState(parsed.state)) return { state: cloneSeed(), revision: 0, dirty: false };
-    return {
-      state: applyKelosiPpr(normalizeAppState(parsed.state)),
-      revision: Number.isInteger(parsed.revision) && Number(parsed.revision) >= 0 ? Number(parsed.revision) : 0,
-      dirty: parsed.dirty === true,
-      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
-    };
-  } catch {
-    return { state: cloneSeed(), revision: 0, dirty: false };
-  }
-};
-
-export const saveCachedProject = (project: CachedProject) => {
-  if (!identityScope) return;
-  try {
-    window.localStorage.setItem(`${cachePrefix()}${project.state.project.id}`, JSON.stringify(project));
-    window.localStorage.setItem(activeProjectKey(), project.state.project.id);
-  } catch {
-    // Сервер остаётся источником истины. Переполнение локального кэша не блокирует работу.
-  }
 };
 
 export const fetchRemoteProjects = async (): Promise<ProjectListItem[]> => {

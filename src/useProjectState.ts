@@ -2,14 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   fetchRemoteProject,
   fetchRemoteProjects,
-  loadCachedProject,
+  normalizeAppState,
   RevisionConflictError,
-  saveCachedProject,
   saveRemoteProject,
-  setStorageIdentityScope,
   type RemoteSnapshot,
   type ProjectListItem,
 } from './storage';
+import {
+  cloneSeedProject,
+  createProjectCache,
+  ProjectCacheError,
+  ProjectCacheWriter,
+  type CachedProject,
+} from './projectCache';
 import { mergeProjectStates } from './conflict';
 import { synchronizeDerivedProgress } from './progressEngine';
 import type { AppState, UserRole } from './types';
@@ -23,13 +28,26 @@ export interface SyncView {
   message?: string;
 }
 
-const errorMessage = (error: unknown) => {
+export interface LocalCacheView {
+  phase: 'idle' | 'saving' | 'saved' | 'failed';
+  message?: string;
+}
+
+const errorMessage = (error: unknown, cachePhase: LocalCacheView['phase']) => {
   if (error instanceof Error && error.message === 'payload_too_large') return 'Данные слишком велики для сохранения. Проверьте вложения.';
+  if (cachePhase === 'failed') return 'Сервер недоступен, локальная копия тоже не сохранена. Не закрывайте вкладку.';
+  if (cachePhase === 'saving') return 'Нет связи с сервером. Локальная копия ещё сохраняется на этом устройстве.';
   return 'Нет связи с сервером. Изменения сохранены на этом устройстве и ждут синхронизации.';
 };
 
+const cacheErrorMessage = (error?: ProjectCacheError) => error?.code === 'quota_exceeded'
+  ? 'Локальная копия не сохранена: в хранилище браузера закончилось место.'
+  : error?.code === 'corrupt'
+    ? 'Локальная копия повреждена и не была загружена.'
+    : 'Локальная копия недоступна в этом браузере.';
+
 export function useProjectState(role: UserRole, actor: string, storageIdentity = '') {
-  const initial = useRef(loadCachedProject());
+  const initial = useRef(cloneSeedProject());
   initial.current.state = synchronizeDerivedProgress(initial.current.state);
   const [state, setState] = useState<AppState>(initial.current.state);
   const [sync, setSync] = useState<SyncView>({
@@ -37,6 +55,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     revision: initial.current.revision,
     updatedAt: initial.current.updatedAt,
   });
+  const [localCache, setLocalCache] = useState<LocalCacheView>({ phase: 'idle' });
   const [conflict, setConflict] = useState<RemoteSnapshot | null>(null);
   const [projects, setProjects] = useState<ProjectListItem[]>([{
     id: initial.current.state.project.id,
@@ -61,9 +80,15 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   const savingRef = useRef(false);
   const conflictRef = useRef<RemoteSnapshot | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+  const cacheWriterRef = useRef<ProjectCacheWriter | null>(null);
+  const cachePhaseRef = useRef<LocalCacheView['phase']>('idle');
   const pendingSummaryRef = useRef('Обновлены данные проекта');
   const flushRef = useRef<() => Promise<void>>(async () => undefined);
   const hydrateRef = useRef<() => Promise<void>>(async () => undefined);
+
+  const queueCache = useCallback((project: CachedProject) => {
+    cacheWriterRef.current?.schedule(project);
+  }, []);
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -88,8 +113,8 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     dirtyRef.current = false;
     setState(normalized);
     setSync({ phase: 'saved', revision: remote.revision, updatedAt: remote.updatedAt });
-    saveCachedProject({ state: normalized, revision: remote.revision, dirty: false, updatedAt: remote.updatedAt });
-  }, []);
+    queueCache({ state: normalized, revision: remote.revision, dirty: false, updatedAt: remote.updatedAt });
+  }, [queueCache]);
 
   flushRef.current = async () => {
     if (!readyRef.current || savingRef.current || conflictRef.current || !dirtyRef.current) return;
@@ -127,7 +152,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
             }
           }
           baseRef.current = serverState;
-          saveCachedProject({
+          queueCache({
             state: stateRef.current,
             revision: result.revision,
             dirty: dirtyRef.current,
@@ -146,7 +171,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
               updatedAtRef.current = error.current.updatedAt;
               dirtyRef.current = true;
               setState(normalizedMerged);
-              saveCachedProject({
+              queueCache({
                 state: normalizedMerged,
                 revision: error.current.revision,
                 dirty: true,
@@ -167,7 +192,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
               phase: 'offline',
               revision: revisionRef.current,
               updatedAt: updatedAtRef.current,
-              message: errorMessage(error),
+              message: errorMessage(error, cachePhaseRef.current),
             });
           }
           break;
@@ -232,38 +257,70 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         phase: 'offline',
         revision: revisionRef.current,
         updatedAt: updatedAtRef.current,
-        message: errorMessage(error),
+        message: errorMessage(error, cachePhaseRef.current),
       });
     }
   };
 
   useEffect(() => {
-    setStorageIdentityScope(storageIdentity);
     if (!storageIdentity) return undefined;
-    const cached = loadCachedProject();
-    const normalizedCached = synchronizeDerivedProgress(cached.state);
-    stateRef.current = normalizedCached;
-    baseRef.current = normalizedCached;
-    revisionRef.current = cached.revision;
-    updatedAtRef.current = cached.updatedAt;
-    dirtyRef.current = cached.dirty;
-    readyRef.current = false;
-    setState(normalizedCached);
-    setProjects([{
-      id: normalizedCached.project.id,
-      code: normalizedCached.project.code,
-      name: normalizedCached.project.name,
-      model: normalizedCached.project.model,
-      area: normalizedCached.project.area,
-      address: normalizedCached.project.address,
-      targetDate: normalizedCached.project.targetDate,
-      revision: cached.revision,
-      updatedAt: cached.updatedAt,
-    }]);
-    setSync({ phase: 'loading', revision: cached.revision, updatedAt: cached.updatedAt });
-    void hydrateRef.current();
+    let active = true;
+    const cache = createProjectCache(storageIdentity, normalizeAppState);
+    const writer = new ProjectCacheWriter(cache, (phase, projectId, error) => {
+      if (!active || projectId !== stateRef.current.project.id) return;
+      cachePhaseRef.current = phase;
+      setLocalCache({ phase, message: phase === 'failed' ? cacheErrorMessage(error) : undefined });
+      setSync((current) => current.phase === 'offline'
+        ? { ...current, message: errorMessage(new Error('network_error'), phase) }
+        : current);
+    });
+    cacheWriterRef.current = writer;
+    cachePhaseRef.current = 'idle';
+    setLocalCache({ phase: 'idle' });
+
+    const initialize = async () => {
+      let cached = cloneSeedProject();
+      try {
+        cached = await cache.load();
+      } catch (error) {
+        const cacheError = error instanceof ProjectCacheError ? error : new ProjectCacheError('unavailable', error);
+        cachePhaseRef.current = 'failed';
+        setLocalCache({ phase: 'failed', message: cacheErrorMessage(cacheError) });
+      }
+      if (!active) return;
+      const normalizedCached = synchronizeDerivedProgress(cached.state);
+      stateRef.current = normalizedCached;
+      baseRef.current = normalizedCached;
+      revisionRef.current = cached.revision;
+      updatedAtRef.current = cached.updatedAt;
+      dirtyRef.current = cached.dirty;
+      readyRef.current = false;
+      setState(normalizedCached);
+      setProjects([{
+        id: normalizedCached.project.id,
+        code: normalizedCached.project.code,
+        name: normalizedCached.project.name,
+        model: normalizedCached.project.model,
+        area: normalizedCached.project.area,
+        address: normalizedCached.project.address,
+        targetDate: normalizedCached.project.targetDate,
+        revision: cached.revision,
+        updatedAt: cached.updatedAt,
+      }]);
+      setSync({ phase: 'loading', revision: cached.revision, updatedAt: cached.updatedAt });
+      await hydrateRef.current();
+    };
+    const flushCache = () => { void writer.flush(); };
+    window.addEventListener('pagehide', flushCache);
+    document.addEventListener('visibilitychange', flushCache);
+    void initialize();
     return () => {
+      active = false;
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+      window.removeEventListener('pagehide', flushCache);
+      document.removeEventListener('visibilitychange', flushCache);
+      void writer.flush();
+      if (cacheWriterRef.current === writer) cacheWriterRef.current = null;
     };
   }, [refreshProjects, storageIdentity]);
 
@@ -276,7 +333,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     stateRef.current = normalized;
     dirtyRef.current = true;
     setState(normalized);
-    saveCachedProject({
+    queueCache({
       state: normalized,
       revision: revisionRef.current,
       dirty: true,
@@ -285,7 +342,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
 
     if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => void flushRef.current(), 650);
-  }, []);
+  }, [queueCache]);
 
   const retry = useCallback(() => {
     if (readyRef.current) void flushRef.current();
@@ -309,17 +366,18 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     setConflict(null);
     dirtyRef.current = true;
     pendingSummaryRef.current = 'Конфликт разрешён: сохранена локальная версия';
-    saveCachedProject({
+    queueCache({
       state: stateRef.current,
       revision: current.revision,
       dirty: true,
       updatedAt: current.updatedAt,
     });
     void flushRef.current();
-  }, []);
+  }, [queueCache]);
 
   const switchProject = useCallback(async (projectId: string) => {
     if (projectId === stateRef.current.project.id) return;
+    await cacheWriterRef.current?.flush();
     if (dirtyRef.current && readyRef.current) await flushRef.current();
     setSync({ phase: 'loading', revision: 0 });
     setConflict(null);
@@ -330,7 +388,17 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
       readyRef.current = true;
       applyRemote(remote);
     } catch {
-      const cached = loadCachedProject(projectId);
+      const cache = createProjectCache(storageIdentity, normalizeAppState);
+      let cached: CachedProject;
+      try {
+        cached = await cache.load(projectId);
+      } catch (error) {
+        const cacheError = error instanceof ProjectCacheError ? error : new ProjectCacheError('unavailable', error);
+        cachePhaseRef.current = 'failed';
+        setLocalCache({ phase: 'failed', message: cacheErrorMessage(cacheError) });
+        setSync((current) => ({ ...current, phase: 'offline', message: 'Не удалось загрузить выбранный проект: локальная копия недоступна.' }));
+        return;
+      }
       if (cached.state.project.id !== projectId) {
         setSync((current) => ({ ...current, phase: 'offline', message: 'Не удалось загрузить выбранный проект.' }));
         return;
@@ -345,7 +413,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
       setState(normalizedCached);
       setSync({ phase: 'offline', revision: cached.revision, updatedAt: cached.updatedAt, message: 'Показана локальная копия проекта.' });
     }
-  }, [applyRemote]);
+  }, [applyRemote, storageIdentity]);
 
   const createProject = useCallback(async (nextState: AppState) => {
     if (dirtyRef.current && readyRef.current) await flushRef.current();
@@ -360,16 +428,17 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     setConflict(null);
     setState(normalized);
     setSync({ phase: 'saving', revision: 0 });
-    saveCachedProject({ state: normalized, revision: 0, dirty: true });
+    queueCache({ state: normalized, revision: 0, dirty: true });
     pendingSummaryRef.current = `Создан проект ${normalized.project.code}`;
     await flushRef.current();
     await refreshProjects();
-  }, [refreshProjects]);
+  }, [queueCache, refreshProjects]);
 
   return {
     state,
     updateState,
     sync,
+    localCache,
     conflict,
     retry,
     useServerVersion,

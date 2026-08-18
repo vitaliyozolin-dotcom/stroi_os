@@ -530,6 +530,34 @@ p {
   cursor: pointer;
 }
 
+.local-cache-alert {
+  display: flex;
+  min-width: 174px;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  color: var(--red);
+  border: 1px solid #f0d3cf;
+  border-radius: 9px;
+  background: var(--red-light);
+}
+
+.local-cache-alert span {
+  display: flex;
+  flex-direction: column;
+}
+
+.local-cache-alert strong {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.local-cache-alert small {
+  color: var(--soft-muted);
+  font-size: 9px;
+  line-height: 1.2;
+}
+
 .spin {
   animation: spin 900ms linear infinite;
 }
