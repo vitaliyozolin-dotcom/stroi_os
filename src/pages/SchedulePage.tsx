@@ -22,7 +22,7 @@ import {
   ShieldCheck,
   UserRound,
 } from 'lucide-react';
-import { formatDate, progressTotals, stageStatusLabel, uid } from '../domain';
+import { formatDate, money, paidAmountFor, progressTotals, stageFinanceTotals, stageStatusLabel, uid } from '../domain';
 import { addDaysKey, mondayOf, projectWeekNumber, projectWeekRange, stageWeekRange } from '../projectWeek';
 import type { AppState, ProjectTask, StageStatus, UserRole } from '../types';
 import { Field, Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
@@ -52,7 +52,6 @@ const taskTemplates: Record<string, string[]> = {
   handover: ['Провести финальный осмотр дома', 'Собрать акты, инструкции и комплект документов', 'Передать объект и зафиксировать итоговую приёмку'],
 };
 
-const money = (value: number) => `${new Intl.NumberFormat('ru-RU').format(Math.round(value || 0))} ₽`;
 const taskDone = (task: ProjectTask) => ['done', 'canceled'].includes(task.status);
 
 export function SchedulePage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
@@ -73,17 +72,9 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
   const openStageTasks = stageTasks.filter((item) => !taskDone(item));
   const unacceptedCheckpoints = checkpoints.filter((item) => item.status !== 'accepted');
   const stageFinance = state.financeEntries.filter((item) => item.stageId === selected.id);
-  const stageExpenses = stageFinance.filter((item) => item.kind === 'expense');
-  const stageIncome = stageFinance.filter((item) => item.kind === 'income');
   const stageProcurement = state.procurement.filter((item) => item.stageId === selected.id);
   const stageDocuments = state.documents.filter((item) => item.stageId === selected.id);
-  const stageBudgetPlan = state.budgetLines.reduce((sum, line) => line.stageIds.includes(selected.id) ? sum + line.plan / Math.max(1, line.stageIds.length) : sum, 0);
-  const stageBudgetForecast = state.budgetLines.reduce((sum, line) => line.stageIds.includes(selected.id) ? sum + line.forecast / Math.max(1, line.stageIds.length) : sum, 0);
-  const stageCommitted = stageExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const stageAccepted = stageExpenses.reduce((sum, item) => sum + Number(item.acceptedAmount || 0), 0);
-  const stagePaid = stageExpenses.reduce((sum, item) => sum + Number(item.paidAmount || 0), 0);
-  const stageBilled = stageIncome.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const stageReceived = stageIncome.reduce((sum, item) => sum + Number(item.paidAmount || 0), 0);
+  const stageFinancialTotals = stageFinanceTotals(state, selected.id);
   const selectedWeeks = stageWeekRange(state.project.startDate, selected.planStart, selected.planEnd);
   const todayKey = new Date().toISOString().slice(0, 10);
   const currentWeek = projectWeekRange(state.project.startDate, todayKey);
@@ -316,13 +307,13 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
           <article className="panel stage-gates">
             <SectionHeader eyebrow="Экономика этапа" title="План, обязательства и факт" action={<CircleDollarSign size={19} />} />
             <div className="stage-facts">
-              <div><CircleDollarSign size={18} /><span><small>План затрат</small><strong>{money(stageBudgetPlan)}</strong></span></div>
-              <div><Clock3 size={18} /><span><small>Прогноз затрат</small><strong>{money(stageBudgetForecast)}</strong></span></div>
-              <div><ListTodo size={18} /><span><small>Обязательства</small><strong>{money(stageCommitted)}</strong></span></div>
-              <div><CheckCircle2 size={18} /><span><small>Принято / оплачено</small><strong>{money(stageAccepted)} / {money(stagePaid)}</strong></span></div>
+              <div><CircleDollarSign size={18} /><span><small>План затрат</small><strong>{money(stageFinancialTotals.plan)}</strong></span></div>
+              <div><Clock3 size={18} /><span><small>Прогноз затрат</small><strong>{money(stageFinancialTotals.forecast)}</strong></span></div>
+              <div><ListTodo size={18} /><span><small>Обязательства</small><strong>{money(stageFinancialTotals.committed)}</strong></span></div>
+              <div><CheckCircle2 size={18} /><span><small>Принято / оплачено</small><strong>{money(stageFinancialTotals.accepted)} / {money(stageFinancialTotals.paid)}</strong></span></div>
             </div>
-            {(stageBilled > 0 || stageReceived > 0) && <div className="dependency-note"><CircleDollarSign size={18} /><span><small>Доход по этапу</small><strong>{money(stageBilled)} начислено · {money(stageReceived)} получено</strong></span></div>}
-            {stageFinance.length ? <div className="gate-list">{stageFinance.slice(0, 5).map((item) => <div key={item.id}><span className={`gate-list__icon gate-list__icon--${item.status === 'paid' ? 'accepted' : 'pending'}`}><CircleDollarSign size={17} /></span><span><strong>{item.description}</strong><small>{item.kind === 'income' ? 'Доход' : 'Расход'} · {money(item.amount)} · оплачено {money(Number(item.paidAmount || 0))}</small></span></div>)}</div> : <div className="locked-gate"><CircleDollarSign size={22} /><p>Финансовые операции этапа появятся здесь после создания обязательств или платежей.</p></div>}
+            {(stageFinancialTotals.billed > 0 || stageFinancialTotals.received > 0) && <div className="dependency-note"><CircleDollarSign size={18} /><span><small>Доход по этапу</small><strong>{money(stageFinancialTotals.billed)} начислено · {money(stageFinancialTotals.received)} получено</strong></span></div>}
+            {stageFinance.length ? <div className="gate-list">{stageFinance.slice(0, 5).map((item) => <div key={item.id}><span className={`gate-list__icon gate-list__icon--${item.status === 'paid' ? 'accepted' : 'pending'}`}><CircleDollarSign size={17} /></span><span><strong>{item.description}</strong><small>{item.kind === 'income' ? 'Доход' : 'Расход'} · {money(item.amount)} · оплачено {money(paidAmountFor(item))}</small></span></div>)}</div> : <div className="locked-gate"><CircleDollarSign size={22} /><p>Финансовые операции этапа появятся здесь после создания обязательств или платежей.</p></div>}
           </article>
 
           <article className="panel stage-gates">

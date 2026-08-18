@@ -58,6 +58,23 @@ export const lineTotals = (state: AppState, line: BudgetLine) => {
   };
 };
 
+export const stageFinanceTotals = (state: AppState, stageId: string) => {
+  const budgetLines = state.budgetLines.filter((line) => line.stageIds.includes(stageId));
+  const entries = state.financeEntries.filter((entry) => entry.stageId === stageId);
+  const expenses = entries.filter((entry) => entry.kind === 'expense');
+  const income = entries.filter((entry) => entry.kind === 'income');
+
+  return {
+    plan: budgetLines.reduce((sum, line) => sum + line.plan / Math.max(1, line.stageIds.length), 0),
+    forecast: budgetLines.reduce((sum, line) => sum + line.forecast / Math.max(1, line.stageIds.length), 0),
+    committed: expenses.reduce((sum, entry) => sum + entry.amount, 0),
+    accepted: expenses.reduce((sum, entry) => sum + acceptedAmountFor(entry), 0),
+    paid: expenses.reduce((sum, entry) => sum + paidAmountFor(entry), 0),
+    billed: income.reduce((sum, entry) => sum + entry.amount, 0),
+    received: income.reduce((sum, entry) => sum + paidAmountFor(entry), 0),
+  };
+};
+
 export const progressTotals = (state: AppState) => projectProgressTotals(state);
 
 export const stageStatusLabel: Record<StageStatus, string> = {
