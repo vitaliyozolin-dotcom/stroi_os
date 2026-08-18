@@ -15,6 +15,7 @@ test('production images are SHA-addressable and include Telegram modules', () =>
   assert.match(dockerfile, /ARG BUILD_SHA=unknown/);
   assert.match(dockerfile, /ENV BUILD_SHA=\$BUILD_SHA/);
   assert.match(dockerfile, /sites\/telegram/);
+  assert.match(dockerfile, /sites\/files/);
   assert.match(compose, /^name: stroios/m);
   assert.match(compose, /STROIOS_APP_IMAGE/);
   assert.match(compose, /STROIOS_RELAY_IMAGE/);
@@ -40,6 +41,17 @@ test('Sites artifact includes Worker request-boundary modules', () => {
     assert.match(
       prepare,
       new RegExp(`sites/lib/${moduleName}\\.js.*dist/server/lib/${moduleName}\\.js`),
+    );
+  }
+});
+
+test('Sites artifact includes Worker file-route modules', () => {
+  const prepare = source('scripts/prepare-sites-build.mjs');
+
+  for (const moduleName of ['response', 'routes']) {
+    assert.match(
+      prepare,
+      new RegExp(`sites/files/${moduleName}\\.js.*dist/server/files/${moduleName}\\.js`),
     );
   }
 });

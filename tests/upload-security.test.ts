@@ -50,6 +50,8 @@ test('documents require extension, compatible MIME and container signature', () 
 
 test('untrusted file endpoints force safe response headers and UI excludes active image types', () => {
   const worker = source('sites/worker.js');
+  const fileRoutes = source('sites/files/routes.js');
+  const fileResponse = source('sites/files/response.js');
   const requestBody = source('sites/lib/request-body.js');
   const uploadAdmission = source('sites/lib/upload-admission.js');
   const quality = source('src/pages/QualityPage.tsx');
@@ -57,22 +59,25 @@ test('untrusted file endpoints force safe response headers and UI excludes activ
 
   assert.match(worker, /from '\.\/lib\/request-body\.js'/);
   assert.match(worker, /from '\.\/lib\/upload-admission\.js'/);
+  assert.match(worker, /from '\.\/files\/routes\.js'/);
   assert.doesNotMatch(worker, /const drainReader =/);
   assert.doesNotMatch(worker, /let activeUploads =/);
-  assert.match(worker, /Content-Security-Policy': "sandbox; default-src 'none'/);
-  assert.match(worker, /Content-Type': inlineMime \|\| 'application\/octet-stream'/);
-  assert.match(worker, /const disposition = inlineMime \? 'inline' : 'attachment'/);
-  assert.match(worker, /mimeType = detectRasterImageType\(await readStreamPrefix\(probe\)\)/);
+  assert.doesNotMatch(worker, /const handleQualityPhotoUpload/);
+  assert.doesNotMatch(worker, /const handleDocumentFile/);
+  assert.match(fileResponse, /Content-Security-Policy': "sandbox; default-src 'none'/);
+  assert.match(fileResponse, /Content-Type': inlineMime \|\| 'application\/octet-stream'/);
+  assert.match(fileResponse, /const disposition = inlineMime \? 'inline' : 'attachment'/);
+  assert.match(fileRoutes, /mimeType = detectRasterImageType\(await readStreamPrefix\(probe\)\)/);
   assert.match(requestBody, /void reader\.cancel\(\)\.catch\(\(\) => undefined\)/);
   assert.match(requestBody, /export const requestWithBodyLimit = \(request, limit\)/);
-  assert.match(worker, /readFormDataLimited\(request, MAX_QUALITY_PHOTO_BYTES \+ MAX_MULTIPART_OVERHEAD_BYTES\)/);
-  assert.match(worker, /readFormDataLimited\(request, MAX_FILE_BYTES \+ MAX_MULTIPART_OVERHEAD_BYTES\)/);
+  assert.match(fileRoutes, /readFormDataLimited\(request, MAX_QUALITY_PHOTO_BYTES \+ MAX_MULTIPART_OVERHEAD_BYTES\)/);
+  assert.match(fileRoutes, /readFormDataLimited\(request, MAX_FILE_BYTES \+ MAX_MULTIPART_OVERHEAD_BYTES\)/);
   assert.match(uploadAdmission, /const MAX_CONCURRENT_UPLOADS = 2/);
-  assert.match(worker, /const releaseUpload = claimUploadAdmission\(\)/);
-  assert.match(worker, /if \(!releaseUpload\) return json\(\{ ok: false, error: 'upload_busy' \}, 429\)/);
+  assert.match(fileRoutes, /const releaseUpload = claimUploadAdmission\(\)/);
+  assert.match(fileRoutes, /if \(!releaseUpload\) return json\(\{ ok: false, error: 'upload_busy' \}, 429\)/);
   assert.doesNotMatch(worker, /request\.(?:json|formData)\(\)/);
-  assert.match(worker, /const mimeType = documentMimeType\(file, prefix\)/);
-  assert.doesNotMatch(worker, /Content-Disposition', `inline;/);
+  assert.match(fileRoutes, /const mimeType = documentMimeType\(file, prefix\)/);
+  assert.doesNotMatch(fileResponse, /Content-Disposition', `inline;/);
   assert.match(quality, /accept="image\/jpeg,image\/png,image\/webp"/);
   assert.doesNotMatch(quality, /accept="image\/\*"/);
   assert.match(quality, /\^data:image\\\/\(\?:jpeg\|png\|webp\);base64,/);
