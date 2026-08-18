@@ -7,6 +7,13 @@ import {
 import { addCalendarDays, addDays, dateKey, isoDate } from './lib/date.js';
 import { json, publicLeadResponse } from './lib/http.js';
 import {
+  readFormDataLimited,
+  readJsonBodyLimited,
+  readStreamPrefix,
+  requestWithBodyLimit,
+} from './lib/request-body.js';
+import { claimUploadAdmission } from './lib/upload-admission.js';
+import {
   clean,
   detectRasterImageType,
   documentMimeType,
@@ -60,7 +67,6 @@ const MAX_QUALITY_PHOTO_BYTES = 12 * 1024 * 1024;
 const MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024;
 const MAX_JSON_BODY_BYTES = 32 * 1024;
 const MAX_TELEGRAM_UPDATE_BYTES = 1024 * 1024;
-const MAX_CONCURRENT_UPLOADS = 2;
 const TELEGRAM_CONFIG_PROJECT_ID = '__integration__:telegram';
 const BATTLE_SCHEMA_VERSION = 17;
 const BATTLE_RESET_KEY = 'battle_v17_reset';
@@ -73,122 +79,10 @@ const PUBLIC_LEAD_BODY_LIMIT = 32 * 1024;
 const TELEGRAM_MUTATION_NOOP = Symbol('telegram_mutation_noop');
 let schemaPromise;
 let battleReadyPromise;
-let activeUploads = 0;
 
 const changes = (result) => Number(result?.meta?.changes ?? result?.changes ?? 0);
 
-const readStreamPrefix = async (stream, limit = 512) => {
-  const reader = stream.getReader();
-  const chunks = [];
-  let size = 0;
-  try {
-    while (size < limit) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
-      const kept = chunk.subarray(0, Math.max(0, limit - size));
-      chunks.push(kept);
-      size += kept.byteLength;
-    }
-  } finally {
-    void reader.cancel().catch(() => undefined);
-  }
-  const prefix = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    prefix.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return prefix;
-};
-
-const drainReader = async (reader) => {
-  try {
-    while (!(await reader.read()).done) { /* Отбрасываем остаток без буферизации. */ }
-  } catch {
-    // Соединение могло закрыться после раннего ответа 413.
-  }
-};
-
-const readJsonBodyLimited = async (request, limit) => {
-  const declared = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > limit) throw new Error('payload_too_large');
-  if (!request.body) throw new Error('invalid_json');
-  const reader = request.body.getReader();
-  const chunks = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
-    size += chunk.byteLength;
-    if (size > limit) {
-      void drainReader(reader);
-      throw new Error('payload_too_large');
-    }
-    chunks.push(chunk);
-  }
-  const body = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return JSON.parse(new TextDecoder().decode(body));
-  } catch {
-    throw new Error('invalid_json');
-  }
-};
-
-export const requestWithBodyLimit = (request, limit) => {
-  const declared = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > limit) throw new Error('payload_too_large');
-  if (!request.body) return request;
-  const reader = request.body.getReader();
-  let size = 0;
-  const body = new ReadableStream({
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (done) return controller.close();
-        const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
-        size += chunk.byteLength;
-        if (size > limit) {
-          void drainReader(reader);
-          controller.error(new Error('payload_too_large'));
-          return;
-        }
-        controller.enqueue(chunk);
-      } catch (error) {
-        controller.error(error);
-      }
-    },
-    cancel() {
-      void drainReader(reader);
-      return undefined;
-    },
-  });
-  return new Request(request.url, {
-    method: request.method,
-    headers: request.headers,
-    body,
-    duplex: 'half',
-  });
-};
-
-const readFormDataLimited = async (request, limit) => requestWithBodyLimit(request, limit).formData();
-
-export const claimUploadAdmission = () => {
-  if (activeUploads >= MAX_CONCURRENT_UPLOADS) return null;
-  activeUploads += 1;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    activeUploads = Math.max(0, activeUploads - 1);
-  };
-};
+export { claimUploadAdmission, requestWithBodyLimit };
 
 const protectedFileHeaders = (filename, fallbackName, { inlineMime = '' } = {}) => {
   const safeName = safeFileName(filename || fallbackName);

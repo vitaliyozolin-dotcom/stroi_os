@@ -33,6 +33,17 @@ test('Sites artifact includes every Telegram module imported by its Worker entry
   }
 });
 
+test('Sites artifact includes Worker request-boundary modules', () => {
+  const prepare = source('scripts/prepare-sites-build.mjs');
+
+  for (const moduleName of ['request-body', 'upload-admission']) {
+    assert.match(
+      prepare,
+      new RegExp(`sites/lib/${moduleName}\\.js.*dist/server/lib/${moduleName}\\.js`),
+    );
+  }
+});
+
 test('runtime initializes schema before listening while readiness itself stays read-only', () => {
   const worker = source('sites/worker.js');
   const server = source('server/index.js');

@@ -50,18 +50,24 @@ test('documents require extension, compatible MIME and container signature', () 
 
 test('untrusted file endpoints force safe response headers and UI excludes active image types', () => {
   const worker = source('sites/worker.js');
+  const requestBody = source('sites/lib/request-body.js');
+  const uploadAdmission = source('sites/lib/upload-admission.js');
   const quality = source('src/pages/QualityPage.tsx');
   const project = source('src/pages/ProjectPage.tsx');
 
+  assert.match(worker, /from '\.\/lib\/request-body\.js'/);
+  assert.match(worker, /from '\.\/lib\/upload-admission\.js'/);
+  assert.doesNotMatch(worker, /const drainReader =/);
+  assert.doesNotMatch(worker, /let activeUploads =/);
   assert.match(worker, /Content-Security-Policy': "sandbox; default-src 'none'/);
   assert.match(worker, /Content-Type': inlineMime \|\| 'application\/octet-stream'/);
   assert.match(worker, /const disposition = inlineMime \? 'inline' : 'attachment'/);
   assert.match(worker, /mimeType = detectRasterImageType\(await readStreamPrefix\(probe\)\)/);
-  assert.match(worker, /void reader\.cancel\(\)\.catch\(\(\) => undefined\)/);
-  assert.match(worker, /const requestWithBodyLimit = \(request, limit\)/);
+  assert.match(requestBody, /void reader\.cancel\(\)\.catch\(\(\) => undefined\)/);
+  assert.match(requestBody, /export const requestWithBodyLimit = \(request, limit\)/);
   assert.match(worker, /readFormDataLimited\(request, MAX_QUALITY_PHOTO_BYTES \+ MAX_MULTIPART_OVERHEAD_BYTES\)/);
   assert.match(worker, /readFormDataLimited\(request, MAX_FILE_BYTES \+ MAX_MULTIPART_OVERHEAD_BYTES\)/);
-  assert.match(worker, /const MAX_CONCURRENT_UPLOADS = 2/);
+  assert.match(uploadAdmission, /const MAX_CONCURRENT_UPLOADS = 2/);
   assert.match(worker, /const releaseUpload = claimUploadAdmission\(\)/);
   assert.match(worker, /if \(!releaseUpload\) return json\(\{ ok: false, error: 'upload_busy' \}, 429\)/);
   assert.doesNotMatch(worker, /request\.(?:json|formData)\(\)/);
@@ -76,10 +82,11 @@ test('untrusted file endpoints force safe response headers and UI excludes activ
 
 test('public lead JSON is streamed through a hard body limit before parsing', () => {
   const worker = source('sites/worker.js');
+  const requestBody = source('sites/lib/request-body.js');
   const handler = worker.slice(worker.indexOf('const handlePublicLead'));
   assert.match(worker, /const PUBLIC_LEAD_BODY_LIMIT = 32 \* 1024/);
-  assert.match(worker, /const readJsonBodyLimited = async \(request, limit\)/);
-  assert.match(worker, /if \(size > limit\)/);
+  assert.match(requestBody, /export const readJsonBodyLimited = async \(request, limit\)/);
+  assert.match(requestBody, /if \(size > limit\)/);
   assert.match(handler, /payload = await readJsonBodyLimited\(request, PUBLIC_LEAD_BODY_LIMIT\)/);
   assert.match(handler, /error\?\.message === 'payload_too_large' \? 413 : 400/);
 });
