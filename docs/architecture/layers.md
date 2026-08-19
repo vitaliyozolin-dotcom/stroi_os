@@ -14,7 +14,9 @@ presentation → application → domain → entities
 
 `src/entities` содержит контракты бизнес-сущностей и `AppState`. Слой не зависит от React, HTTP, браузера, хранилищ или runtime-адаптеров.
 
-Публичная точка входа слоя — `src/entities/index.ts`. Внутреннее ядро, domain/sync и их тесты импортируют сущности непосредственно через неё. Presentation временно использует `src/types.ts`, где рядом с совместимыми реэкспортами остаётся UI-тип `PageId`; фасад будет удалён после миграции этих потребителей.
+Публичная точка входа сущностей — `src/entities/index.ts`; её используют core, domain/sync, presentation и тесты. UI-контракт `PageId` принадлежит `src/presentation/navigation.ts`. Совместимый фасад `src/types.ts` удалён после миграции всех потребителей.
+
+Первый чистый domain-срез находится в `src/domain/finance.ts` и доступен через `src/domain/index.ts`. Старый `src/domain.ts` временно сохраняет совместимые реэкспорты вместе с presentation-утилитами.
 
 ## Правила миграции
 

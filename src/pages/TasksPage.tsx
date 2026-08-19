@@ -33,12 +33,12 @@ import {
 import type {
   AppState,
   AuthenticatedUser,
-  PageId,
   ProjectTask,
   TaskPriority,
   TaskStatus,
   UserRole,
-} from '../types';
+} from '../entities/index';
+import type { PageId } from '../presentation/navigation';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 
 type TaskScope = 'all' | 'mine' | 'today' | 'overdue' | 'review' | 'done';

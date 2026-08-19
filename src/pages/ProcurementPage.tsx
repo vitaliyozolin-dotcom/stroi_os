@@ -14,7 +14,7 @@ import {
   Warehouse,
 } from 'lucide-react';
 import { formatDate, money, uid } from '../domain';
-import type { AppState, ProcurementStatus, UserRole } from '../types';
+import type { AppState, ProcurementStatus, UserRole } from '../entities/index';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';
 

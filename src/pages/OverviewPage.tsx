@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { financeTotals, formatDate, formatDateTime, isTaskOverdue, paidAmountFor, progressTotals, shortMoney, stageStatusLabel, taskStatusLabel } from '../domain';
-import type { AppState, DashboardWidget, PageId, UserRole } from '../types';
+import type { AppState, DashboardWidget, UserRole } from '../entities/index';
+import type { PageId } from '../presentation/navigation';
 import { MetricCard, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 
 const startOfWeek = (date: Date) => {

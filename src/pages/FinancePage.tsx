@@ -13,7 +13,8 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { acceptedAmountFor, financeTotals, formatDate, lineTotals, money, paidAmountFor, shortMoney, uid } from '../domain';
-import type { AppState, ExpenseStatus, FinanceEntry, PageId, ProjectDocument } from '../types';
+import type { AppState, ExpenseStatus, FinanceEntry, ProjectDocument } from '../entities/index';
+import type { PageId } from '../presentation/navigation';
 import { Field, MetricCard, Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';
 

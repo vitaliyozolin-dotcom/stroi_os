@@ -19,7 +19,8 @@ import {
   UsersRound,
 } from 'lucide-react';
 import { formatDate, formatDateTime, uid } from '../domain';
-import type { AppState, AuthenticatedUser, PageId, ProjectDocument } from '../types';
+import type { AppState, AuthenticatedUser, ProjectDocument } from '../entities/index';
+import type { PageId } from '../presentation/navigation';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 
 const categoryLabels: Record<NonNullable<ProjectDocument['category']>, string> = {

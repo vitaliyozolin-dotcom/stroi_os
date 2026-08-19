@@ -13,7 +13,7 @@ import {
   UsersRound,
 } from 'lucide-react';
 import { formatDateTime, money, shortMoney, uid } from '../domain';
-import type { AppState, Lead, LeadSource, LeadStage } from '../types';
+import type { AppState, Lead, LeadSource, LeadStage } from '../entities/index';
 import { Field, MetricCard, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 
 const stageOrder: LeadStage[] = ['new', 'qualified', 'site_visit', 'estimate', 'negotiation', 'won', 'lost'];

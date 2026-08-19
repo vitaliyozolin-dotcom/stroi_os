@@ -15,7 +15,7 @@ import {
   Truck,
 } from 'lucide-react';
 import { acceptedAmountFor, formatDate, money, paidAmountFor } from '../domain';
-import type { AppState, ExpenseStatus, ProcurementStatus, StageStatus } from '../types';
+import type { AppState, ExpenseStatus, ProcurementStatus, StageStatus } from '../entities/index';
 import { Modal, StatusBadge } from './Ui';
 
 const stageLabels: Record<StageStatus, string> = {

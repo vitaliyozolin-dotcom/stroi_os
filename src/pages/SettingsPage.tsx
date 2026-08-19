@@ -18,7 +18,7 @@ import {
   UserCog,
 } from 'lucide-react';
 import { formatDateTime, uid } from '../domain';
-import type { AppState, DashboardWidget, NotificationSettings, SystemUser, UserRole } from '../types';
+import type { AppState, DashboardWidget, NotificationSettings, SystemUser, UserRole } from '../entities/index';
 import type { RemoteSnapshot } from '../storage';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 

@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { formatDateTime, uid } from '../domain';
 import { photoStandard } from '../seed';
-import type { AppState, CheckpointStatus, EvidencePhoto, UserRole } from '../types';
+import type { AppState, CheckpointStatus, EvidencePhoto, UserRole } from '../entities/index';
 import { ProgressBar, StatusBadge } from '../components/Ui';
 
 const checkpointLabels: Record<CheckpointStatus, string> = {

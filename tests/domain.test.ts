@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { stageFinanceTotals } from '../src/domain.ts';
+import { stageFinanceTotals } from '../src/domain/index.ts';
 import { seedState } from '../src/seed.ts';
 import type { AppState, FinanceEntry } from '../src/entities/index.ts';
 

@@ -3,7 +3,7 @@ import { Building2, FileCheck2, Plus, Search, ShieldCheck, Truck, UsersRound } f
 import { CounterpartyModal } from '../components/CounterpartyModal';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 import { money, uid } from '../domain';
-import type { AppState, CounterpartyProfile, CounterpartyStatus, CounterpartyType, ProjectDocument } from '../types';
+import type { AppState, CounterpartyProfile, CounterpartyStatus, CounterpartyType, ProjectDocument } from '../entities/index';
 
 const typeLabels: Record<CounterpartyType, string> = { contractor: 'Подрядчик', supplier: 'Поставщик', service: 'Сервис', client: 'Заказчик' };
 const emptyProfile = (): CounterpartyProfile => ({ id: '', name: '', type: 'contractor', status: 'probation', specialty: '', contactName: '', phone: '', email: '', inn: '', kpp: '', ogrn: '', legalName: '', legalAddress: '', bankName: '', bik: '', settlementAccount: '', correspondentAccount: '', internalOwner: '', paymentTerms: '', warrantyTerms: '', serviceRegion: '', notes: '', tags: [] });

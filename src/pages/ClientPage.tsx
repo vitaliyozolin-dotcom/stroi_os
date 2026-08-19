@@ -20,7 +20,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { financeTotals, formatDate, formatDateTime, money, progressTotals, uid } from '../domain';
-import type { AppState } from '../types';
+import type { AppState } from '../entities/index';
 import { Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 
 export function ClientPage({ state, onChange }: { state: AppState; onChange: (next: AppState) => void }) {

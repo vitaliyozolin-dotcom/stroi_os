@@ -10,17 +10,6 @@ const entityFiles = readdirSync(new URL('../src/entities/', import.meta.url), { 
 
 const importSpecifier = /^\s*(?:import|export)\s+(?:type\s+)?(?:[^'"\n]*?\sfrom\s+)?['"]([^'"]+)['"]/gm;
 
-const migratedCoreConsumers = [
-  'src/conflict.ts',
-  'src/domain.ts',
-  'src/kelosiPpr.ts',
-  'src/progressEngine.ts',
-  'src/projectCache.ts',
-  'src/seed.ts',
-  'src/storage.ts',
-  'src/useProjectState.ts',
-];
-
 test('entities depend only on other files inside the entities layer', () => {
   for (const file of entityFiles) {
     const contents = source(`src/entities/${file}`);
@@ -32,7 +21,7 @@ test('entities depend only on other files inside the entities layer', () => {
   }
 });
 
-test('entity consumers use the public entrypoint or the compatibility facade', () => {
+test('entity consumers use public layer entrypoints', () => {
   const rootEntries = readdirSync(new URL('../src/', import.meta.url), { withFileTypes: true });
   const pending = rootEntries
     .filter((entry) => entry.isDirectory() && entry.name !== 'entities')
@@ -54,15 +43,29 @@ test('entity consumers use the public entrypoint or the compatibility facade', (
   for (const file of files) {
     const contents = source(file);
     assert.doesNotMatch(contents, /from\s+['"][^'"]*entities\/(?!index(?:['"]|\.ts['"]))[^'"]+['"]/, `${file} bypasses the entities entrypoint`);
+    assert.equal(contents.includes("from './types'") || contents.includes("from './types.ts'") || contents.includes("from '../types'") || contents.includes("from '../types.ts'"), false, `${file} imports the removed compatibility facade`);
   }
 
-  assert.match(source('src/types.ts'), /export type \* from ['"]\.\/entities\/index['"]/);
 });
 
-test('migrated core consumers no longer depend on the compatibility facade', () => {
-  for (const file of migratedCoreConsumers) {
-    const contents = source(file);
-    assert.equal(contents.includes("from './types'") || contents.includes("from './types.ts'"), false, `${file} imports the compatibility facade`);
-    assert.ok(contents.includes("from './entities/index'") || contents.includes("from './entities/index.ts'"), `${file} does not use the entities entrypoint`);
+test('navigation types belong to presentation, not entities', () => {
+  assert.ok(source('src/presentation/navigation.ts').includes('export type PageId ='));
+  for (const file of entityFiles) {
+    assert.equal(source(`src/entities/${file}`).includes('PageId'), false, `${file} contains a presentation type`);
+  }
+});
+
+test('domain slices depend only on entities and their own files', () => {
+  const domainFiles = readdirSync(new URL('../src/domain/', import.meta.url), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.ts'))
+    .map((entry) => entry.name);
+
+  for (const file of domainFiles) {
+    const contents = source(`src/domain/${file}`);
+    const specifiers = [...contents.matchAll(importSpecifier)].map((match) => match[1]);
+    assert.ok(
+      specifiers.every((specifier) => specifier.startsWith('./') || specifier === '../entities/index'),
+      `${file} imports a dependency outside domain or entities`,
+    );
   }
 });

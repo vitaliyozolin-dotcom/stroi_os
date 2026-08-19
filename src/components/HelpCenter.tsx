@@ -4,7 +4,7 @@ import {
   HelpCircle, ListTodo, Megaphone, MessageSquareWarning, PackageSearch, Send, Settings2,
   ShieldCheck, X,
 } from 'lucide-react';
-import type { PageId } from '../types';
+import type { PageId } from '../presentation/navigation';
 import { Field, Modal } from './Ui';
 
 type TourStep = { page?: PageId; selector: string; title: string; text: string; openProjects?: boolean };

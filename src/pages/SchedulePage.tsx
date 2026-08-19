@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { formatDate, money, paidAmountFor, progressTotals, stageFinanceTotals, stageStatusLabel, uid } from '../domain';
 import { addDaysKey, mondayOf, projectWeekNumber, projectWeekRange, stageWeekRange } from '../projectWeek';
-import type { AppState, ProjectTask, StageStatus, UserRole } from '../types';
+import type { AppState, ProjectTask, StageStatus, UserRole } from '../entities/index';
 import { Field, Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';
 
