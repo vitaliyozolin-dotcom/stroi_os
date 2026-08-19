@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { stageFinanceTotals } from '../src/domain.ts';
 import { seedState } from '../src/seed.ts';
-import type { AppState, FinanceEntry } from '../src/types.ts';
+import type { AppState, FinanceEntry } from '../src/entities/index.ts';
 
 const entry = (overrides: Partial<FinanceEntry> & Pick<FinanceEntry, 'id' | 'kind' | 'status' | 'amount'>): FinanceEntry => ({
   date: '2026-08-18',

@@ -1,4 +1,4 @@
-import type { AppState, ProjectTask } from './types';
+import type { AppState, ProjectTask } from './entities/index';
 
 type RuntimeProgressTask = ProjectTask & {
   progressWeight?: number;

@@ -17,7 +17,7 @@ import {
 } from './projectCache';
 import { mergeProjectStates } from './conflict';
 import { synchronizeDerivedProgress } from './progressEngine';
-import type { AppState, UserRole } from './types';
+import type { AppState, UserRole } from './entities/index';
 
 export type SyncPhase = 'loading' | 'saved' | 'saving' | 'offline' | 'conflict';
 

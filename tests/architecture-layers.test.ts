@@ -10,6 +10,17 @@ const entityFiles = readdirSync(new URL('../src/entities/', import.meta.url), { 
 
 const importSpecifier = /^\s*(?:import|export)\s+(?:type\s+)?(?:[^'"\n]*?\sfrom\s+)?['"]([^'"]+)['"]/gm;
 
+const migratedCoreConsumers = [
+  'src/conflict.ts',
+  'src/domain.ts',
+  'src/kelosiPpr.ts',
+  'src/progressEngine.ts',
+  'src/projectCache.ts',
+  'src/seed.ts',
+  'src/storage.ts',
+  'src/useProjectState.ts',
+];
+
 test('entities depend only on other files inside the entities layer', () => {
   for (const file of entityFiles) {
     const contents = source(`src/entities/${file}`);
@@ -46,4 +57,12 @@ test('entity consumers use the public entrypoint or the compatibility facade', (
   }
 
   assert.match(source('src/types.ts'), /export type \* from ['"]\.\/entities\/index['"]/);
+});
+
+test('migrated core consumers no longer depend on the compatibility facade', () => {
+  for (const file of migratedCoreConsumers) {
+    const contents = source(file);
+    assert.equal(contents.includes("from './types'") || contents.includes("from './types.ts'"), false, `${file} imports the compatibility facade`);
+    assert.ok(contents.includes("from './entities/index'") || contents.includes("from './entities/index.ts'"), `${file} does not use the entities entrypoint`);
+  }
 });

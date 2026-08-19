@@ -1,6 +1,6 @@
 import { seedState } from './seed';
 import { applyKelosiPpr } from './kelosiPpr';
-import type { AppState, UserRole } from './types';
+import type { AppState, UserRole } from './entities/index';
 import { clearProjectCache } from './projectCache';
 
 const redirectAfterAuthenticationFailure = (response: Response) => {

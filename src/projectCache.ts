@@ -1,6 +1,6 @@
 import { applyKelosiPpr } from './kelosiPpr.ts';
 import { seedState } from './seed.ts';
-import type { AppState } from './types.ts';
+import type { AppState } from './entities/index.ts';
 
 const CACHE_ROOT = 'stroios.work.v17.';
 const DATABASE_NAME = 'stroios-work-v17';

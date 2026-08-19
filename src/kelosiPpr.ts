@@ -1,4 +1,4 @@
-import type { AppState, Stage } from './types';
+import type { AppState, Stage } from './entities/index';
 
 const IMPORT_MARKER = 'ppr-kelosi-2026-08-17-v2-exact';
 const PREVIOUS_IMPORT_MARKER = 'ppr-kelosi-2026-08-17-v1';

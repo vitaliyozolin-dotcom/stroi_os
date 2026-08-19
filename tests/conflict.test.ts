@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mergeProjectStates } from '../src/conflict.ts';
-import type { AppState } from '../src/types.ts';
+import type { AppState } from '../src/entities/index.ts';
 
 const clone = (): AppState => ({
   version: 1,

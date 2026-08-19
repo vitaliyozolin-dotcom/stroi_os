@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { projectProgressTotals, stageProgressTotals, synchronizeDerivedProgress, taskPhysicalProgress } from '../src/progressEngine.ts';
-import type { AppState, ProjectTask } from '../src/types.ts';
+import type { AppState, ProjectTask } from '../src/entities/index.ts';
 
 const task = (overrides: Partial<ProjectTask> & Record<string, unknown>): ProjectTask => ({
   id: String(overrides.id || Math.random()), title: 'Работа', status: 'todo', priority: 'normal',

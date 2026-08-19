@@ -1,5 +1,5 @@
 import { synchronizeDerivedProgress } from './progressEngine.ts';
-import type { AppState, Stage } from './types';
+import type { AppState, Stage } from './entities/index';
 
 type KeyedCollection = 'budgetLines'
   | 'financeEntries'

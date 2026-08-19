@@ -1,4 +1,4 @@
-import type { AppState, BudgetLine, Stage, SystemUser } from './types';
+import type { AppState, BudgetLine, Stage, SystemUser } from './entities/index';
 import { uid } from './domain.ts';
 
 const DAY_MS = 86_400_000;
