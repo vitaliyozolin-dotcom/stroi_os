@@ -90,6 +90,9 @@ test('deploy builds exact Git content, persists image pointers and rolls back si
   assert.match(deploy, /public_readiness_check "\$target_commit"/);
   assert.match(deploy, /reload_caddy/);
   assert.match(deploy, /caddy validate --config \/etc\/caddy\/Caddyfile/);
+  assert.match(deploy, /STROIOS_DEPLOY_ERROR service_health_failed service=\$service status=\$\{status:-missing\}/);
+  assert.match(deploy, /docker inspect --format '\{\{json \.State\.Health\}\}' "\$container"/);
+  assert.match(deploy, /logs --no-color --tail=120 "\$service"/);
   assert.match(deploy, /STROIOS_DEPLOY_ERROR internal_readiness_failed/);
   assert.match(deploy, /STROIOS_DEPLOY_ERROR public_readiness_failed status=/);
   assert.match(deploy, /INFRA_APPROVAL_FILE="\/var\/lib\/stroios-deploy\/approved-infra\.sha256"/);

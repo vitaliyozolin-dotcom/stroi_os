@@ -254,6 +254,11 @@ service_health_check() {
     fi
     sleep "$HEALTH_INTERVAL_SECONDS"
   done
+  echo "STROIOS_DEPLOY_ERROR service_health_failed service=$service status=${status:-missing}" >&2
+  if [[ -n "${container:-}" ]]; then
+    docker inspect --format '{{json .State.Health}}' "$container" >&2 2>/dev/null || true
+  fi
+  docker compose -f "$COMPOSE_FILE" logs --no-color --tail=120 "$service" >&2 2>/dev/null || true
   return 1
 }
 
