@@ -17,6 +17,8 @@ COPY --from=build /app/dist/client ./dist/client
 COPY --from=build /app/server ./server
 COPY --from=build /app/sites/worker.js ./sites/worker.js
 COPY --from=build /app/sites/access-control.js ./sites/access-control.js
+COPY --from=build /app/sites/company-os-export.js ./sites/company-os-export.js
+COPY --from=build /app/sites/company-os-investor-export.js ./sites/company-os-investor-export.js
 COPY --from=build /app/sites/files ./sites/files
 COPY --from=build /app/sites/telegram ./sites/telegram
 USER node
