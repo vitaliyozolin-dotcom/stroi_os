@@ -69,3 +69,24 @@ test('domain slices depend only on entities and their own files', () => {
     );
   }
 });
+
+test('business pages persist project changes through StateChange sinks', () => {
+  const pages = [
+    'TasksPage.tsx',
+    'QualityPage.tsx',
+    'FinancePage.tsx',
+    'ProcurementPage.tsx',
+    'SchedulePage.tsx',
+    'ProjectPage.tsx',
+    'CounterpartiesPage.tsx',
+    'MarketingPage.tsx',
+    'ClientPage.tsx',
+    'SettingsPage.tsx',
+  ];
+
+  for (const page of pages) {
+    const contents = source(`src/pages/${page}`);
+    assert.doesNotMatch(contents, /\bonChange\(\{\s*\.\.\.state/, `${page} writes AppState directly`);
+    assert.match(contents, /commitStateChange|createPageStateSink/, `${page} bypasses StateChange metadata`);
+  }
+});

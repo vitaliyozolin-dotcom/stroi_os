@@ -1,3 +1,5 @@
+import { createMutationContext, createPageStateSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Building2,
@@ -72,6 +74,7 @@ export function ProjectPage({
   onChange: (next: AppState) => void;
   onNavigate: (page: PageId, entityId?: string) => void;
 }) {
+  const saveChange = createPageStateSink(state, { action: 'document_updated', summary: 'Обновлены документы проекта' }, createMutationContext(session.name, systemClock, runtimeIdGenerator), onChange);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<'all' | NonNullable<ProjectDocument['category']>>('all');
   const [showUpload, setShowUpload] = useState(false);
@@ -156,7 +159,7 @@ export function ProjectPage({
         uploadedAt: body.file.uploadedAt,
         uploadedBy: session.name,
       };
-      onChange({
+      saveChange({
         ...state,
         documents: [document, ...state.documents],
         activity: [{

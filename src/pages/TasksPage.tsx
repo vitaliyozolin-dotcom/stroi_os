@@ -30,7 +30,7 @@ import {
   taskStatusLabel,
   uid,
 } from '../domain';
-import { changeTaskStatus } from '../domain/index';
+import { addTaskComment, changeTaskStatus, saveTask as saveTaskChange } from '../domain/index';
 import { commitStateChange, createMutationContext, type StateChangeSink } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import type {
@@ -161,12 +161,6 @@ export function TasksPage({
 
   const selected = visibleTasks.find((task) => task.id === selectedId) ?? null;
 
-  const recordActivity = (nextTasks: ProjectTask[], text: string, tone: 'neutral' | 'positive' | 'warning' = 'neutral') => onChange({
-    ...state,
-    tasks: nextTasks,
-    activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text, tone }, ...state.activity],
-  });
-
   const openCreate = () => {
     if (role !== 'management') return;
     setEditingId(null);
@@ -224,7 +218,7 @@ export function TasksPage({
         rescheduleCount: 0,
         history: [{ id: uid('task-history'), timestamp, actor, kind: 'created', text: `Создал задачу и назначил ${assignee.name}` }],
       };
-      recordActivity([task, ...state.tasks], `Создана задача «${task.title}» · ответственный ${assignee.name}`);
+      commitStateChange(saveTaskChange(state, { task, isNew: true }, createMutationContext(actor, systemClock, runtimeIdGenerator)), onChange);
     } else {
       const previous = state.tasks.find((task) => task.id === editingId);
       if (!previous) return;
@@ -250,7 +244,7 @@ export function TasksPage({
         rescheduleCount: previous.rescheduleCount + (previous.dueDate !== form.dueDate ? 1 : 0),
         history: [...changes, ...previous.history],
       };
-      recordActivity(state.tasks.map((item) => item.id === task.id ? task : item), `Обновлена задача «${task.title}»`);
+      commitStateChange(saveTaskChange(state, { task, isNew: false }, createMutationContext(actor, systemClock, runtimeIdGenerator)), onChange);
     }
     setShowForm(false);
     setEditingId(null);
@@ -269,13 +263,7 @@ export function TasksPage({
   const addComment = (event: FormEvent) => {
     event.preventDefault();
     if (!selected || !comment.trim()) return;
-    const timestamp = new Date().toISOString();
-    const updated = {
-      ...selected,
-      updatedAt: timestamp,
-      history: [{ id: uid('task-history'), timestamp, actor, kind: 'comment' as const, text: comment.trim() }, ...selected.history],
-    };
-    recordActivity(state.tasks.map((task) => task.id === selected.id ? updated : task), `Добавлен комментарий к задаче «${selected.title}»`);
+    commitStateChange(addTaskComment(state, { taskId: selected.id, text: comment.trim() }, createMutationContext(actor, systemClock, runtimeIdGenerator)), onChange);
     setComment('');
   };
 

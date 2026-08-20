@@ -1,3 +1,5 @@
+import { createMutationContext, createPageStateSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
@@ -55,6 +57,7 @@ const taskTemplates: Record<string, string[]> = {
 const taskDone = (task: ProjectTask) => ['done', 'canceled'].includes(task.status);
 
 export function SchedulePage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
+  const saveChange = createPageStateSink(state, { action: 'schedule_updated', summary: 'Обновлён график проекта' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
   const defaultStage = state.stages.find((stage) => ['in_progress', 'rework', 'awaiting_inspection', 'blocked'].includes(stage.status)) ?? state.stages[0];
   const [selectedId, setSelectedId] = useState(defaultStage?.id ?? '');
   const [counterpartyId, setCounterpartyId] = useState<string | null>(null);
@@ -125,7 +128,7 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
     if (!dateForm.planStart || dateForm.planEnd < dateForm.planStart || dateForm.forecastEnd < dateForm.planStart) return;
     const dependency = state.stages.find((stage) => stage.id === dateForm.dependencyId);
     const responsible = state.counterparties.find((item) => item.id === dateForm.responsibleId);
-    onChange({
+    saveChange({
       ...state,
       stages: state.stages.map((stage) => stage.id === selected.id ? {
         ...stage,
@@ -175,7 +178,7 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
       if (status === 'accepted' && index === acceptedIndex + 1 && stage.status === 'not_ready') return { ...stage, status: 'ready' as StageStatus };
       return stage;
     });
-    onChange({
+    saveChange({
       ...state,
       stages: nextStages,
       tasks: status === 'in_progress' && selected.status === 'ready' ? buildTasksForStage() : state.tasks,
@@ -184,7 +187,7 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
   };
 
   const clearBlocker = () => {
-    onChange({
+    saveChange({
       ...state,
       stages: state.stages.map((stage) => stage.id === selected.id ? { ...stage, blocker: undefined } : stage),
       activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `Устранено препятствие: ${selected.shortName}`, tone: 'positive' }, ...state.activity],

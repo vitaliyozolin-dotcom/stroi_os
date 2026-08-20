@@ -1,3 +1,5 @@
+import { createMutationContext, createPageStateSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
@@ -43,6 +45,7 @@ const dateAfterDays = (days: number) => {
 };
 
 export function ProcurementPage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
+  const saveChange = createPageStateSink(state, { action: 'procurement_updated', summary: 'Обновлено снабжение проекта' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
   const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState<'active' | 'all' | 'risk'>('active');
   const [statusFilter, setStatusFilter] = useState<ProcurementStatus | null>(null);
@@ -77,7 +80,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
     if (!form.item.trim() || quantity <= 0) return;
     const supplier = state.counterparties.find((item) => item.id === form.supplierId);
     const budgetLine = state.budgetLines.find((item) => item.stageIds.includes(form.stageId));
-    onChange({
+    saveChange({
       ...state,
       procurement: [{ id: uid('supply'), stageId: form.stageId, budgetLineId: budgetLine?.id, item: form.item.trim(), quantity, unit: form.unit, neededBy: form.neededBy, status: 'need', budget: budget || 0, supplier: supplier?.name ?? 'Не выбран', supplierId: supplier?.id, owner: form.owner.trim() || actor }, ...state.procurement],
       activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `Создана потребность: ${form.item.trim()}`, tone: 'neutral' }, ...state.activity],
@@ -91,7 +94,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
     if (!current) return;
     const nextStatus = statusOrder[Math.min(statusOrder.indexOf(current.status) + 1, statusOrder.length - 1)];
     const today = new Date().toISOString().slice(0, 10);
-    onChange({
+    saveChange({
       ...state,
       procurement: state.procurement.map((item) => item.id === id ? {
         ...item,
@@ -109,7 +112,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
   const selectQuote = (quoteId: string) => {
     const quote = state.supplierQuotes.find((item) => item.id === quoteId);
     if (!quote || !selected) return;
-    onChange({
+    saveChange({
       ...state,
       supplierQuotes: state.supplierQuotes.map((item) => item.procurementItemId === selected.id ? { ...item, status: item.id === quoteId ? 'selected' : 'rejected' } : item),
       procurement: state.procurement.map((item) => item.id === selected.id ? { ...item, supplier: quote.supplier, supplierId: quote.supplierId ?? state.counterparties.find((profile) => profile.name === quote.supplier)?.id, budget: quote.amount, status: item.status === 'need' ? 'rfq' : item.status } : item),
@@ -124,7 +127,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
     const amount = Number(quoteForm.amount);
     const deliveryDays = Number(quoteForm.deliveryDays);
     if (!procurementItem || !supplier || amount <= 0 || deliveryDays < 0 || !quoteForm.paymentTerms.trim()) return;
-    onChange({
+    saveChange({
       ...state,
       supplierQuotes: [{
         id: uid('quote'),

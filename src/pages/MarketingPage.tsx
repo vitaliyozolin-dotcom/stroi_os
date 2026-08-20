@@ -1,3 +1,5 @@
+import { createMutationContext, createPageStateSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   ArrowRight,
@@ -56,6 +58,7 @@ const stageTone = (stage: LeadStage): 'neutral' | 'positive' | 'warning' | 'dang
 };
 
 export function MarketingPage({ state, actor, focusId, onChange }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
+  const saveChange = createPageStateSink(state, { action: 'lead_updated', summary: 'Обновлена воронка продаж' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
   const importedProjects = useRef(new Set<string>());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -68,7 +71,7 @@ export function MarketingPage({ state, actor, focusId, onChange }: { state: AppS
     void fetch('/api/leads?projectId=ikioma-sales', { cache: 'no-store' }).then((response) => response.json()).then((body: { leads?: Array<{ id: string; created_at: string; name: string; phone: string; email?: string; source?: string; message?: string }> }) => {
       const incoming = (body.leads ?? []).filter((item) => !state.leads.some((lead) => lead.id === item.id)).map((item): Lead => ({ id: item.id, createdAt: item.created_at, name: item.name, phone: item.phone, email: item.email || undefined, source: (Object.hasOwn(sourceLabels, item.source ?? '') ? item.source : 'website') as LeadSource, stage: 'new', nextAction: 'Позвонить и квалифицировать заявку', owner: actor, notes: item.message || undefined }));
       if (!incoming.length) return;
-      onChange({ ...state, leads: [...incoming, ...state.leads], activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor: 'ИКИОМА ОС', text: `Из формы сайта получено заявок: ${incoming.length}`, tone: 'neutral' }, ...state.activity] });
+      saveChange({ ...state, leads: [...incoming, ...state.leads], activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor: 'ИКИОМА ОС', text: `Из формы сайта получено заявок: ${incoming.length}`, tone: 'neutral' }, ...state.activity] });
     }).catch(() => undefined);
   }, [state.project.id]);
 
@@ -106,7 +109,7 @@ export function MarketingPage({ state, actor, focusId, onChange }: { state: AppS
       owner: form.owner.trim() || actor,
       notes: form.notes.trim() || undefined,
     };
-    onChange({
+    saveChange({
       ...state,
       leads: [lead, ...state.leads],
       activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `Новая заявка: ${lead.name} · ${sourceLabels[lead.source]}`, tone: 'neutral' }, ...state.activity],
@@ -118,7 +121,7 @@ export function MarketingPage({ state, actor, focusId, onChange }: { state: AppS
   const updateLead = (leadId: string, patch: Partial<Lead>, eventText?: string) => {
     const current = state.leads.find((lead) => lead.id === leadId);
     if (!current) return;
-    onChange({
+    saveChange({
       ...state,
       leads: state.leads.map((lead) => lead.id === leadId ? { ...lead, ...patch } : lead),
       activity: eventText ? [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: eventText, tone: patch.stage === 'won' ? 'positive' : 'neutral' }, ...state.activity] : state.activity,

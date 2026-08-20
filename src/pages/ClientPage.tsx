@@ -1,3 +1,5 @@
+import { createMutationContext, createPageStateSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
   ArrowRight,
@@ -24,6 +26,7 @@ import type { AppState } from '../entities/index';
 import { Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 
 export function ClientPage({ state, onChange }: { state: AppState; onChange: (next: AppState) => void }) {
+  const saveChange = createPageStateSink(state, { action: 'client_decision_updated', summary: 'Обновлено решение клиента' }, createMutationContext(state.project.clientNames, systemClock, runtimeIdGenerator), onChange);
   const progress = progressTotals(state);
   const finance = financeTotals(state);
   const current = state.stages.find((stage) => ['in_progress', 'awaiting_inspection', 'rework', 'blocked'].includes(stage.status)) ?? state.stages[0];
@@ -53,7 +56,7 @@ export function ClientPage({ state, onChange }: { state: AppState; onChange: (ne
 
   const decide = () => {
     if (!activeDecision) return;
-    onChange({
+    saveChange({
       ...state,
       decisions: state.decisions.map((item) => item.id === activeDecision.id ? { ...item, status: 'decided', choice } : item),
       activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor: state.project.clientNames, text: `Решение клиента: ${activeDecision.title} — ${choice}`, tone: 'positive' }, ...state.activity],

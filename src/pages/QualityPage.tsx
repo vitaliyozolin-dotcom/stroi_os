@@ -90,7 +90,11 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
 
   const updateCheckpoint = (patch: Partial<typeof selected>, activityText?: string, tone: 'neutral' | 'positive' | 'warning' = 'neutral') => {
     if (!activityText) {
-      onChange({ ...state, checkpoints: state.checkpoints.map((item) => item.id === selected.id ? { ...item, ...patch } : item) });
+      commitStateChange(changeCheckpoint(
+        state,
+        { checkpointId: selected.id, patch, summary: `Обновлена контрольная точка «${selected.title}»`, recordActivity: false },
+        createMutationContext(actor, systemClock, runtimeIdGenerator),
+      ), onChange);
       return;
     }
     commitStateChange(changeCheckpoint(

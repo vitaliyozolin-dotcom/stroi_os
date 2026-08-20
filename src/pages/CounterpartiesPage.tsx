@@ -1,3 +1,5 @@
+import { createMutationContext, createPageStateSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Building2, FileCheck2, Plus, Search, ShieldCheck, Truck, UsersRound } from 'lucide-react';
 import { CounterpartyModal } from '../components/CounterpartyModal';
@@ -9,6 +11,7 @@ const typeLabels: Record<CounterpartyType, string> = { contractor: 'Подряд
 const emptyProfile = (): CounterpartyProfile => ({ id: '', name: '', type: 'contractor', status: 'probation', specialty: '', contactName: '', phone: '', email: '', inn: '', kpp: '', ogrn: '', legalName: '', legalAddress: '', bankName: '', bik: '', settlementAccount: '', correspondentAccount: '', internalOwner: '', paymentTerms: '', warrantyTerms: '', serviceRegion: '', notes: '', tags: [] });
 
 export function CounterpartiesPage({ state, actor, focusId, onChange }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
+  const saveChange = createPageStateSink(state, { action: 'counterparty_updated', summary: 'Обновлены контрагенты проекта' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
   const [filter, setFilter] = useState<'all' | CounterpartyType>('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -33,7 +36,7 @@ export function CounterpartiesPage({ state, actor, focusId, onChange }: { state:
     if (!editing?.name.trim()) return;
     const profile: CounterpartyProfile = { ...editing, id: editing.id || uid('counterparty'), name: editing.name.trim(), specialty: editing.specialty?.trim(), contactName: editing.contactName?.trim(), phone: editing.phone?.trim(), email: editing.email?.trim(), inn: editing.inn?.trim(), kpp: editing.kpp?.trim(), ogrn: editing.ogrn?.trim(), legalName: editing.legalName?.trim(), legalAddress: editing.legalAddress?.trim(), bankName: editing.bankName?.trim(), bik: editing.bik?.trim(), settlementAccount: editing.settlementAccount?.trim(), correspondentAccount: editing.correspondentAccount?.trim(), internalOwner: editing.internalOwner?.trim(), paymentTerms: editing.paymentTerms?.trim(), warrantyTerms: editing.warrantyTerms?.trim(), serviceRegion: editing.serviceRegion?.trim(), notes: editing.notes?.trim(), tags: editing.tags?.map((tag) => tag.trim()).filter(Boolean) };
     const exists = state.counterparties.some((item) => item.id === profile.id);
-    onChange({ ...state, counterparties: exists ? state.counterparties.map((item) => item.id === profile.id ? profile : item) : [profile, ...state.counterparties], activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `${exists ? 'Обновлена' : 'Создана'} карточка контрагента ${profile.name}`, tone: 'neutral' }, ...state.activity] });
+    saveChange({ ...state, counterparties: exists ? state.counterparties.map((item) => item.id === profile.id ? profile : item) : [profile, ...state.counterparties], activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `${exists ? 'Обновлена' : 'Создана'} карточка контрагента ${profile.name}`, tone: 'neutral' }, ...state.activity] });
     setEditing(null);
     setSelectedId(profile.id);
   };
@@ -43,7 +46,7 @@ export function CounterpartiesPage({ state, actor, focusId, onChange }: { state:
     if (!documentFor || !documentForm.name.trim()) return;
     const now = new Date().toISOString();
     const document: ProjectDocument = { id: uid('document'), name: documentForm.name.trim(), type: documentForm.category, category: documentForm.category, number: documentForm.number.trim() || undefined, documentDate: documentForm.documentDate, updatedAt: now, clientVisible: false, status: documentForm.status, direction: documentForm.direction, counterpartyId: documentFor, receivedAt: documentForm.direction === 'incoming' ? now : undefined, sentAt: documentForm.direction === 'outgoing' ? now : undefined, signedAt: documentForm.status === 'signed' ? now : undefined, storageLocation: documentForm.storageLocation.trim() || undefined };
-    onChange({ ...state, documents: [document, ...state.documents], activity: [{ id: uid('activity'), timestamp: now, actor, text: `Добавлен документ ${document.name}`, tone: 'neutral' }, ...state.activity] });
+    saveChange({ ...state, documents: [document, ...state.documents], activity: [{ id: uid('activity'), timestamp: now, actor, text: `Добавлен документ ${document.name}`, tone: 'neutral' }, ...state.activity] });
     setDocumentFor(null);
     setDocumentForm({ name: '', category: 'contract', number: '', documentDate: new Date().toISOString().slice(0, 10), status: 'draft', direction: 'incoming', storageLocation: '' });
   };

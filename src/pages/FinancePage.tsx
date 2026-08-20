@@ -1,3 +1,5 @@
+import { createMutationContext, createPageStateSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   ArrowDownLeft,
@@ -25,6 +27,7 @@ const statusLabels: Record<ExpenseStatus, string> = {
 };
 
 export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId) => void }) {
+  const saveChange = createPageStateSink(state, { action: 'finance_updated', summary: 'Обновлены финансы проекта' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
   const totals = financeTotals(state);
   const [showForm, setShowForm] = useState(false);
   const [formKind, setFormKind] = useState<'expense' | 'income'>('expense');
@@ -87,7 +90,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
         tone: 'neutral',
       }, ...state.activity],
     };
-    onChange(next);
+    saveChange(next);
     setShowForm(false);
     setForm({ ...form, amount: '', counterpartyId: '', description: '' });
   };
@@ -129,7 +132,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
       return { ...item, status: paidAmount >= item.amount ? 'paid' as ExpenseStatus : item.status, paidAmount, paidAt: actionForm.date, paymentDocument: actionForm.document.trim() || undefined };
     });
     const document: ProjectDocument | null = actionForm.document.trim() ? { id: uid('document'), name: actionForm.document.trim(), type: actionKind === 'accept' ? 'Акт / приёмка' : 'Платёжный документ', category: actionKind === 'accept' ? 'act' : 'other', documentDate: actionForm.date, updatedAt: now, clientVisible: false, status: 'current', direction: actionKind === 'accept' ? 'incoming' : 'outgoing', counterpartyId: entry.counterpartyId, stageId: entry.stageId, financeEntryId: entry.id, receivedAt: actionKind === 'accept' ? now : undefined, sentAt: actionKind === 'accept' ? undefined : now, storageLocation: `ИКИОМА ОС / ${state.project.code} / Финансы` } : null;
-    onChange({ ...state, financeEntries, documents: document ? [document, ...state.documents] : state.documents, activity: [{ id: uid('activity'), timestamp: now, actor, text, tone: actionKind === 'accept' ? 'neutral' : 'positive' }, ...state.activity] });
+    saveChange({ ...state, financeEntries, documents: document ? [document, ...state.documents] : state.documents, activity: [{ id: uid('activity'), timestamp: now, actor, text, tone: actionKind === 'accept' ? 'neutral' : 'positive' }, ...state.activity] });
     setActionEntryId(null);
   };
 
@@ -145,7 +148,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
     const forecast = Number(lineForm.forecast);
     if (!editingLineId || plan < 0 || forecast < 0 || !lineForm.source.trim()) return;
     const line = state.budgetLines.find((item) => item.id === editingLineId);
-    onChange({ ...state, budgetLines: state.budgetLines.map((item) => item.id === editingLineId ? { ...item, plan, forecast } : item), budgetMeta: { ...state.budgetMeta, version: lineForm.version.trim() || state.budgetMeta.version, source: lineForm.source.trim(), importedAt: new Date().toISOString() }, activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `Обновлена статья сметы ${line?.name ?? ''}: план ${money(plan)}`, tone: 'neutral' }, ...state.activity] });
+    saveChange({ ...state, budgetLines: state.budgetLines.map((item) => item.id === editingLineId ? { ...item, plan, forecast } : item), budgetMeta: { ...state.budgetMeta, version: lineForm.version.trim() || state.budgetMeta.version, source: lineForm.source.trim(), importedAt: new Date().toISOString() }, activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `Обновлена статья сметы ${line?.name ?? ''}: план ${money(plan)}`, tone: 'neutral' }, ...state.activity] });
     setEditingLineId(null);
   };
 

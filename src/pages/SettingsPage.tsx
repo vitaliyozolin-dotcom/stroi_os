@@ -1,3 +1,5 @@
+import { createMutationContext, createPageStateSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useState, type FormEvent } from 'react';
 import {
   BellRing,
@@ -87,6 +89,7 @@ function Toggle({ checked, onChange, label, disabled = false }: { checked: boole
 }
 
 export function SettingsPage({ state, actor, canManageAccess, onChange, onServerSnapshot }: { state: AppState; actor: string; canManageAccess: boolean; onChange: (next: AppState) => void; onServerSnapshot: (snapshot: RemoteSnapshot) => void }) {
+  const saveChange = createPageStateSink(state, { action: 'settings_updated', summary: 'Обновлены настройки проекта' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
   const [tab, setTab] = useState<SettingsTab>('access');
   const [showInvite, setShowInvite] = useState(false);
   const [invite, setInvite] = useState({ name: '', email: '', role: 'foreman' as UserRole, telegram: '' });
@@ -176,7 +179,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     void refreshAccess();
   }, [tab, state.project.id, state.settings.users.length]);
 
-  const saveSettings = (settings: AppState['settings'], text: string) => onChange({
+  const saveSettings = (settings: AppState['settings'], text: string) => saveChange({
     ...state,
     settings,
     activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text, tone: 'neutral' }, ...state.activity],

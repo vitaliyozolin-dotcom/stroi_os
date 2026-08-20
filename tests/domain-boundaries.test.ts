@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { isTaskClosed, isTaskOverdue, normalizeAppStateWithFallback } from '../src/domain/index.ts';
+import { addTaskComment, changeCheckpoint, changeProjectState, isTaskClosed, isTaskOverdue, normalizeAppStateWithFallback } from '../src/domain/index.ts';
 import type { AppState } from '../src/entities/index.ts';
 import { seedState } from '../src/seed.ts';
 
@@ -36,4 +36,54 @@ test('legacy root files are compatibility facades, not parallel implementations'
   assert.match(source('src/progressEngine.ts'), /from '\.\/domain\/progress\.ts'/);
   assert.match(source('src/conflict.ts'), /from '\.\/domain\/merge\.ts'/);
   assert.doesNotMatch(source('src/domain.ts'), /new Intl\.|Date\.now\(|Math\.random\(/);
+});
+
+test('task mutations produce auditable StateChange without mutating the source state', () => {
+  const state = structuredClone(seedState);
+  state.tasks.push({ id: 'task-1', title: 'Проверить работу', status: 'todo', priority: 'normal', assigneeId: 'u1', assigneeName: 'Прораб', createdBy: 'Прораб', createdAt: '2026-08-20T09:00:00.000Z', updatedAt: '2026-08-20T09:00:00.000Z', dueDate: '2026-08-20', originalDueDate: '2026-08-20', rescheduleCount: 0, history: [] });
+  const task = structuredClone(state.tasks[0]);
+  const before = structuredClone(state);
+  const context = { actor: 'Проверяющий', timestamp: '2026-08-20T12:00:00.000Z', nextId: (prefix: string) => `${prefix}-test` };
+
+  const comment = addTaskComment(state, { taskId: task.id, text: 'Проверить узел' }, context);
+
+  assert.deepEqual(state, before);
+  assert.equal(comment.action, 'task_comment_added');
+  assert.equal(comment.state.tasks[0].history[0].text, 'Проверить узел');
+  assert.equal(comment.state.activity[0].actor, 'Проверяющий');
+});
+
+test('generic project changes preserve supplied payload and expose audit metadata', () => {
+  const state = structuredClone(seedState);
+  const context = { actor: 'Менеджер', timestamp: '2026-08-20T12:00:00.000Z', nextId: (prefix: string) => `${prefix}-test` };
+  const settings = { ...state.settings, dashboardWidgets: [] };
+
+  const change = changeProjectState(state, {
+    patch: { settings },
+    action: 'settings_updated',
+    summary: 'Обновлены настройки',
+  }, context);
+
+  assert.equal(change.action, 'settings_updated');
+  assert.deepEqual(change.state.settings.dashboardWidgets, []);
+  assert.equal(change.state.activity[0].text, 'Обновлены настройки');
+  assert.notEqual(change.state, state);
+});
+
+test('checkpoint draft changes can remain quiet while still carrying save metadata', () => {
+  const state = structuredClone(seedState);
+  state.checkpoints.push({ id: 'checkpoint-1', stageId: 'stage-1', title: 'Армирование', zone: 'Фундамент', status: 'pending', requiredShots: [], photos: [], assignee: 'Прораб', reviewer: 'Виталий', clientVisible: false });
+  const checkpoint = state.checkpoints[0];
+  const context = { actor: 'Прораб', timestamp: '2026-08-20T12:00:00.000Z', nextId: (prefix: string) => `${prefix}-test` };
+
+  const change = changeCheckpoint(state, {
+    checkpointId: checkpoint.id,
+    patch: { note: 'Черновик замера' },
+    summary: 'Обновлена контрольная точка',
+    recordActivity: false,
+  }, context);
+
+  assert.equal(change.summary, 'Обновлена контрольная точка');
+  assert.deepEqual(change.state.activity, state.activity);
+  assert.equal(change.state.checkpoints[0].note, 'Черновик замера');
 });

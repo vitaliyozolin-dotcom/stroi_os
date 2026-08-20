@@ -15,4 +15,4 @@ export {
 } from './progress.ts';
 export { isTaskClosed, isTaskOverdue } from './tasks.ts';
 export type { ChangeMetadata, MutationContext, StateChange } from './change.ts';
-export { changeCheckpoint, changeTaskStatus } from './mutations.ts';
+export { addTaskComment, changeCheckpoint, changeProjectState, changeTaskStatus, saveTask } from './mutations.ts';
