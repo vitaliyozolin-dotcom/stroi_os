@@ -5,6 +5,7 @@ import { extname, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import worker, { flushTelegramOutbox, initializeBattleRuntime } from '../sites/worker.js';
 import { handleCompanyOsExport } from '../sites/company-os-export.js';
+import { handleCompanyOsInvestorExport } from '../sites/company-os-investor-export.js';
 import { FileBucket } from './file-bucket.js';
 import { PostgresDatabase } from './postgres.js';
 import { isPublicRoute } from './public-routes.js';
@@ -292,6 +293,9 @@ const server = createServer(async (incoming, outgoing) => {
 
     if (url.pathname === '/api/company-os/export') {
       return writeResponse(outgoing, await handleCompanyOsExport(request, env));
+    }
+    if (url.pathname === '/api/company-os/investor-export') {
+      return writeResponse(outgoing, await handleCompanyOsInvestorExport(request, env));
     }
 
     if (url.pathname === '/login' && request.method === 'GET') {
