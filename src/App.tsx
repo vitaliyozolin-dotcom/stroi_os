@@ -96,6 +96,7 @@ const shortTime = (value?: string) => {
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toLocaleUpperCase('ru');
 
 function App() {
+  const todayKey = new Date().toISOString().slice(0, 10);
   const [role, setRole] = useState<UserRole>('client');
   const [page, setPage] = useState<PageId>('overview');
   const [session, setSession] = useState<AuthenticatedUser | null>(null);
@@ -204,13 +205,13 @@ function App() {
   }, [role]);
 
   const notificationCount = useMemo(() => {
-    const overdue = role === 'client' ? 0 : state.tasks.filter((task) => isTaskOverdue(task)).length;
+    const overdue = role === 'client' ? 0 : state.tasks.filter((task) => isTaskOverdue(task, todayKey)).length;
     const quality = state.checkpoints.filter((item) => item.status === 'rework').length;
     const supply = role === 'client' ? 0 : state.procurement.filter((item) => item.risk).length;
     const schedule = role === 'client' ? 0 : state.stages.filter((item) => ['blocked', 'rework', 'awaiting_inspection'].includes(item.status)).length;
     const leads = role === 'management' ? state.leads.filter((item) => item.stage === 'new').length : 0;
     return overdue + quality + supply + schedule + leads;
-  }, [role, state.checkpoints, state.leads, state.procurement, state.stages, state.tasks]);
+  }, [role, state.checkpoints, state.leads, state.procurement, state.stages, state.tasks, todayKey]);
 
   const navigate = (nextPage: PageId, entityId?: string) => {
     setProfileOpen(false);
@@ -282,7 +283,7 @@ function App() {
               <button type="button" key={item.id} data-tour={`nav-${item.id}`} className={page === item.id ? 'active' : ''} onClick={() => navigate(item.id)} title={item.label}>
                 <Icon size={19} /><span>{item.label}</span>
                 {item.id === 'quality' && state.checkpoints.some((checkpoint) => checkpoint.status === 'rework') && <i className="nav-alert" />}
-                {item.id === 'tasks' && state.tasks.some((task) => isTaskOverdue(task)) && <i className="nav-alert" />}
+                {item.id === 'tasks' && state.tasks.some((task) => isTaskOverdue(task, todayKey)) && <i className="nav-alert" />}
               </button>
             );
           })}
@@ -368,7 +369,7 @@ function App() {
       {notificationsOpen && (
         <Modal title="Центр уведомлений" subtitle="Каждое событие открывает конкретную задачу, этап, закупку или карточку." onClose={() => setNotificationsOpen(false)}>
           <div className="notification-list">
-            {role !== 'client' && state.tasks.filter((task) => isTaskOverdue(task)).slice(0, 3).map((task) => <button type="button" key={task.id} onClick={() => { setNotificationsOpen(false); navigate('tasks', task.id); }}><span><ListTodo size={18} /></span><div><strong>{task.title}</strong><small>{task.assigneeName} · срок {new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(new Date(task.dueDate))}</small></div><StatusBadge label="Просрочено" tone="danger" /></button>)}
+            {role !== 'client' && state.tasks.filter((task) => isTaskOverdue(task, todayKey)).slice(0, 3).map((task) => <button type="button" key={task.id} onClick={() => { setNotificationsOpen(false); navigate('tasks', task.id); }}><span><ListTodo size={18} /></span><div><strong>{task.title}</strong><small>{task.assigneeName} · срок {new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(new Date(task.dueDate))}</small></div><StatusBadge label="Просрочено" tone="danger" /></button>)}
             {state.checkpoints.filter((item) => item.status === 'rework').map((item) => <button type="button" key={item.id} onClick={() => { setNotificationsOpen(false); navigate('quality', item.id); }}><span><AlertTriangle size={18} /></span><div><strong>{item.title}</strong><small>Контроль качества · требуется доработка</small></div><StatusBadge label="Важно" tone="danger" /></button>)}
             {role !== 'client' && state.stages.filter((item) => ['blocked', 'rework', 'awaiting_inspection'].includes(item.status)).map((item) => <button type="button" key={item.id} onClick={() => { setNotificationsOpen(false); navigate('schedule', item.id); }}><span><CalendarRange size={18} /></span><div><strong>{item.name}</strong><small>{item.status === 'blocked' ? item.blocker ?? 'Этап заблокирован' : item.status === 'rework' ? 'Этап возвращён на доработку' : 'Этап ожидает приёмки'}</small></div><StatusBadge label={item.status === 'awaiting_inspection' ? 'Проверить' : 'График'} tone={item.status === 'awaiting_inspection' ? 'blue' : 'danger'} /></button>)}
             {role !== 'client' && state.procurement.filter((item) => item.risk).map((item) => <button type="button" key={item.id} onClick={() => { setNotificationsOpen(false); navigate('procurement', item.id); }}><span><PackageSearch size={18} /></span><div><strong>{item.item}</strong><small>{item.risk}</small></div><StatusBadge label="Риск" tone="warning" /></button>)}

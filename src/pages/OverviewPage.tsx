@@ -45,10 +45,11 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
   const reviewCount = state.checkpoints.filter((item) => item.status === 'in_review').length;
   const reworkCount = state.checkpoints.filter((item) => item.status === 'rework').length;
   const riskySupply = state.procurement.filter((item) => item.risk);
+  const todayKey = new Date().toISOString().slice(0, 10);
   const activeTasks = state.tasks
     .filter((task) => !['done', 'canceled'].includes(task.status))
-    .sort((a, b) => Number(isTaskOverdue(b)) - Number(isTaskOverdue(a)) || a.dueDate.localeCompare(b.dueDate));
-  const overdueTaskCount = activeTasks.filter((task) => isTaskOverdue(task)).length;
+    .sort((a, b) => Number(isTaskOverdue(b, todayKey)) - Number(isTaskOverdue(a, todayKey)) || a.dueDate.localeCompare(b.dueDate));
+  const overdueTaskCount = activeTasks.filter((task) => isTaskOverdue(task, todayKey)).length;
   const nextDecision = state.decisions.find((item) => item.status === 'waiting');
   const margin = state.project.contractValue - finance.forecast;
   const marginPercent = state.project.contractValue > 0 ? Math.round(margin / state.project.contractValue * 100) : null;
@@ -298,10 +299,10 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
         />
         <div className="overview-task-list">
           {activeTasks.slice(0, 3).map((task) => (
-            <button type="button" key={task.id} className={isTaskOverdue(task) ? 'overview-task overview-task--overdue' : 'overview-task'} onClick={() => onNavigate('tasks')}>
+            <button type="button" key={task.id} className={isTaskOverdue(task, todayKey) ? 'overview-task overview-task--overdue' : 'overview-task'} onClick={() => onNavigate('tasks')}>
               <span><ListTodo size={17} /></span>
               <div><strong>{task.title}</strong><small>{task.assigneeName} · {taskStatusLabel[task.status]}</small></div>
-              <div><small>{isTaskOverdue(task) ? 'Просрочено' : 'Срок'}</small><strong>{formatDate(task.dueDate)}</strong></div>
+              <div><small>{isTaskOverdue(task, todayKey) ? 'Просрочено' : 'Срок'}</small><strong>{formatDate(task.dueDate)}</strong></div>
               <ChevronRight size={16} />
             </button>
           ))}

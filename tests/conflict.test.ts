@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mergeProjectStates } from '../src/conflict.ts';
+import { mergeProjectStates } from '../src/domain/index.ts';
 import type { AppState } from '../src/entities/index.ts';
 
 const clone = (): AppState => ({

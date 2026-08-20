@@ -15,8 +15,7 @@ import {
   ProjectCacheWriter,
   type CachedProject,
 } from './projectCache';
-import { mergeProjectStates } from './conflict';
-import { synchronizeDerivedProgress } from './progressEngine';
+import { mergeProjectStates, synchronizeDerivedProgress } from './domain/index';
 import type { AppState, UserRole } from './entities/index';
 
 export type SyncPhase = 'loading' | 'saved' | 'saving' | 'offline' | 'conflict';

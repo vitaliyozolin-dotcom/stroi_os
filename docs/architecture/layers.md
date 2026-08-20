@@ -16,7 +16,7 @@ presentation → application → domain → entities
 
 Публичная точка входа сущностей — `src/entities/index.ts`; её используют core, domain/sync, presentation и тесты. UI-контракт `PageId` принадлежит `src/presentation/navigation.ts`. Совместимый фасад `src/types.ts` удалён после миграции всех потребителей.
 
-Первый чистый domain-срез находится в `src/domain/finance.ts` и доступен через `src/domain/index.ts`. Старый `src/domain.ts` временно сохраняет совместимые реэкспорты вместе с presentation-утилитами.
+Чистый domain-слой содержит финансовые расчёты, task/progress-правила, three-way merge и нормализацию состояния. Публичная точка входа — `src/domain/index.ts`. Форматирование и подписи статусов находятся в `src/presentation`, runtime-генератор идентификаторов — в `src/infrastructure`. Старые `src/domain.ts`, `src/progressEngine.ts` и `src/conflict.ts` временно сохраняются только как совместимые фасады.
 
 ## Правила миграции
 
