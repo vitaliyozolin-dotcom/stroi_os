@@ -1,0 +1,52 @@
+name: Company OS Export Smoke
+on:
+  workflow_run:
+    workflows: ["Deploy Timeweb Production"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "41 6 * * *"
+permissions:
+  contents: read
+jobs:
+  smoke:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify production readiness
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          health_code="$(curl --silent --show-error --location --max-time 20 --output "$RUNNER_TEMP/health.json" --write-out '%{http_code}' https://stroios.online/api/health)"
+          [[ "$health_code" == "200" ]] || {
+            echo "Health returned $health_code" >&2
+            cat "$RUNNER_TEMP/health.json" >&2 || true
+            exit 1
+          }
+          python3 - "$RUNNER_TEMP/health.json" <<'PY'
+          import json, sys
+          value = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert value.get('ok') is True, value
+          print('production health: ok')
+          PY
+
+      - name: Verify protected Company OS routes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for path in export investor-export; do
+            code="$(curl --silent --show-error --location --max-time 20 --output "$RUNNER_TEMP/$path.json" --write-out '%{http_code}' "https://stroios.online/api/company-os/$path")"
+            [[ "$code" == "401" ]] || {
+              echo "/api/company-os/$path returned $code instead of protected 401" >&2
+              cat "$RUNNER_TEMP/$path.json" >&2 || true
+              exit 1
+            }
+            python3 - "$RUNNER_TEMP/$path.json" <<'PY'
+          import json, sys
+          value = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert value.get('error') == 'company_os_auth_required', value
+          PY
+          done
+          echo "Company OS production exports: present and protected"
