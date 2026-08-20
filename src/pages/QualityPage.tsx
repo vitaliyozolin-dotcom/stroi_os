@@ -20,7 +20,10 @@ import {
   UserRound,
   ZoomIn,
 } from 'lucide-react';
-import { formatDateTime, uid } from '../domain';
+import { formatDateTime } from '../domain';
+import { changeCheckpoint } from '../domain/index';
+import { commitStateChange, createMutationContext, type StateChangeSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { photoStandard } from '../seed';
 import type { AppState, CheckpointStatus, EvidencePhoto, UserRole } from '../entities/index';
 import { ProgressBar, StatusBadge } from '../components/Ui';
@@ -41,7 +44,7 @@ const checkpointTone = (status: CheckpointStatus): 'neutral' | 'positive' | 'dan
 
 const standardIcons = [Camera, ScanLine, ZoomIn, Ruler, Tag, FlaskConical, RotateCcw];
 
-export function QualityPage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
+export function QualityPage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: StateChangeSink }) {
   const defaultCheckpoint = state.checkpoints.find((item) => item.status === 'in_review') ?? state.checkpoints[0];
   const [selectedId, setSelectedId] = useState(defaultCheckpoint?.id ?? '');
   const [filter, setFilter] = useState<'all' | CheckpointStatus>('all');
@@ -86,11 +89,15 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
   const selectedStage = state.stages.find((stage) => stage.id === selected.stageId);
 
   const updateCheckpoint = (patch: Partial<typeof selected>, activityText?: string, tone: 'neutral' | 'positive' | 'warning' = 'neutral') => {
-    onChange({
-      ...state,
-      checkpoints: state.checkpoints.map((item) => item.id === selected.id ? { ...item, ...patch } : item),
-      activity: activityText ? [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: activityText, tone }, ...state.activity] : state.activity,
-    });
+    if (!activityText) {
+      onChange({ ...state, checkpoints: state.checkpoints.map((item) => item.id === selected.id ? { ...item, ...patch } : item) });
+      return;
+    }
+    commitStateChange(changeCheckpoint(
+      state,
+      { checkpointId: selected.id, patch, summary: activityText, tone },
+      createMutationContext(actor, systemClock, runtimeIdGenerator),
+    ), onChange);
   };
 
   const uploadFiles = async (files: FileList | null) => {

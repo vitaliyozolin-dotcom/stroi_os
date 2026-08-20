@@ -16,6 +16,7 @@ import {
   type CachedProject,
 } from './projectCache';
 import { mergeProjectStates, synchronizeDerivedProgress } from './domain/index';
+import type { ChangeMetadata } from './domain/change';
 import type { AppState, UserRole } from './entities/index';
 
 export type SyncPhase = 'loading' | 'saved' | 'saving' | 'offline' | 'conflict';
@@ -82,6 +83,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   const cacheWriterRef = useRef<ProjectCacheWriter | null>(null);
   const cachePhaseRef = useRef<LocalCacheView['phase']>('idle');
   const pendingSummaryRef = useRef('Обновлены данные проекта');
+  const pendingActionRef = useRef('project_update');
   const flushRef = useRef<() => Promise<void>>(async () => undefined);
   const hydrateRef = useRef<() => Promise<void>>(async () => undefined);
 
@@ -134,6 +136,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
             expectedRevision,
             actor: actorRef.current,
             role: roleRef.current,
+            action: pendingActionRef.current,
             summary,
           });
           revisionRef.current = result.revision;
@@ -323,11 +326,13 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     };
   }, [refreshProjects, storageIdentity]);
 
-  const updateState = useCallback((next: AppState) => {
+  const updateState = useCallback((next: AppState, metadata?: ChangeMetadata) => {
     const normalized = synchronizeDerivedProgress(next);
     const previousActivityId = stateRef.current.activity[0]?.id;
     const nextActivity = normalized.activity[0];
-    if (nextActivity && nextActivity.id !== previousActivityId) pendingSummaryRef.current = nextActivity.text;
+    if (metadata?.action) pendingActionRef.current = metadata.action;
+    if (metadata?.summary) pendingSummaryRef.current = metadata.summary;
+    if (!metadata?.summary && nextActivity && nextActivity.id !== previousActivityId) pendingSummaryRef.current = nextActivity.text;
 
     stateRef.current = normalized;
     dirtyRef.current = true;

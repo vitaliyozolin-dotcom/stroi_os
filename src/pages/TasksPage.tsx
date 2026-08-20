@@ -30,6 +30,9 @@ import {
   taskStatusLabel,
   uid,
 } from '../domain';
+import { changeTaskStatus } from '../domain/index';
+import { commitStateChange, createMutationContext, type StateChangeSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import type {
   AppState,
   AuthenticatedUser,
@@ -93,7 +96,7 @@ export function TasksPage({
   role: UserRole;
   session: AuthenticatedUser;
   focusId?: string | null;
-  onChange: (next: AppState) => void;
+  onChange: StateChangeSink;
   onNavigate: (page: PageId, entityId?: string) => void;
 }) {
   const internalUsers = state.settings.users.filter((user) => user.role !== 'client' && user.status !== 'disabled');
@@ -254,21 +257,11 @@ export function TasksPage({
   };
 
   const changeStatus = (task: ProjectTask, status: TaskStatus, text: string, extra: Partial<ProjectTask> = {}) => {
-    const timestamp = new Date().toISOString();
-    const historyKind = status === 'done' ? 'completed' : task.status === 'done' ? 'reopened' : 'status';
-    const updated: ProjectTask = {
-      ...task,
-      ...extra,
-      status,
-      updatedAt: timestamp,
-      completedAt: status === 'done' ? timestamp : status === 'canceled' ? task.completedAt : undefined,
-      history: [{ id: uid('task-history'), timestamp, actor, kind: historyKind, text }, ...task.history],
-    };
-    recordActivity(
-      state.tasks.map((item) => item.id === task.id ? updated : item),
-      `${text}: «${task.title}»`,
-      status === 'done' ? 'positive' : status === 'waiting' ? 'warning' : 'neutral',
-    );
+    commitStateChange(changeTaskStatus(
+      state,
+      { taskId: task.id, status, text, extra },
+      createMutationContext(actor, systemClock, runtimeIdGenerator),
+    ), onChange);
     setComment('');
     setCompletionNote('');
   };
