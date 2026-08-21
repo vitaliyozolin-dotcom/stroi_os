@@ -90,3 +90,14 @@ test('business pages persist project changes through StateChange sinks', () => {
     assert.match(contents, /commitStateChange|createPageStateSink/, `${page} bypasses StateChange metadata`);
   }
 });
+
+test('project synchronization is runtime-neutral and storage remains a compatibility facade', () => {
+  const sync = source('src/application/project-sync.ts');
+  assert.doesNotMatch(sync, /from ['"]react|\bfetch\(|\bwindow\.|\bdocument\.|indexedDB/);
+  assert.match(sync, /reconcileRemoteSnapshot/);
+  assert.match(sync, /reconcileRevisionConflict/);
+
+  const storage = source('src/storage.ts');
+  assert.match(storage, /from '.\/infrastructure\/project-http\.ts'/);
+  assert.doesNotMatch(storage, /\bfetch\(|class RevisionConflictError/);
+});

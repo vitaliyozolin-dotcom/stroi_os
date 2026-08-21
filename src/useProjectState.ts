@@ -15,10 +15,19 @@ import {
   ProjectCacheWriter,
   type CachedProject,
 } from './projectCache';
-import { mergeProjectStates, synchronizeDerivedProgress } from './domain/index';
+import { synchronizeDerivedProgress } from './domain/index';
 import type { ChangeMetadata } from './domain/change';
 import type { AppState, UserRole } from './entities/index';
 
+import {
+  applyLocalChange,
+  applyRemoteSnapshot,
+  createSyncModel,
+  reconcileRemoteSnapshot,
+  reconcileRevisionConflict,
+  reconcileSavedSnapshot,
+  type SyncModel,
+} from './application';
 export type SyncPhase = 'loading' | 'saved' | 'saving' | 'offline' | 'conflict';
 
 export interface SyncView {
@@ -85,6 +94,30 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   const pendingSummaryRef = useRef('Обновлены данные проекта');
   const pendingActionRef = useRef('project_update');
   const flushRef = useRef<() => Promise<void>>(async () => undefined);
+
+  const readModel = useCallback((): SyncModel => ({
+    state: stateRef.current,
+    base: baseRef.current,
+    revision: revisionRef.current,
+    updatedAt: updatedAtRef.current,
+    dirty: dirtyRef.current,
+    ready: readyRef.current,
+    pendingAction: pendingActionRef.current,
+    pendingSummary: pendingSummaryRef.current,
+  }), []);
+
+  const writeModel = useCallback((model: SyncModel, render = true) => {
+    stateRef.current = model.state;
+    baseRef.current = model.base;
+    revisionRef.current = model.revision;
+    updatedAtRef.current = model.updatedAt;
+    dirtyRef.current = model.dirty;
+    readyRef.current = model.ready;
+    pendingActionRef.current = model.pendingAction;
+    pendingSummaryRef.current = model.pendingSummary;
+    if (render) setState(model.state);
+  }, []);
+
   const hydrateRef = useRef<() => Promise<void>>(async () => undefined);
 
   const queueCache = useCallback((project: CachedProject) => {
@@ -106,16 +139,11 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   }, [actor, role]);
 
   const applyRemote = useCallback((remote: RemoteSnapshot) => {
-    const normalized = synchronizeDerivedProgress(remote.state);
-    stateRef.current = normalized;
-    baseRef.current = normalized;
-    revisionRef.current = remote.revision;
-    updatedAtRef.current = remote.updatedAt;
-    dirtyRef.current = false;
-    setState(normalized);
+    const model = applyRemoteSnapshot(readModel(), remote);
+    writeModel(model);
     setSync({ phase: 'saved', revision: remote.revision, updatedAt: remote.updatedAt });
-    queueCache({ state: normalized, revision: remote.revision, dirty: false, updatedAt: remote.updatedAt });
-  }, [queueCache]);
+    queueCache({ state: model.state, revision: remote.revision, dirty: false, updatedAt: remote.updatedAt });
+  }, [queueCache, readModel, writeModel]);
 
   flushRef.current = async () => {
     if (!readyRef.current || savingRef.current || conflictRef.current || !dirtyRef.current) return;
@@ -139,21 +167,8 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
             action: pendingActionRef.current,
             summary,
           });
-          revisionRef.current = result.revision;
-          updatedAtRef.current = result.updatedAt;
-          const serverState = synchronizeDerivedProgress(result.state ?? snapshot);
-          if (stateRef.current === snapshot) {
-            stateRef.current = serverState;
-            setState(serverState);
-          } else if (result.state) {
-            const merged = mergeProjectStates(snapshot, stateRef.current, serverState);
-            if (!merged.conflicts.length) {
-              const normalizedMerged = synchronizeDerivedProgress(merged.state);
-              stateRef.current = normalizedMerged;
-              setState(normalizedMerged);
-            }
-          }
-          baseRef.current = serverState;
+          const saved = reconcileSavedSnapshot(readModel(), snapshot, { ...result, state: result.state ?? snapshot });
+          writeModel(saved);
           queueCache({
             state: stateRef.current,
             revision: result.revision,
@@ -164,17 +179,11 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         } catch (error) {
           dirtyRef.current = true;
           if (error instanceof RevisionConflictError) {
-            const merged = mergeProjectStates(baseRef.current, snapshot, error.current.state);
-            if (!merged.conflicts.length) {
-              const normalizedMerged = synchronizeDerivedProgress(merged.state);
-              stateRef.current = normalizedMerged;
-              baseRef.current = synchronizeDerivedProgress(error.current.state);
-              revisionRef.current = error.current.revision;
-              updatedAtRef.current = error.current.updatedAt;
-              dirtyRef.current = true;
-              setState(normalizedMerged);
+            const resolution = reconcileRevisionConflict(readModel(), snapshot, error.current);
+            if (resolution.kind === 'save') {
+              writeModel(resolution.model);
               queueCache({
-                state: normalizedMerged,
+                state: resolution.model.state,
                 revision: error.current.revision,
                 dirty: true,
                 updatedAt: error.current.updatedAt,
@@ -187,7 +196,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
               phase: 'conflict',
               revision: revisionRef.current,
               updatedAt: updatedAtRef.current,
-              message: `Одновременно изменена одна и та же запись: ${merged.conflicts.join(', ')}.`,
+              message: `Одновременно изменена одна и та же запись: ${resolution.conflicts.join(', ')}.`,
             });
           } else {
             setSync({
@@ -218,20 +227,14 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         return;
       }
 
-      if (dirtyRef.current && revisionRef.current !== remote.revision) {
-        if (JSON.stringify(stateRef.current) === JSON.stringify(remote.state)) {
+      if (dirtyRef.current) {
+        const resolution = reconcileRemoteSnapshot(readModel(), remote);
+        if (resolution.kind === 'remote') {
           applyRemote(remote);
           return;
         }
-        const merged = mergeProjectStates(baseRef.current, stateRef.current, remote.state);
-        if (!merged.conflicts.length) {
-          const normalizedMerged = synchronizeDerivedProgress(merged.state);
-          stateRef.current = normalizedMerged;
-          baseRef.current = synchronizeDerivedProgress(remote.state);
-          revisionRef.current = remote.revision;
-          updatedAtRef.current = remote.updatedAt;
-          dirtyRef.current = true;
-          setState(normalizedMerged);
+        if (resolution.kind === 'save') {
+          writeModel(resolution.model);
           await flushRef.current();
           await refreshProjects();
           return;
@@ -242,16 +245,12 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
           phase: 'conflict',
           revision: revisionRef.current,
           updatedAt: updatedAtRef.current,
-          message: `Одновременно изменена одна и та же запись: ${merged.conflicts.join(', ')}.`,
+          message: `Одновременно изменена одна и та же запись: ${resolution.conflicts.join(', ')}.`,
         });
         return;
       }
 
-      if (dirtyRef.current) {
-        await flushRef.current();
-      } else {
-        applyRemote(remote);
-      }
+      applyRemote(remote);
       await refreshProjects();
     } catch (error) {
       readyRef.current = false;
@@ -290,14 +289,9 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         setLocalCache({ phase: 'failed', message: cacheErrorMessage(cacheError) });
       }
       if (!active) return;
-      const normalizedCached = synchronizeDerivedProgress(cached.state);
-      stateRef.current = normalizedCached;
-      baseRef.current = normalizedCached;
-      revisionRef.current = cached.revision;
-      updatedAtRef.current = cached.updatedAt;
-      dirtyRef.current = cached.dirty;
-      readyRef.current = false;
-      setState(normalizedCached);
+      const cachedModel = createSyncModel(cached, cached.dirty, false);
+      writeModel(cachedModel);
+      const normalizedCached = cachedModel.state;
       setProjects([{
         id: normalizedCached.project.id,
         code: normalizedCached.project.code,
@@ -324,21 +318,13 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
       void writer.flush();
       if (cacheWriterRef.current === writer) cacheWriterRef.current = null;
     };
-  }, [refreshProjects, storageIdentity]);
+  }, [refreshProjects, storageIdentity, writeModel]);
 
   const updateState = useCallback((next: AppState, metadata?: ChangeMetadata) => {
-    const normalized = synchronizeDerivedProgress(next);
-    const previousActivityId = stateRef.current.activity[0]?.id;
-    const nextActivity = normalized.activity[0];
-    if (metadata?.action) pendingActionRef.current = metadata.action;
-    if (metadata?.summary) pendingSummaryRef.current = metadata.summary;
-    if (!metadata?.summary && nextActivity && nextActivity.id !== previousActivityId) pendingSummaryRef.current = nextActivity.text;
-
-    stateRef.current = normalized;
-    dirtyRef.current = true;
-    setState(normalized);
+    const model = applyLocalChange(readModel(), next, metadata);
+    writeModel(model);
     queueCache({
-      state: normalized,
+      state: model.state,
       revision: revisionRef.current,
       dirty: true,
       updatedAt: updatedAtRef.current,
@@ -346,7 +332,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
 
     if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => void flushRef.current(), 650);
-  }, [queueCache]);
+  }, [queueCache, readModel, writeModel]);
 
   const retry = useCallback(() => {
     if (readyRef.current) void flushRef.current();
@@ -407,36 +393,24 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         setSync((current) => ({ ...current, phase: 'offline', message: 'Не удалось загрузить выбранный проект.' }));
         return;
       }
-      const normalizedCached = synchronizeDerivedProgress(cached.state);
-      stateRef.current = normalizedCached;
-      baseRef.current = normalizedCached;
-      revisionRef.current = cached.revision;
-      updatedAtRef.current = cached.updatedAt;
-      dirtyRef.current = cached.dirty;
-      readyRef.current = false;
-      setState(normalizedCached);
+      const cachedModel = createSyncModel(cached, cached.dirty, false);
+      writeModel(cachedModel);
       setSync({ phase: 'offline', revision: cached.revision, updatedAt: cached.updatedAt, message: 'Показана локальная копия проекта.' });
     }
-  }, [applyRemote, storageIdentity]);
+  }, [applyRemote, storageIdentity, writeModel]);
 
   const createProject = useCallback(async (nextState: AppState) => {
     if (dirtyRef.current && readyRef.current) await flushRef.current();
-    const normalized = synchronizeDerivedProgress(nextState);
-    stateRef.current = normalized;
-    baseRef.current = normalized;
-    revisionRef.current = 0;
-    updatedAtRef.current = undefined;
-    dirtyRef.current = true;
-    readyRef.current = true;
+    const model = createSyncModel({ state: nextState, revision: 0 }, true, true);
+    model.pendingSummary = `Создан проект ${model.state.project.code}`;
+    writeModel(model);
     conflictRef.current = null;
     setConflict(null);
-    setState(normalized);
     setSync({ phase: 'saving', revision: 0 });
-    queueCache({ state: normalized, revision: 0, dirty: true });
-    pendingSummaryRef.current = `Создан проект ${normalized.project.code}`;
+    queueCache({ state: model.state, revision: 0, dirty: true });
     await flushRef.current();
     await refreshProjects();
-  }, [queueCache, refreshProjects]);
+  }, [queueCache, refreshProjects, writeModel]);
 
   return {
     state,
