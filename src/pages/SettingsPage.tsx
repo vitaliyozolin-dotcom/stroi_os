@@ -1,4 +1,5 @@
-import { createMutationContext, createPageStateSink } from '../application';
+import { requestApi } from '../infrastructure/api-http';
+import { createSettingsCommands } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useState, type FormEvent } from 'react';
 import {
@@ -89,7 +90,7 @@ function Toggle({ checked, onChange, label, disabled = false }: { checked: boole
 }
 
 export function SettingsPage({ state, actor, canManageAccess, onChange, onServerSnapshot }: { state: AppState; actor: string; canManageAccess: boolean; onChange: (next: AppState) => void; onServerSnapshot: (snapshot: RemoteSnapshot) => void }) {
-  const saveChange = createPageStateSink(state, { action: 'settings_updated', summary: 'Обновлены настройки проекта' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
+  const saveChange = createSettingsCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const [tab, setTab] = useState<SettingsTab>('access');
   const [showInvite, setShowInvite] = useState(false);
   const [invite, setInvite] = useState({ name: '', email: '', role: 'foreman' as UserRole, telegram: '' });
@@ -126,7 +127,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
 
   const refreshAccess = async () => {
     try {
-      const response = await fetch(`/api/access/users?projectId=${encodeURIComponent(state.project.id)}`, { cache: 'no-store' });
+      const response = await requestApi(`/api/access/users?projectId=${encodeURIComponent(state.project.id)}`, { cache: 'no-store' });
       if (response.status === 404) {
         setAccessSnapshot({ authMode: 'sites_sso', users: [] });
         return;
@@ -141,7 +142,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
 
   const refreshIntegrationStatus = async (): Promise<IntegrationStatus | null> => {
     try {
-      const response = await fetch('/api/integrations/status', { cache: 'no-store' });
+      const response = await requestApi('/api/integrations/status', { cache: 'no-store' });
       const body = await response.json() as { integrations?: IntegrationStatus };
       const nextStatus = response.ok ? body.integrations ?? null : null;
       setIntegrationStatus(nextStatus);
@@ -212,7 +213,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     if (canManageAccess && accessSnapshot?.authMode !== 'sites_sso') {
       setAccessBusy({ userId: 'new', action: 'create' });
       try {
-        const response = await fetch('/api/access/users', {
+        const response = await requestApi('/api/access/users', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -250,7 +251,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     if (canManageAccess && accessSnapshot?.authMode !== 'sites_sso') {
       setAccessBusy({ userId: editingUser.id, action: 'profile' });
       try {
-        const response = await fetch(`/api/access/users/${encodeURIComponent(editingUser.id)}`, {
+        const response = await requestApi(`/api/access/users/${encodeURIComponent(editingUser.id)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -297,7 +298,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     setAccessBusy({ userId: user.id, action: 'projects' });
     setAccessErrors((current) => ({ ...current, [user.id]: '' }));
     try {
-      const response = await fetch(
+      const response = await requestApi(
         `/api/access/users/${encodeURIComponent(user.id)}/projects?projectId=${encodeURIComponent(state.project.id)}`,
         { cache: 'no-store' },
       );
@@ -333,7 +334,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     setAccessBusy({ userId: projectAccess.user.id, action: 'projects' });
     setAccessErrors((current) => ({ ...current, [projectAccess.user.id]: '' }));
     try {
-      const response = await fetch(`/api/access/users/${encodeURIComponent(projectAccess.user.id)}/projects`, {
+      const response = await requestApi(`/api/access/users/${encodeURIComponent(projectAccess.user.id)}/projects`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: state.project.id, projectIds: projectAccess.selected }),
@@ -361,7 +362,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     setAccessErrors((current) => ({ ...current, [user.id]: '' }));
     try {
       const request = async () => {
-        const response = await fetch(reset ? '/api/access/web/reset' : '/api/access/web/invitations', {
+        const response = await requestApi(reset ? '/api/access/web/reset' : '/api/access/web/invitations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId: state.project.id, userId: user.id }),
@@ -405,7 +406,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     setAccessBusy({ userId: user.id, action });
     setAccessErrors((current) => ({ ...current, [user.id]: '' }));
     try {
-      const response = await fetch(`/api/access/users/${encodeURIComponent(user.id)}/${action}`, {
+      const response = await requestApi(`/api/access/users/${encodeURIComponent(user.id)}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: state.project.id }),
@@ -427,7 +428,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
   const testIntegration = async (channel: 'email' | 'telegram') => {
     setIntegrationMessage('Проверяем подключение…');
     try {
-      const response = await fetch('/api/integrations/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, to: state.settings.users.find((user) => user.role === 'management')?.email, message: `ИКИОМА ОС: тест канала ${channel === 'email' ? 'Email' : 'Telegram'} для проекта ${state.project.code}` }) });
+      const response = await requestApi('/api/integrations/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, to: state.settings.users.find((user) => user.role === 'management')?.email, message: `ИКИОМА ОС: тест канала ${channel === 'email' ? 'Email' : 'Telegram'} для проекта ${state.project.code}` }) });
       const body = await response.json();
       setIntegrationMessage(response.ok && body.ok
         ? `Тест ${channel === 'email' ? 'Email' : 'Telegram'} отправлен.`
@@ -446,7 +447,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
   const selectTelegramChat = async (candidate: TelegramCandidate) => {
     setIntegrationMessage(`Подключаем чат «${candidate.title}»…`);
     try {
-      const response = await fetch('/api/integrations/telegram/select', {
+      const response = await requestApi('/api/integrations/telegram/select', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chatId: candidate.id }),
@@ -468,7 +469,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
   const createTelegramLink = async (user: SystemUser) => {
     setIntegrationMessage(`Готовим персональную Telegram-ссылку для ${user.name}…`);
     try {
-      const response = await fetch('/api/integrations/telegram/link', {
+      const response = await requestApi('/api/integrations/telegram/link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: state.project.id, userId: user.id }),
@@ -492,7 +493,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     setAccessBusy({ userId: user.id, action: 'telegram-unlink' });
     setIntegrationMessage(`Отключаем Telegram пользователя ${user.name}…`);
     try {
-      const response = await fetch('/api/integrations/telegram/unlink', {
+      const response = await requestApi('/api/integrations/telegram/unlink', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: state.project.id, userId: user.id }),

@@ -1,4 +1,5 @@
-import { createMutationContext, createPageStateSink } from '../application';
+import { requestApi } from '../infrastructure/api-http';
+import { createClientDecisionCommands } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
@@ -26,7 +27,7 @@ import type { AppState } from '../entities/index';
 import { Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 
 export function ClientPage({ state, onChange }: { state: AppState; onChange: (next: AppState) => void }) {
-  const saveChange = createPageStateSink(state, { action: 'client_decision_updated', summary: 'Обновлено решение клиента' }, createMutationContext(state.project.clientNames, systemClock, runtimeIdGenerator), onChange);
+  const saveChange = createClientDecisionCommands(state, state.project.clientNames, systemClock, runtimeIdGenerator, onChange);
   const progress = progressTotals(state);
   const finance = financeTotals(state);
   const current = state.stages.find((stage) => ['in_progress', 'awaiting_inspection', 'rework', 'blocked'].includes(stage.status)) ?? state.stages[0];
@@ -45,7 +46,7 @@ export function ClientPage({ state, onChange }: { state: AppState; onChange: (ne
 
   useEffect(() => {
     let active = true;
-    void fetch(`/api/camera/status?projectId=${encodeURIComponent(state.project.id)}`, { cache: 'no-store' })
+    void requestApi(`/api/camera/status?projectId=${encodeURIComponent(state.project.id)}`, { cache: 'no-store' })
       .then((response) => response.json())
       .then((body: { camera?: { configured: boolean; online: boolean; label: string } }) => {
         if (active) setCamera(body.camera ?? null);

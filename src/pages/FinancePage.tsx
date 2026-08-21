@@ -1,4 +1,4 @@
-import { createMutationContext, createPageStateSink } from '../application';
+import { createFinanceCommands } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
@@ -27,7 +27,7 @@ const statusLabels: Record<ExpenseStatus, string> = {
 };
 
 export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId) => void }) {
-  const saveChange = createPageStateSink(state, { action: 'finance_updated', summary: 'Обновлены финансы проекта' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
+  const saveChange = createFinanceCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const totals = financeTotals(state);
   const [showForm, setShowForm] = useState(false);
   const [formKind, setFormKind] = useState<'expense' | 'income'>('expense');

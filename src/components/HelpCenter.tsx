@@ -1,3 +1,4 @@
+import { requestApi } from '../infrastructure/api-http';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   BookOpen, CalendarRange, Check, ChevronLeft, ChevronRight, CircleDollarSign, FolderPlus,
@@ -87,7 +88,7 @@ export function HelpCenter({ projectId, currentPage, onNavigate, onOpenProjects,
 
   useEffect(() => {
     if (!feedbackOpen) return;
-    void fetch(`/api/developer-feedback?projectId=${encodeURIComponent(projectId)}`, { headers: { Accept: 'application/json' } })
+    void requestApi(`/api/developer-feedback?projectId=${encodeURIComponent(projectId)}`, { headers: { Accept: 'application/json' } })
       .then((response) => response.ok ? response.json() : Promise.reject())
       .then((body: { items?: FeedbackItem[] }) => setFeedbackItems(body.items ?? []))
       .catch(() => setFeedbackItems([]));
@@ -120,7 +121,7 @@ export function HelpCenter({ projectId, currentPage, onNavigate, onOpenProjects,
     if (!feedback.title.trim() || !feedback.details.trim()) return;
     setFeedbackStatus('Отправляем…');
     try {
-      const response = await fetch('/api/developer-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ projectId, page: currentPage, ...feedback }) });
+      const response = await requestApi('/api/developer-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ projectId, page: currentPage, ...feedback }) });
       const body = await response.json() as { item?: FeedbackItem; error?: string };
       if (!response.ok || !body.item) throw new Error(body.error ?? 'request_failed');
       setFeedbackItems((items) => [body.item!, ...items]);

@@ -18,6 +18,8 @@ import {
 import { synchronizeDerivedProgress } from './domain/index';
 import type { ChangeMetadata } from './domain/change';
 import type { AppState, UserRole } from './entities/index';
+import { cacheErrorMessage, syncErrorMessage, type LocalCacheView, type SyncPhase, type SyncView } from './presentation/sync-status';
+export type { SyncPhase } from './presentation/sync-status';
 
 import {
   applyLocalChange,
@@ -28,33 +30,6 @@ import {
   reconcileSavedSnapshot,
   type SyncModel,
 } from './application';
-export type SyncPhase = 'loading' | 'saved' | 'saving' | 'offline' | 'conflict';
-
-export interface SyncView {
-  phase: SyncPhase;
-  revision: number;
-  updatedAt?: string;
-  message?: string;
-}
-
-export interface LocalCacheView {
-  phase: 'idle' | 'saving' | 'saved' | 'failed';
-  message?: string;
-}
-
-const errorMessage = (error: unknown, cachePhase: LocalCacheView['phase']) => {
-  if (error instanceof Error && error.message === 'payload_too_large') return 'Данные слишком велики для сохранения. Проверьте вложения.';
-  if (cachePhase === 'failed') return 'Сервер недоступен, локальная копия тоже не сохранена. Не закрывайте вкладку.';
-  if (cachePhase === 'saving') return 'Нет связи с сервером. Локальная копия ещё сохраняется на этом устройстве.';
-  return 'Нет связи с сервером. Изменения сохранены на этом устройстве и ждут синхронизации.';
-};
-
-const cacheErrorMessage = (error?: ProjectCacheError) => error?.code === 'quota_exceeded'
-  ? 'Локальная копия не сохранена: в хранилище браузера закончилось место.'
-  : error?.code === 'corrupt'
-    ? 'Локальная копия повреждена и не была загружена.'
-    : 'Локальная копия недоступна в этом браузере.';
-
 export function useProjectState(role: UserRole, actor: string, storageIdentity = '') {
   const initial = useRef(cloneSeedProject());
   initial.current.state = synchronizeDerivedProgress(initial.current.state);
@@ -203,7 +178,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
               phase: 'offline',
               revision: revisionRef.current,
               updatedAt: updatedAtRef.current,
-              message: errorMessage(error, cachePhaseRef.current),
+              message: syncErrorMessage(error, cachePhaseRef.current),
             });
           }
           break;
@@ -258,7 +233,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         phase: 'offline',
         revision: revisionRef.current,
         updatedAt: updatedAtRef.current,
-        message: errorMessage(error, cachePhaseRef.current),
+        message: syncErrorMessage(error, cachePhaseRef.current),
       });
     }
   };
@@ -272,7 +247,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
       cachePhaseRef.current = phase;
       setLocalCache({ phase, message: phase === 'failed' ? cacheErrorMessage(error) : undefined });
       setSync((current) => current.phase === 'offline'
-        ? { ...current, message: errorMessage(new Error('network_error'), phase) }
+        ? { ...current, message: syncErrorMessage(new Error('network_error'), phase) }
         : current);
     });
     cacheWriterRef.current = writer;

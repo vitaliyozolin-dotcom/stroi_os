@@ -1,4 +1,4 @@
-import { createMutationContext, createPageStateSink } from '../application';
+import { createCounterpartyCommands } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Building2, FileCheck2, Plus, Search, ShieldCheck, Truck, UsersRound } from 'lucide-react';
@@ -11,7 +11,7 @@ const typeLabels: Record<CounterpartyType, string> = { contractor: 'Подряд
 const emptyProfile = (): CounterpartyProfile => ({ id: '', name: '', type: 'contractor', status: 'probation', specialty: '', contactName: '', phone: '', email: '', inn: '', kpp: '', ogrn: '', legalName: '', legalAddress: '', bankName: '', bik: '', settlementAccount: '', correspondentAccount: '', internalOwner: '', paymentTerms: '', warrantyTerms: '', serviceRegion: '', notes: '', tags: [] });
 
 export function CounterpartiesPage({ state, actor, focusId, onChange }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
-  const saveChange = createPageStateSink(state, { action: 'counterparty_updated', summary: 'Обновлены контрагенты проекта' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
+  const saveChange = createCounterpartyCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const [filter, setFilter] = useState<'all' | CounterpartyType>('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);

@@ -1,4 +1,4 @@
-import { createMutationContext, createPageStateSink } from '../application';
+import { createScheduleCommands } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
@@ -57,7 +57,7 @@ const taskTemplates: Record<string, string[]> = {
 const taskDone = (task: ProjectTask) => ['done', 'canceled'].includes(task.status);
 
 export function SchedulePage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
-  const saveChange = createPageStateSink(state, { action: 'schedule_updated', summary: 'Обновлён график проекта' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
+  const saveChange = createScheduleCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const defaultStage = state.stages.find((stage) => ['in_progress', 'rework', 'awaiting_inspection', 'blocked'].includes(stage.status)) ?? state.stages[0];
   const [selectedId, setSelectedId] = useState(defaultStage?.id ?? '');
   const [counterpartyId, setCounterpartyId] = useState<string | null>(null);

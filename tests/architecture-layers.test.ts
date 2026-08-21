@@ -87,7 +87,13 @@ test('business pages persist project changes through StateChange sinks', () => {
   for (const page of pages) {
     const contents = source(`src/pages/${page}`);
     assert.doesNotMatch(contents, /\bonChange\(\{\s*\.\.\.state/, `${page} writes AppState directly`);
-    assert.match(contents, /commitStateChange|createPageStateSink/, `${page} bypasses StateChange metadata`);
+    assert.match(contents, /commitStateChange|create[A-Z][A-Za-z0-9_]+Commands/, `${page} bypasses StateChange metadata`);
+  }
+});
+
+test('UI delegates HTTP transport to infrastructure', () => {
+  for (const file of ['src/App.tsx', ...readdirSync(new URL('../src/pages/', import.meta.url)).filter((name) => name.endsWith('.tsx')).map((name) => `src/pages/${name}`), ...readdirSync(new URL('../src/components/', import.meta.url)).filter((name) => name.endsWith('.tsx')).map((name) => `src/components/${name}`)]) {
+    assert.doesNotMatch(source(file), /\bfetch\(/, `${file} performs HTTP transport directly`);
   }
 });
 

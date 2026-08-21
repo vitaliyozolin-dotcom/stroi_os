@@ -19,7 +19,8 @@ test('training can be dismissed and is replaced with developer feedback', () => 
 
   assert.match(help, /aria-label="Закрыть обучение и открыть правки разработчику"/);
   assert.match(help, /showFeedbackFab \? setFeedbackOpen\(true\) : setOpen\(true\)/);
-  assert.match(help, /fetch\('\/api\/developer-feedback'/);
+  assert.ok(help.includes("requestApi('/api/developer-feedback'"));
+  assert.ok(source('src/infrastructure/api-http.ts').includes('fetch(input, init)'));
   assert.match(help, /completed\.length >= topics\.length/);
   assert.match(help, /else onCloseProjects\(\)/);
 });

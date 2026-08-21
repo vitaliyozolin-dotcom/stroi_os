@@ -1,3 +1,4 @@
+import { requestApi } from './infrastructure/api-http';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
@@ -127,7 +128,7 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    void fetch('/api/session', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+    void requestApi('/api/session', { headers: { Accept: 'application/json' }, cache: 'no-store' })
       .then(async (response) => {
         const body = await response.json() as { user?: AuthenticatedUser; error?: string };
         if (!response.ok || !body.user) throw new Error(body.error ?? 'session_unavailable');
@@ -174,7 +175,7 @@ function App() {
     if (!session) return undefined;
     const verifySession = async () => {
       try {
-        const response = await fetch('/api/session', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+        const response = await requestApi('/api/session', { headers: { Accept: 'application/json' }, cache: 'no-store' });
         if (response.ok) return;
         if (response.status !== 401 && response.status !== 403) return;
       } catch {

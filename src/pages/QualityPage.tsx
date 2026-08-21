@@ -1,3 +1,4 @@
+import { requestApi } from '../infrastructure/api-http';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -118,7 +119,7 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
       for (const file of selectedFiles) {
         const body = new FormData();
         body.append('file', file);
-        const response = await fetch(`/api/quality/upload?projectId=${encodeURIComponent(state.project.id)}&checkpointId=${encodeURIComponent(selected.id)}`, {
+        const response = await requestApi(`/api/quality/upload?projectId=${encodeURIComponent(state.project.id)}&checkpointId=${encodeURIComponent(selected.id)}`, {
           method: 'POST',
           body,
         });

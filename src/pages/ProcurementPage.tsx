@@ -1,4 +1,4 @@
-import { createMutationContext, createPageStateSink } from '../application';
+import { createProcurementCommands } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
@@ -45,7 +45,7 @@ const dateAfterDays = (days: number) => {
 };
 
 export function ProcurementPage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
-  const saveChange = createPageStateSink(state, { action: 'procurement_updated', summary: 'Обновлено снабжение проекта' }, createMutationContext(actor, systemClock, runtimeIdGenerator), onChange);
+  const saveChange = createProcurementCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState<'active' | 'all' | 'risk'>('active');
   const [statusFilter, setStatusFilter] = useState<ProcurementStatus | null>(null);
