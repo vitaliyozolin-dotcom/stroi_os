@@ -15,3 +15,7 @@
     -Server
   }
 }
+
+# Routes for externally hosted applications are stored in Caddy's persistent
+# data volume so container recreation and ordinary StroiOS deploys retain them.
+import /data/external-routes.caddy
