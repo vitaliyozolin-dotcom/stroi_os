@@ -17,9 +17,13 @@ COPY --from=build /app/dist/client ./dist/client
 COPY --from=build /app/server ./server
 COPY --from=build /app/sites/worker.js ./sites/worker.js
 COPY --from=build /app/sites/access-control.js ./sites/access-control.js
+COPY --from=build /app/sites/access ./sites/access
 COPY --from=build /app/sites/company-os-export.js ./sites/company-os-export.js
 COPY --from=build /app/sites/company-os-investor-export.js ./sites/company-os-investor-export.js
 COPY --from=build /app/sites/files ./sites/files
+COPY --from=build /app/sites/integrations ./sites/integrations
+COPY --from=build /app/sites/projects ./sites/projects
+COPY --from=build /app/sites/routes ./sites/routes
 COPY --from=build /app/sites/telegram ./sites/telegram
 USER node
 COPY --from=build /app/sites/lib ./sites/lib

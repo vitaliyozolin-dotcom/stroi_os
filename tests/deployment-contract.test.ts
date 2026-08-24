@@ -56,6 +56,17 @@ test('Sites artifact includes Worker file-route modules', () => {
   }
 });
 
+test('both runtime artifacts include extracted project, access, integration and API boundaries', () => {
+  const prepare = source('scripts/prepare-sites-build.mjs');
+  const dockerfile = source('Dockerfile');
+  for (const modulePath of ['access/session', 'integrations/camera', 'projects/routes', 'routes/api']) {
+    assert.match(prepare, new RegExp(`sites/${modulePath}\\.js.*dist/server/${modulePath}\\.js`));
+  }
+  for (const directory of ['access', 'integrations', 'projects', 'routes']) {
+    assert.match(dockerfile, new RegExp(`sites/${directory} ./sites/${directory}`));
+  }
+});
+
 test('runtime initializes schema before listening while readiness itself stays read-only', () => {
   const worker = source('sites/worker.js');
   const server = source('server/index.js');

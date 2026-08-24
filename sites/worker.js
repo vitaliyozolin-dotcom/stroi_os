@@ -6,6 +6,10 @@ import {
 } from './access-control.js';
 import { addCalendarDays, addDays, dateKey, isoDate } from './lib/date.js';
 import { createFileHandlers } from './files/routes.js';
+import { createProjectReadHandlers } from './projects/routes.js';
+import { createSessionHandler } from './access/session.js';
+import { createCameraHandlers } from './integrations/camera.js';
+import { createApiHandler } from './routes/api.js';
 import { json, publicLeadResponse } from './lib/http.js';
 import {
   readJsonBodyLimited,
@@ -405,22 +409,9 @@ const {
   verifyAndStoreTelegramChat,
 } = createTelegramConnection({ ensureSchema, readSnapshot, reviveTelegramOutbox });
 
-const handleGetState = async (request, env) => {
-  if (!env.DB) return json({ ok: false, error: 'storage_unavailable' }, 503);
-  const projectId = clean(new URL(request.url).searchParams.get('projectId'), 100);
-  if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
-
-  try {
-    await ensureSchema(env.DB);
-    const snapshot = await readSnapshot(env.DB, projectId);
-    if (!snapshot) return json({ ok: false, error: 'not_found' }, 404);
-    const identity = projectIdentity(request, env, snapshot.state);
-    if (!identity) return json({ ok: false, error: 'project_access_denied' }, 403);
-    return json({ ok: true, snapshot: { ...snapshot, state: stateForRole(snapshot.state, identity), updatedRole: identity.role } });
-  } catch {
-    return json({ ok: false, error: 'storage_error' }, 500);
-  }
-};
+const { getState: handleGetState, audit: handleAudit, projects: handleProjects } = createProjectReadHandlers({ ensureSchema, readSnapshot });
+const handleSession = createSessionHandler({ ensureSchema });
+const { status: handleCameraStatus, view: handleCameraView } = createCameraHandlers({ ensureSchema, readSnapshot });
 
 const notificationStatusLabels = {
   ordered: 'заказано',
@@ -2641,76 +2632,6 @@ const handlePutState = async (request, env, context) => {
   }
 };
 
-const handleAudit = async (request, env) => {
-  if (!env.DB) return json({ ok: false, error: 'storage_unavailable' }, 503);
-  const url = new URL(request.url);
-  const projectId = clean(url.searchParams.get('projectId'), 100);
-  const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 30));
-  if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
-
-  try {
-    await ensureSchema(env.DB);
-    const snapshot = await readSnapshot(env.DB, projectId);
-    const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
-    if (!identity || identity.role !== 'management') return json({ ok: false, error: 'project_access_denied' }, 403);
-    const result = await env.DB.prepare(`
-      SELECT id, revision, created_at, actor, role, action, summary, state_bytes
-      FROM audit_log
-      WHERE project_id = ?
-      ORDER BY revision DESC
-      LIMIT ?
-    `).bind(projectId, limit).all();
-    return json({ ok: true, events: result?.results ?? [] });
-  } catch {
-    return json({ ok: false, error: 'storage_error' }, 500);
-  }
-};
-
-const handleProjects = async (request, env) => {
-  if (!env.DB) return json({ ok: false, error: 'storage_unavailable' }, 503);
-  try {
-    await ensureSchema(env.DB);
-    const result = await env.DB.prepare(`
-      SELECT project_id, state_json, revision, updated_at
-      FROM project_state
-      ORDER BY updated_at DESC
-      LIMIT 100
-    `).all();
-    const projects = (result?.results ?? []).flatMap((row) => {
-      try {
-        const state = JSON.parse(row.state_json);
-        const identity = projectIdentity(request, env, state);
-        if (!identity) return [];
-        const project = state?.project;
-        if (!project?.id || String(project.id).startsWith('__')) return [];
-        return [{
-          id: project.id,
-          code: clean(project.code, 40),
-          name: clean(project.name, 120),
-          model: clean(project.model, 120),
-          area: Number(project.area) || 0,
-          address: clean(project.address, 240),
-          targetDate: clean(project.targetDate, 40),
-          revision: Number(row.revision),
-          updatedAt: row.updated_at,
-          status: clean(project.status, 40),
-        }];
-      } catch {
-        return [];
-      }
-    });
-    const visibleProjects = projects.some((project) => project.status !== 'workspace')
-      ? projects.filter((project) => project.status !== 'workspace')
-      : projects;
-    return json({
-      ok: true,
-      projects: visibleProjects.map(({ status: _status, ...project }) => project),
-    });
-  } catch {
-    return json({ ok: false, error: 'storage_error' }, 500);
-  }
-};
-
 const integrationStatus = async (env) => {
   const telegramConnection = await resolveTelegramConnection(env);
   const botUsername = clean(telegramConnection.bot?.username, 120);
@@ -3013,88 +2934,6 @@ const handleTelegramBootstrap = async (request, env) => {
   }, connection.chat?.id && webhookReady ? 200 : 409);
 };
 
-const findIdentityAcrossProjects = async (request, env) => {
-  const authenticated = authenticatedIdentity(request, env);
-  if (!authenticated) return null;
-  if (authenticated.isOwner) return { ...authenticated, id: 'owner', role: 'management', status: 'active' };
-  if (!env.DB) return null;
-
-  await ensureSchema(env.DB);
-  const result = await env.DB.prepare(`
-    SELECT state_json
-    FROM project_state
-    ORDER BY updated_at DESC
-    LIMIT 100
-  `).all();
-  for (const row of result?.results ?? []) {
-    try {
-      const identity = projectIdentity(request, env, JSON.parse(row.state_json));
-      if (identity) return identity;
-    } catch {
-      // Пропускаем повреждённый снимок, не раскрывая его содержимое.
-    }
-  }
-  return null;
-};
-
-const handleSession = async (request, env) => {
-  try {
-    const identity = await findIdentityAcrossProjects(request, env);
-    if (!identity) return json({ ok: false, error: 'access_not_assigned' }, 403);
-    return json({
-      ok: true,
-      user: {
-        id: identity.id,
-        email: identity.email,
-        name: identity.name,
-        role: identity.role,
-        isOwner: identity.isOwner,
-      },
-    });
-  } catch {
-    return json({ ok: false, error: 'session_unavailable' }, 503);
-  }
-};
-
-const handleCameraStatus = async (request, env) => {
-  if (!env.DB) return json({ ok: false, error: 'storage_unavailable' }, 503);
-  const projectId = clean(new URL(request.url).searchParams.get('projectId'), 100);
-  if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
-  try {
-    await ensureSchema(env.DB);
-    const snapshot = await readSnapshot(env.DB, projectId);
-    const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
-    if (!identity) return json({ ok: false, error: 'project_access_denied' }, 403);
-    return json({
-      ok: true,
-      camera: {
-        configured: Boolean(env.CAMERA_VIEW_URL),
-        online: Boolean(env.CAMERA_VIEW_URL && snapshot.state?.project?.cameraStatus === 'online'),
-        label: clean(env.CAMERA_LABEL, 80) || 'Камера 01',
-      },
-    });
-  } catch {
-    return json({ ok: false, error: 'camera_status_unavailable' }, 503);
-  }
-};
-
-const handleCameraView = async (request, env) => {
-  if (!env.CAMERA_VIEW_URL || !env.DB) return json({ ok: false, error: 'camera_not_configured' }, 409);
-  const projectId = clean(new URL(request.url).searchParams.get('projectId'), 100);
-  if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
-  try {
-    await ensureSchema(env.DB);
-    const snapshot = await readSnapshot(env.DB, projectId);
-    const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
-    if (!identity) return json({ ok: false, error: 'project_access_denied' }, 403);
-    const target = new URL(env.CAMERA_VIEW_URL);
-    if (!['https:', 'http:'].includes(target.protocol)) return json({ ok: false, error: 'invalid_camera_url' }, 500);
-    return Response.redirect(target.toString(), 302);
-  } catch {
-    return json({ ok: false, error: 'camera_unavailable' }, 503);
-  }
-};
-
 const handleLeadInbox = async (request, env) => {
   if (!env.DB) return json({ ok: false, error: 'storage_unavailable' }, 503);
   await ensureSchema(env.DB);
@@ -3310,36 +3149,31 @@ const handleDeveloperFeedback = async (request, env) => {
 };
 
 
-const handleApi = async (request, env, context) => {
-  const url = new URL(request.url);
-  if (url.pathname === '/api/public/leads') return handlePublicLead(request, env);
-  const origin = request.headers.get('origin');
-  if (origin && origin !== url.origin) return json({ ok: false, error: 'forbidden_origin' }, 403);
-
-  if (url.pathname === '/api/session' && request.method === 'GET') return handleSession(request, env);
-  if (url.pathname === '/api/access/users' && request.method === 'GET') return handleAccessUsers(request, env);
-  if (url.pathname === '/api/state' && request.method === 'GET') return handleGetState(request, env);
-  if (url.pathname === '/api/state' && request.method === 'PUT') return handlePutState(request, env, context);
-  if (url.pathname === '/api/projects' && request.method === 'GET') return handleProjects(request, env);
-  if (url.pathname === '/api/integrations/status' && request.method === 'GET') return handleIntegrationStatus(request, env);
-  if (url.pathname === '/api/integrations/test' && request.method === 'POST') return handleIntegrationTest(request, env);
-  if (url.pathname === '/api/integrations/telegram/select' && request.method === 'POST') return handleTelegramChatSelect(request, env);
-  if (url.pathname === '/api/integrations/telegram/link' && request.method === 'POST') return handleTelegramLink(request, env);
-  if (url.pathname === '/api/integrations/telegram/unlink' && request.method === 'POST') return handleTelegramUnlink(request, env);
-  if (url.pathname === '/api/integrations/telegram/bootstrap' && request.method === 'POST') return handleTelegramBootstrap(request, env);
-  if (url.pathname === '/api/integrations/telegram/update' && request.method === 'POST') return handleTelegramUpdate(request, env, context);
-  if (url.pathname === '/api/camera/status' && request.method === 'GET') return handleCameraStatus(request, env);
-  if (url.pathname === '/api/camera/view' && request.method === 'GET') return handleCameraView(request, env);
-  if (url.pathname === '/api/quality/upload' && request.method === 'POST') return handleQualityPhotoUpload(request, env);
-  if (url.pathname === '/api/quality/file' && request.method === 'GET') return handleQualityPhotoFile(request, env);
-  if (url.pathname === '/api/documents/upload' && request.method === 'POST') return handleDocumentUpload(request, env);
-  if (url.pathname === '/api/documents/file' && request.method === 'GET') return handleDocumentFile(request, env);
-  if (url.pathname === '/api/field-reports/file' && request.method === 'GET') return handleFieldReportFile(request, env);
-  if (url.pathname === '/api/leads' && (request.method === 'GET' || request.method === 'POST')) return handleLeadInbox(request, env);
-  if (url.pathname === '/api/developer-feedback' && (request.method === 'GET' || request.method === 'POST')) return handleDeveloperFeedback(request, env);
-  if (url.pathname === '/api/audit' && request.method === 'GET') return handleAudit(request, env);
-  return json({ ok: false, error: 'not_found' }, 404);
-};
+const handleApi = createApiHandler({
+  session: handleSession,
+  accessUsers: handleAccessUsers,
+  getState: handleGetState,
+  putState: handlePutState,
+  projects: handleProjects,
+  integrationStatus: handleIntegrationStatus,
+  integrationTest: handleIntegrationTest,
+  telegramChatSelect: handleTelegramChatSelect,
+  telegramLink: handleTelegramLink,
+  telegramUnlink: handleTelegramUnlink,
+  telegramBootstrap: handleTelegramBootstrap,
+  telegramUpdate: handleTelegramUpdate,
+  cameraStatus: handleCameraStatus,
+  cameraView: handleCameraView,
+  qualityPhotoUpload: handleQualityPhotoUpload,
+  qualityPhotoFile: handleQualityPhotoFile,
+  documentUpload: handleDocumentUpload,
+  documentFile: handleDocumentFile,
+  fieldReportFile: handleFieldReportFile,
+  leadInbox: handleLeadInbox,
+  publicLead: handlePublicLead,
+  developerFeedback: handleDeveloperFeedback,
+  audit: handleAudit,
+});
 
 const serveSpa = async (request, env) => {
   const assetResponse = await env.ASSETS.fetch(request);
