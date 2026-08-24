@@ -1,12 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { normalizeAppState, projectRepository } from './infrastructure/project-http';
-import {
-  cloneSeedProject,
-  createProjectCache,
-  ProjectCacheError,
-  ProjectCacheWriter,
-  type CachedProject,
-} from './projectCache';
+import { seedState } from './seed';
 import { synchronizeDerivedProgress } from './domain/index';
 import type { ChangeMetadata } from './domain/change';
 import type { AppState, UserRole } from './entities/index';
@@ -20,12 +13,27 @@ import {
   reconcileRemoteSnapshot,
   reconcileRevisionConflict,
   reconcileSavedSnapshot,
+  ProjectCacheError,
   ProjectRevisionConflict,
+  type CachedProject,
+  type ProjectCacheFactory,
+  type ProjectCacheSession,
   type RemoteProjectSnapshot,
   type ProjectListItem,
+  type ProjectRepository,
   type SyncModel,
 } from './application';
-export function useProjectState(role: UserRole, actor: string, storageIdentity = '') {
+
+export interface ProjectStateDependencies {
+  repository: ProjectRepository;
+  cacheFactory: ProjectCacheFactory;
+  normalizeState: (state: AppState) => AppState;
+}
+
+const cloneSeedProject = (): CachedProject => ({ state: structuredClone(seedState), revision: 0, dirty: false });
+
+export function useProjectState(role: UserRole, actor: string, storageIdentity: string, dependencies: ProjectStateDependencies) {
+  const { repository, cacheFactory, normalizeState } = dependencies;
   const initial = useRef(cloneSeedProject());
   initial.current.state = synchronizeDerivedProgress(initial.current.state);
   const [state, setState] = useState<AppState>(initial.current.state);
@@ -59,7 +67,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   const savingRef = useRef(false);
   const conflictRef = useRef<RemoteProjectSnapshot | null>(null);
   const saveTimerRef = useRef<number | null>(null);
-  const cacheWriterRef = useRef<ProjectCacheWriter | null>(null);
+  const cacheSessionRef = useRef<ProjectCacheSession | null>(null);
   const cachePhaseRef = useRef<LocalCacheView['phase']>('idle');
   const pendingSummaryRef = useRef('Обновлены данные проекта');
   const pendingActionRef = useRef('project_update');
@@ -91,17 +99,17 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   const hydrateRef = useRef<() => Promise<void>>(async () => undefined);
 
   const queueCache = useCallback((project: CachedProject) => {
-    cacheWriterRef.current?.schedule(project);
+    cacheSessionRef.current?.schedule(project);
   }, []);
 
   const refreshProjects = useCallback(async () => {
     try {
-      const items = await projectRepository.list();
+      const items = await repository.list();
       if (items.length) setProjects(items);
     } catch {
       // Текущий проект продолжает работать из своего снимка.
     }
-  }, []);
+  }, [repository]);
 
   useEffect(() => {
     roleRef.current = role;
@@ -129,7 +137,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         setSync({ phase: 'saving', revision: expectedRevision, updatedAt: updatedAtRef.current });
 
         try {
-          const result = await projectRepository.save({
+          const result = await repository.save({
             state: snapshot,
             expectedRevision,
             actor: actorRef.current,
@@ -187,7 +195,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   hydrateRef.current = async () => {
     setSync((current) => ({ ...current, phase: 'loading', message: undefined }));
     try {
-      const remote = await projectRepository.load(stateRef.current.project.id);
+      const remote = await repository.load(stateRef.current.project.id);
       readyRef.current = true;
 
       if (!remote) {
@@ -236,8 +244,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   useEffect(() => {
     if (!storageIdentity) return undefined;
     let active = true;
-    const cache = createProjectCache(storageIdentity, normalizeAppState);
-    const writer = new ProjectCacheWriter(cache, (phase, projectId, error) => {
+    const cache = cacheFactory.create(storageIdentity, normalizeState, (phase, projectId, error) => {
       if (!active || projectId !== stateRef.current.project.id) return;
       cachePhaseRef.current = phase;
       setLocalCache({ phase, message: phase === 'failed' ? cacheErrorMessage(error) : undefined });
@@ -245,7 +252,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         ? { ...current, message: syncErrorMessage(new Error('network_error'), phase) }
         : current);
     });
-    cacheWriterRef.current = writer;
+    cacheSessionRef.current = cache;
     cachePhaseRef.current = 'idle';
     setLocalCache({ phase: 'idle' });
 
@@ -276,7 +283,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
       setSync({ phase: 'loading', revision: cached.revision, updatedAt: cached.updatedAt });
       await hydrateRef.current();
     };
-    const flushCache = () => { void writer.flush(); };
+    const flushCache = () => { void cache.flush(); };
     window.addEventListener('pagehide', flushCache);
     document.addEventListener('visibilitychange', flushCache);
     void initialize();
@@ -285,10 +292,10 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
       window.removeEventListener('pagehide', flushCache);
       document.removeEventListener('visibilitychange', flushCache);
-      void writer.flush();
-      if (cacheWriterRef.current === writer) cacheWriterRef.current = null;
+      void cache.flush();
+      if (cacheSessionRef.current === cache) cacheSessionRef.current = null;
     };
-  }, [refreshProjects, storageIdentity, writeModel]);
+  }, [cacheFactory, normalizeState, refreshProjects, storageIdentity, writeModel]);
 
   const updateState = useCallback((next: AppState, metadata?: ChangeMetadata) => {
     const model = applyLocalChange(readModel(), next, metadata);
@@ -337,18 +344,18 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
 
   const switchProject = useCallback(async (projectId: string) => {
     if (projectId === stateRef.current.project.id) return;
-    await cacheWriterRef.current?.flush();
+    await cacheSessionRef.current?.flush();
     if (dirtyRef.current && readyRef.current) await flushRef.current();
     setSync({ phase: 'loading', revision: 0 });
     setConflict(null);
     conflictRef.current = null;
     try {
-      const remote = await projectRepository.load(projectId);
+      const remote = await repository.load(projectId);
       if (!remote) throw new Error('not_found');
       readyRef.current = true;
       applyRemote(remote);
     } catch {
-      const cache = createProjectCache(storageIdentity, normalizeAppState);
+      const cache = cacheSessionRef.current ?? cacheFactory.create(storageIdentity, normalizeState, () => undefined);
       let cached: CachedProject;
       try {
         cached = await cache.load(projectId);
@@ -367,7 +374,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
       writeModel(cachedModel);
       setSync({ phase: 'offline', revision: cached.revision, updatedAt: cached.updatedAt, message: 'Показана локальная копия проекта.' });
     }
-  }, [applyRemote, storageIdentity, writeModel]);
+  }, [applyRemote, cacheFactory, normalizeState, repository, storageIdentity, writeModel]);
 
   const createProject = useCallback(async (nextState: AppState) => {
     if (dirtyRef.current && readyRef.current) await flushRef.current();

@@ -15,7 +15,23 @@ export class ProjectRevisionConflict extends Error {
     this.current = current;
   }
 }
-export interface ProjectCache { load(projectId?: string): Promise<ProjectSnapshot>; store(snapshot: ProjectSnapshot): Promise<void>; }
+export interface CachedProject extends ProjectSnapshot { dirty: boolean; }
+export type ProjectCacheErrorCode = 'corrupt' | 'quota_exceeded' | 'unavailable';
+export class ProjectCacheError extends Error {
+  readonly code: ProjectCacheErrorCode;
+
+  constructor(code: ProjectCacheErrorCode, cause?: unknown) {
+    super(code, cause === undefined ? undefined : { cause });
+    this.name = 'ProjectCacheError';
+    this.code = code;
+  }
+}
+export type CacheWriteStatus = 'saving' | 'saved' | 'failed';
+export interface ProjectCachePort { load(projectId?: string): Promise<CachedProject>; save(project: CachedProject): Promise<void>; }
+export interface ProjectCacheSession { load(projectId?: string): Promise<CachedProject>; schedule(project: CachedProject): void; flush(): Promise<void>; }
+export interface ProjectCacheFactory {
+  create(identity: string, normalizeState: (state: AppState) => AppState, onStatus: (status: CacheWriteStatus, projectId: string, error?: ProjectCacheError) => void): ProjectCacheSession;
+}
 export interface SessionProvider { current(): Promise<{ id: string; name: string; role: UserRole } | null>; }
 export interface FileRepository { upload(path: string, file: Blob): Promise<{ id: string; key: string }>; }
 

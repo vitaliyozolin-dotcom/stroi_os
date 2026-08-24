@@ -3,5 +3,5 @@ export { createClientDecisionCommands, createCounterpartyCommands, createFinance
 export { applyLocalChange, applyRemoteSnapshot, createSyncModel, reconcileRemoteSnapshot, reconcileRevisionConflict, reconcileSavedSnapshot } from './project-sync.ts';
 export type { RemoteReconciliation, SaveReconciliation, SyncModel, SyncSnapshot } from './project-sync.ts';
 export type { StateChangeSink } from './state-change.ts';
-export { ProjectRevisionConflict } from './ports.ts';
-export type { Clock, FileRepository, IdGenerator, ProjectCache, ProjectListItem, ProjectRepository, ProjectSnapshot, RemoteProjectSnapshot, SavedProjectSnapshot, SaveProjectInput, SessionProvider } from './ports.ts';
+export { ProjectCacheError, ProjectRevisionConflict } from './ports.ts';
+export type { CacheWriteStatus, CachedProject, Clock, FileRepository, IdGenerator, ProjectCacheErrorCode, ProjectCacheFactory, ProjectCachePort, ProjectCacheSession, ProjectListItem, ProjectRepository, ProjectSnapshot, RemoteProjectSnapshot, SavedProjectSnapshot, SaveProjectInput, SessionProvider } from './ports.ts';

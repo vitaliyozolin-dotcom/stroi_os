@@ -1,4 +1,4 @@
-import { ProjectCacheError } from '../projectCache.ts';
+import { ProjectCacheError } from '../application/ports.ts';
 
 export type SyncPhase = 'loading' | 'saved' | 'saving' | 'offline' | 'conflict';
 

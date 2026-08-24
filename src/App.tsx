@@ -46,7 +46,10 @@ import type { PageId } from './presentation/navigation';
 import { useProjectState, type SyncPhase } from './useProjectState';
 import { createProjectState } from './seed';
 import { isTaskOverdue } from './domain';
-import { clearProjectCache } from './projectCache';
+import { normalizeAppState, projectRepository } from './infrastructure/project-http';
+import { clearProjectCache, projectCacheFactory } from './infrastructure/project-cache';
+
+const projectStateDependencies = { repository: projectRepository, cacheFactory: projectCacheFactory, normalizeState: normalizeAppState };
 
 const roleLabels: Record<UserRole, string> = {
   management: 'Управление',
@@ -117,7 +120,7 @@ function App() {
     projects,
     switchProject,
     createProject,
-  } = useProjectState(role, session?.name ?? 'Виталий Озолин', session ? `${session.email}|${session.role}` : '');
+  } = useProjectState(role, session?.name ?? 'Виталий Озолин', session ? `${session.email}|${session.role}` : '', projectStateDependencies);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);

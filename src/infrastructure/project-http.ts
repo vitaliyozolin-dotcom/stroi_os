@@ -1,7 +1,7 @@
 import { seedState } from '../seed';
 import { applyKelosiPpr } from '../kelosiPpr';
 import type { AppState } from '../entities/index';
-import { clearProjectCache } from '../projectCache';
+import { clearProjectCache } from './project-cache';
 import { normalizeAppStateWithFallback } from '../domain/index';
 import { ProjectRevisionConflict } from '../application/ports';
 import type { ProjectListItem, ProjectRepository, RemoteProjectSnapshot, SavedProjectSnapshot, SaveProjectInput } from '../application/ports';
