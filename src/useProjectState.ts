@@ -1,13 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  fetchRemoteProject,
-  fetchRemoteProjects,
-  normalizeAppState,
-  RevisionConflictError,
-  saveRemoteProject,
-  type RemoteSnapshot,
-  type ProjectListItem,
-} from './storage';
+import { normalizeAppState, projectRepository } from './infrastructure/project-http';
 import {
   cloneSeedProject,
   createProjectCache,
@@ -28,6 +20,9 @@ import {
   reconcileRemoteSnapshot,
   reconcileRevisionConflict,
   reconcileSavedSnapshot,
+  ProjectRevisionConflict,
+  type RemoteProjectSnapshot,
+  type ProjectListItem,
   type SyncModel,
 } from './application';
 export function useProjectState(role: UserRole, actor: string, storageIdentity = '') {
@@ -40,7 +35,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     updatedAt: initial.current.updatedAt,
   });
   const [localCache, setLocalCache] = useState<LocalCacheView>({ phase: 'idle' });
-  const [conflict, setConflict] = useState<RemoteSnapshot | null>(null);
+  const [conflict, setConflict] = useState<RemoteProjectSnapshot | null>(null);
   const [projects, setProjects] = useState<ProjectListItem[]>([{
     id: initial.current.state.project.id,
     code: initial.current.state.project.code,
@@ -62,7 +57,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   const dirtyRef = useRef(initial.current.dirty);
   const readyRef = useRef(false);
   const savingRef = useRef(false);
-  const conflictRef = useRef<RemoteSnapshot | null>(null);
+  const conflictRef = useRef<RemoteProjectSnapshot | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const cacheWriterRef = useRef<ProjectCacheWriter | null>(null);
   const cachePhaseRef = useRef<LocalCacheView['phase']>('idle');
@@ -101,7 +96,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
 
   const refreshProjects = useCallback(async () => {
     try {
-      const items = await fetchRemoteProjects();
+      const items = await projectRepository.list();
       if (items.length) setProjects(items);
     } catch {
       // Текущий проект продолжает работать из своего снимка.
@@ -113,7 +108,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     actorRef.current = actor;
   }, [actor, role]);
 
-  const applyRemote = useCallback((remote: RemoteSnapshot) => {
+  const applyRemote = useCallback((remote: RemoteProjectSnapshot) => {
     const model = applyRemoteSnapshot(readModel(), remote);
     writeModel(model);
     setSync({ phase: 'saved', revision: remote.revision, updatedAt: remote.updatedAt });
@@ -134,7 +129,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
         setSync({ phase: 'saving', revision: expectedRevision, updatedAt: updatedAtRef.current });
 
         try {
-          const result = await saveRemoteProject({
+          const result = await projectRepository.save({
             state: snapshot,
             expectedRevision,
             actor: actorRef.current,
@@ -153,7 +148,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
           setSync({ phase: dirtyRef.current ? 'saving' : 'saved', revision: result.revision, updatedAt: result.updatedAt });
         } catch (error) {
           dirtyRef.current = true;
-          if (error instanceof RevisionConflictError) {
+          if (error instanceof ProjectRevisionConflict) {
             const resolution = reconcileRevisionConflict(readModel(), snapshot, error.current);
             if (resolution.kind === 'save') {
               writeModel(resolution.model);
@@ -192,7 +187,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
   hydrateRef.current = async () => {
     setSync((current) => ({ ...current, phase: 'loading', message: undefined }));
     try {
-      const remote = await fetchRemoteProject(stateRef.current.project.id);
+      const remote = await projectRepository.load(stateRef.current.project.id);
       readyRef.current = true;
 
       if (!remote) {
@@ -348,7 +343,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity =
     setConflict(null);
     conflictRef.current = null;
     try {
-      const remote = await fetchRemoteProject(projectId);
+      const remote = await projectRepository.load(projectId);
       if (!remote) throw new Error('not_found');
       readyRef.current = true;
       applyRemote(remote);

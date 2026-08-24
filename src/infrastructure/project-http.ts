@@ -1,8 +1,10 @@
 import { seedState } from '../seed';
 import { applyKelosiPpr } from '../kelosiPpr';
-import type { AppState, UserRole } from '../entities/index';
+import type { AppState } from '../entities/index';
 import { clearProjectCache } from '../projectCache';
 import { normalizeAppStateWithFallback } from '../domain/index';
+import { ProjectRevisionConflict } from '../application/ports';
+import type { ProjectListItem, ProjectRepository, RemoteProjectSnapshot, SavedProjectSnapshot, SaveProjectInput } from '../application/ports';
 
 const redirectAfterAuthenticationFailure = (response: Response) => {
   if (response.status !== 401) return;
@@ -10,45 +12,10 @@ const redirectAfterAuthenticationFailure = (response: Response) => {
   window.location.assign('/login');
 };
 
-export interface ProjectListItem {
-  id: string;
-  code: string;
-  name: string;
-  model: string;
-  area: number;
-  address: string;
-  targetDate: string;
-  revision: number;
-  updatedAt?: string;
-}
-
-export interface RemoteSnapshot {
-  projectId: string;
-  state: AppState;
-  revision: number;
-  updatedAt: string;
-  updatedBy: string;
-  updatedRole: UserRole;
-}
-
-export interface SaveResult {
-  projectId: string;
-  revision: number;
-  updatedAt: string;
-  updatedBy: string;
-  updatedRole: UserRole;
-  state?: AppState;
-}
-
-export class RevisionConflictError extends Error {
-  current: RemoteSnapshot;
-
-  constructor(current: RemoteSnapshot) {
-    super('revision_conflict');
-    this.name = 'RevisionConflictError';
-    this.current = current;
-  }
-}
+export type RemoteSnapshot = RemoteProjectSnapshot;
+export type SaveResult = SavedProjectSnapshot;
+export type { ProjectListItem };
+export { ProjectRevisionConflict as RevisionConflictError };
 
 export class StorageRequestError extends Error {
   code: string;
@@ -140,7 +107,7 @@ export const fetchRemoteProject = async (projectId: string): Promise<RemoteSnaps
         state: saved.state ?? migratedState,
       };
     } catch (error) {
-      if (error instanceof RevisionConflictError) {
+      if (error instanceof ProjectRevisionConflict) {
         return { ...error.current, state: applyKelosiPpr(normalizeAppState(error.current.state)) };
       }
       return { ...body.snapshot, state: migratedState };
@@ -157,14 +124,7 @@ export const saveRemoteProject = async ({
   role,
   action = 'project_update',
   summary = 'Обновлены данные проекта',
-}: {
-  state: AppState;
-  expectedRevision: number;
-  actor: string;
-  role: UserRole;
-  action?: string;
-  summary?: string;
-}): Promise<SaveResult> => {
+}: SaveProjectInput): Promise<SavedProjectSnapshot> => {
   let response: Response;
   try {
     response = await fetch(`/api/state?projectId=${encodeURIComponent(state.project.id)}`, {
@@ -189,7 +149,7 @@ export const saveRemoteProject = async ({
 
   if (response.status === 409) {
     const body = await readError(response);
-    if (body.current) throw new RevisionConflictError(body.current);
+    if (body.current) throw new ProjectRevisionConflict(body.current);
     throw new StorageRequestError('revision_conflict');
   }
   if (!response.ok) {
@@ -203,4 +163,10 @@ export const saveRemoteProject = async ({
   return body.snapshot.state && isAppState(body.snapshot.state)
     ? { ...body.snapshot, state: normalizeAppState(body.snapshot.state) }
     : body.snapshot;
+};
+
+export const projectRepository: ProjectRepository = {
+  list: fetchRemoteProjects,
+  load: fetchRemoteProject,
+  save: saveRemoteProject,
 };

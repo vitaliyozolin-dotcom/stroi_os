@@ -107,3 +107,15 @@ test('project synchronization is runtime-neutral and storage remains a compatibi
   assert.match(storage, /from '.\/infrastructure\/project-http\.ts'/);
   assert.doesNotMatch(storage, /\bfetch\(|class RevisionConflictError/);
 });
+
+test('project UI depends on the application repository port instead of transport functions', () => {
+  const hook = source('src/useProjectState.ts');
+  const ports = source('src/application/ports.ts');
+  const adapter = source('src/infrastructure/project-http.ts');
+
+  assert.match(ports, /interface ProjectRepository/);
+  assert.match(ports, /class ProjectRevisionConflict/);
+  assert.match(adapter, /projectRepository: ProjectRepository/);
+  assert.match(hook, /projectRepository\.(?:list|load|save)/);
+  assert.doesNotMatch(hook, /fetchRemoteProject|fetchRemoteProjects|saveRemoteProject|RevisionConflictError/);
+});

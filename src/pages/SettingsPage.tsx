@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { formatDateTime, uid } from '../domain';
 import type { AppState, DashboardWidget, NotificationSettings, SystemUser, UserRole } from '../entities/index';
-import type { RemoteSnapshot } from '../storage';
+import type { RemoteProjectSnapshot } from '../application';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 
 type SettingsTab = 'access' | 'dashboard' | 'notifications' | 'integrations';
@@ -89,7 +89,7 @@ function Toggle({ checked, onChange, label, disabled = false }: { checked: boole
   return <button type="button" role="switch" disabled={disabled} aria-checked={checked} aria-label={label} className={checked ? 'toggle toggle--on' : 'toggle'} onClick={onChange}><span /></button>;
 }
 
-export function SettingsPage({ state, actor, canManageAccess, onChange, onServerSnapshot }: { state: AppState; actor: string; canManageAccess: boolean; onChange: (next: AppState) => void; onServerSnapshot: (snapshot: RemoteSnapshot) => void }) {
+export function SettingsPage({ state, actor, canManageAccess, onChange, onServerSnapshot }: { state: AppState; actor: string; canManageAccess: boolean; onChange: (next: AppState) => void; onServerSnapshot: (snapshot: RemoteProjectSnapshot) => void }) {
   const saveChange = createSettingsCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const [tab, setTab] = useState<SettingsTab>('access');
   const [showInvite, setShowInvite] = useState(false);
@@ -221,7 +221,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
             user: { name: invite.name, email: invite.email, role: invite.role, telegram: invite.telegram },
           }),
         });
-        const body = await response.json() as { ok?: boolean; error?: string; user?: SystemUser; snapshot?: RemoteSnapshot };
+        const body = await response.json() as { ok?: boolean; error?: string; user?: SystemUser; snapshot?: RemoteProjectSnapshot };
         if (!(response.status === 404 && body.error === 'not_found')) {
           if (!response.ok || !body.ok || !body.user || !body.snapshot) throw new Error(body.error || 'access_error');
           onServerSnapshot(body.snapshot);
@@ -264,7 +264,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
             },
           }),
         });
-        const body = await response.json() as { ok?: boolean; error?: string; snapshot?: RemoteSnapshot };
+        const body = await response.json() as { ok?: boolean; error?: string; snapshot?: RemoteProjectSnapshot };
         if (!(response.status === 404 && body.error === 'not_found')) {
           if (!response.ok || !body.ok || !body.snapshot) throw new Error(body.error || 'access_error');
           onServerSnapshot(body.snapshot);
@@ -339,7 +339,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: state.project.id, projectIds: projectAccess.selected }),
       });
-      const body = await response.json() as UserProjectAccessSnapshot & { ok?: boolean; error?: string; snapshot?: RemoteSnapshot | null };
+      const body = await response.json() as UserProjectAccessSnapshot & { ok?: boolean; error?: string; snapshot?: RemoteProjectSnapshot | null };
       if (!response.ok || !body.ok) throw new Error(body.error || 'access_error');
       if (body.snapshot?.projectId === state.project.id) onServerSnapshot(body.snapshot);
       const user = projectAccess.user;
