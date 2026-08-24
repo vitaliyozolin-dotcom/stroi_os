@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -97,15 +97,13 @@ test('UI delegates HTTP transport to infrastructure', () => {
   }
 });
 
-test('project synchronization is runtime-neutral and storage remains a compatibility facade', () => {
+test('project synchronization is runtime-neutral and the storage compatibility facade stays removed', () => {
   const sync = source('src/application/project-sync.ts');
   assert.doesNotMatch(sync, /from ['"]react|\bfetch\(|\bwindow\.|\bdocument\.|indexedDB/);
   assert.match(sync, /reconcileRemoteSnapshot/);
   assert.match(sync, /reconcileRevisionConflict/);
 
-  const storage = source('src/storage.ts');
-  assert.match(storage, /from '.\/infrastructure\/project-http\.ts'/);
-  assert.doesNotMatch(storage, /\bfetch\(|class RevisionConflictError/);
+  assert.equal(existsSync(new URL('../src/storage.ts', import.meta.url)), false);
 });
 
 test('App composes project adapters while the synchronization hook depends only on application ports', () => {
@@ -120,5 +118,6 @@ test('App composes project adapters while the synchronization hook depends only 
   assert.match(hook, /dependencies: ProjectStateDependencies/);
   assert.match(hook, /repository\.(?:list|load|save)/);
   assert.match(hook, /cacheFactory\.create/);
+  assert.match(source('src/application/project-sync-workflow.ts'), /flushProjectChanges/);
   assert.doesNotMatch(hook, /from ['"].*infrastructure|fetchRemoteProject|fetchRemoteProjects|saveRemoteProject|RevisionConflictError|createProjectCache|ProjectCacheWriter/);
 });

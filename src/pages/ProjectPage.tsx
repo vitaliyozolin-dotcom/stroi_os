@@ -1,6 +1,6 @@
 import { requestApi } from '../infrastructure/api-http';
 import { createProjectDocumentCommands } from '../application';
-import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
+import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Building2,
@@ -21,7 +21,7 @@ import {
   UploadCloud,
   UsersRound,
 } from 'lucide-react';
-import { formatDate, formatDateTime, uid } from '../domain';
+import { formatDate, formatDateTime } from '../presentation/formatting';
 import type { AppState, AuthenticatedUser, ProjectDocument } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';

@@ -1,6 +1,6 @@
 import { requestApi } from '../infrastructure/api-http';
 import { createSettingsCommands } from '../application';
-import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
+import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useState, type FormEvent } from 'react';
 import {
   BellRing,
@@ -20,7 +20,7 @@ import {
   ShieldCheck,
   UserCog,
 } from 'lucide-react';
-import { formatDateTime, uid } from '../domain';
+import { formatDateTime } from '../presentation/formatting';
 import type { AppState, DashboardWidget, NotificationSettings, SystemUser, UserRole } from '../entities/index';
 import type { RemoteProjectSnapshot } from '../application';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';

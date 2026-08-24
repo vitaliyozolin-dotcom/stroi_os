@@ -8,19 +8,24 @@ export type { SyncPhase } from './presentation/sync-status';
 
 import {
   applyLocalChange,
-  applyRemoteSnapshot,
+  applyProjectRemote,
+  createProjectWorkflow,
   createSyncModel,
-  reconcileRemoteSnapshot,
-  reconcileRevisionConflict,
-  reconcileSavedSnapshot,
+  flushProjectChanges,
+  hydrateProject,
+  keepProjectLocalVersion,
   ProjectCacheError,
-  ProjectRevisionConflict,
+  retryProjectSync,
+  switchProjectWorkflow,
+  useProjectServerVersion,
   type CachedProject,
   type ProjectCacheFactory,
   type ProjectCacheSession,
   type RemoteProjectSnapshot,
   type ProjectListItem,
   type ProjectRepository,
+  type ProjectSyncEvent,
+  type ProjectSyncWorkflow,
   type SyncModel,
 } from './application';
 
@@ -72,6 +77,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity: 
   const pendingSummaryRef = useRef('Обновлены данные проекта');
   const pendingActionRef = useRef('project_update');
   const flushRef = useRef<() => Promise<void>>(async () => undefined);
+  const workflowRef = useRef<ProjectSyncWorkflow | null>(null);
 
   const readModel = useCallback((): SyncModel => ({
     state: stateRef.current,
@@ -116,130 +122,46 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity: 
     actorRef.current = actor;
   }, [actor, role]);
 
+  const emitSync = useCallback((event: ProjectSyncEvent) => {
+    if (event.phase === 'loading') setSync({ phase: 'loading', revision: event.revision, updatedAt: event.updatedAt });
+    else if (event.phase === 'saving') setSync({ phase: 'saving', revision: event.revision, updatedAt: event.updatedAt });
+    else if (event.phase === 'saved') setSync({ phase: event.dirty ? 'saving' : 'saved', revision: event.revision, updatedAt: event.updatedAt });
+    else if (event.phase === 'conflict') setSync({ phase: 'conflict', revision: event.revision, updatedAt: event.updatedAt, message: `Одновременно изменена одна и та же запись: ${event.conflicts.join(', ')}.` });
+    else if (event.context === 'switch_cache') {
+      const error = event.error instanceof ProjectCacheError ? event.error : new ProjectCacheError('unavailable', event.error);
+      cachePhaseRef.current = 'failed';
+      setLocalCache({ phase: 'failed', message: cacheErrorMessage(error) });
+      setSync({ phase: 'offline', revision: event.revision, updatedAt: event.updatedAt, message: 'Не удалось загрузить выбранный проект: локальная копия недоступна.' });
+    } else setSync({
+      phase: 'offline',
+      revision: event.revision,
+      updatedAt: event.updatedAt,
+      message: event.context === 'switch_missing' ? 'Не удалось загрузить выбранный проект.' : event.context === 'switch_cached' ? 'Показана локальная копия проекта.' : syncErrorMessage(event.error, cachePhaseRef.current),
+    });
+  }, []);
+
+  const workflow: ProjectSyncWorkflow = {
+    repository,
+    actor: () => actorRef.current,
+    role: () => roleRef.current,
+    readModel,
+    writeModel,
+    queueCache,
+    cache: () => cacheSessionRef.current,
+    conflict: () => conflictRef.current,
+    setConflict: (next) => { conflictRef.current = next; setConflict(next); },
+    saving: () => savingRef.current,
+    setSaving: (next) => { savingRef.current = next; },
+    emit: emitSync,
+  };
+  workflowRef.current = workflow;
+  flushRef.current = () => flushProjectChanges(workflow);
+  hydrateRef.current = () => hydrateProject(workflow, refreshProjects);
+
   const applyRemote = useCallback((remote: RemoteProjectSnapshot) => {
-    const model = applyRemoteSnapshot(readModel(), remote);
-    writeModel(model);
-    setSync({ phase: 'saved', revision: remote.revision, updatedAt: remote.updatedAt });
-    queueCache({ state: model.state, revision: remote.revision, dirty: false, updatedAt: remote.updatedAt });
-  }, [queueCache, readModel, writeModel]);
-
-  flushRef.current = async () => {
-    if (!readyRef.current || savingRef.current || conflictRef.current || !dirtyRef.current) return;
-    savingRef.current = true;
-
-    try {
-      while (dirtyRef.current && !conflictRef.current) {
-        dirtyRef.current = false;
-        const snapshot = synchronizeDerivedProgress(stateRef.current);
-        stateRef.current = snapshot;
-        const expectedRevision = revisionRef.current;
-        const summary = pendingSummaryRef.current;
-        setSync({ phase: 'saving', revision: expectedRevision, updatedAt: updatedAtRef.current });
-
-        try {
-          const result = await repository.save({
-            state: snapshot,
-            expectedRevision,
-            actor: actorRef.current,
-            role: roleRef.current,
-            action: pendingActionRef.current,
-            summary,
-          });
-          const saved = reconcileSavedSnapshot(readModel(), snapshot, { ...result, state: result.state ?? snapshot });
-          writeModel(saved);
-          queueCache({
-            state: stateRef.current,
-            revision: result.revision,
-            dirty: dirtyRef.current,
-            updatedAt: result.updatedAt,
-          });
-          setSync({ phase: dirtyRef.current ? 'saving' : 'saved', revision: result.revision, updatedAt: result.updatedAt });
-        } catch (error) {
-          dirtyRef.current = true;
-          if (error instanceof ProjectRevisionConflict) {
-            const resolution = reconcileRevisionConflict(readModel(), snapshot, error.current);
-            if (resolution.kind === 'save') {
-              writeModel(resolution.model);
-              queueCache({
-                state: resolution.model.state,
-                revision: error.current.revision,
-                dirty: true,
-                updatedAt: error.current.updatedAt,
-              });
-              continue;
-            }
-            conflictRef.current = error.current;
-            setConflict(error.current);
-            setSync({
-              phase: 'conflict',
-              revision: revisionRef.current,
-              updatedAt: updatedAtRef.current,
-              message: `Одновременно изменена одна и та же запись: ${resolution.conflicts.join(', ')}.`,
-            });
-          } else {
-            setSync({
-              phase: 'offline',
-              revision: revisionRef.current,
-              updatedAt: updatedAtRef.current,
-              message: syncErrorMessage(error, cachePhaseRef.current),
-            });
-          }
-          break;
-        }
-      }
-    } finally {
-      savingRef.current = false;
-    }
-  };
-
-  hydrateRef.current = async () => {
-    setSync((current) => ({ ...current, phase: 'loading', message: undefined }));
-    try {
-      const remote = await repository.load(stateRef.current.project.id);
-      readyRef.current = true;
-
-      if (!remote) {
-        dirtyRef.current = true;
-        await flushRef.current();
-        await refreshProjects();
-        return;
-      }
-
-      if (dirtyRef.current) {
-        const resolution = reconcileRemoteSnapshot(readModel(), remote);
-        if (resolution.kind === 'remote') {
-          applyRemote(remote);
-          return;
-        }
-        if (resolution.kind === 'save') {
-          writeModel(resolution.model);
-          await flushRef.current();
-          await refreshProjects();
-          return;
-        }
-        conflictRef.current = remote;
-        setConflict(remote);
-        setSync({
-          phase: 'conflict',
-          revision: revisionRef.current,
-          updatedAt: updatedAtRef.current,
-          message: `Одновременно изменена одна и та же запись: ${resolution.conflicts.join(', ')}.`,
-        });
-        return;
-      }
-
-      applyRemote(remote);
-      await refreshProjects();
-    } catch (error) {
-      readyRef.current = false;
-      setSync({
-        phase: 'offline',
-        revision: revisionRef.current,
-        updatedAt: updatedAtRef.current,
-        message: syncErrorMessage(error, cachePhaseRef.current),
-      });
-    }
-  };
+    const current = workflowRef.current;
+    if (current) applyProjectRemote(current, remote);
+  }, []);
 
   useEffect(() => {
     if (!storageIdentity) return undefined;
@@ -312,82 +234,29 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity: 
   }, [queueCache, readModel, writeModel]);
 
   const retry = useCallback(() => {
-    if (readyRef.current) void flushRef.current();
-    else void hydrateRef.current();
-  }, []);
+    const current = workflowRef.current;
+    if (current) void retryProjectSync(current, refreshProjects);
+  }, [refreshProjects]);
 
   const useServerVersion = useCallback(() => {
-    const current = conflictRef.current;
-    if (!current) return;
-    conflictRef.current = null;
-    setConflict(null);
-    applyRemote(current);
-  }, [applyRemote]);
+    const current = workflowRef.current;
+    if (current) useProjectServerVersion(current);
+  }, []);
 
   const keepLocalVersion = useCallback(() => {
-    const current = conflictRef.current;
-    if (!current) return;
-    revisionRef.current = current.revision;
-    updatedAtRef.current = current.updatedAt;
-    conflictRef.current = null;
-    setConflict(null);
-    dirtyRef.current = true;
-    pendingSummaryRef.current = 'Конфликт разрешён: сохранена локальная версия';
-    queueCache({
-      state: stateRef.current,
-      revision: current.revision,
-      dirty: true,
-      updatedAt: current.updatedAt,
-    });
-    void flushRef.current();
-  }, [queueCache]);
+    const current = workflowRef.current;
+    if (current) void keepProjectLocalVersion(current);
+  }, []);
 
   const switchProject = useCallback(async (projectId: string) => {
-    if (projectId === stateRef.current.project.id) return;
-    await cacheSessionRef.current?.flush();
-    if (dirtyRef.current && readyRef.current) await flushRef.current();
-    setSync({ phase: 'loading', revision: 0 });
-    setConflict(null);
-    conflictRef.current = null;
-    try {
-      const remote = await repository.load(projectId);
-      if (!remote) throw new Error('not_found');
-      readyRef.current = true;
-      applyRemote(remote);
-    } catch {
-      const cache = cacheSessionRef.current ?? cacheFactory.create(storageIdentity, normalizeState, () => undefined);
-      let cached: CachedProject;
-      try {
-        cached = await cache.load(projectId);
-      } catch (error) {
-        const cacheError = error instanceof ProjectCacheError ? error : new ProjectCacheError('unavailable', error);
-        cachePhaseRef.current = 'failed';
-        setLocalCache({ phase: 'failed', message: cacheErrorMessage(cacheError) });
-        setSync((current) => ({ ...current, phase: 'offline', message: 'Не удалось загрузить выбранный проект: локальная копия недоступна.' }));
-        return;
-      }
-      if (cached.state.project.id !== projectId) {
-        setSync((current) => ({ ...current, phase: 'offline', message: 'Не удалось загрузить выбранный проект.' }));
-        return;
-      }
-      const cachedModel = createSyncModel(cached, cached.dirty, false);
-      writeModel(cachedModel);
-      setSync({ phase: 'offline', revision: cached.revision, updatedAt: cached.updatedAt, message: 'Показана локальная копия проекта.' });
-    }
-  }, [applyRemote, cacheFactory, normalizeState, repository, storageIdentity, writeModel]);
+    const current = workflowRef.current;
+    if (current) await switchProjectWorkflow(current, projectId);
+  }, []);
 
   const createProject = useCallback(async (nextState: AppState) => {
-    if (dirtyRef.current && readyRef.current) await flushRef.current();
-    const model = createSyncModel({ state: nextState, revision: 0 }, true, true);
-    model.pendingSummary = `Создан проект ${model.state.project.code}`;
-    writeModel(model);
-    conflictRef.current = null;
-    setConflict(null);
-    setSync({ phase: 'saving', revision: 0 });
-    queueCache({ state: model.state, revision: 0, dirty: true });
-    await flushRef.current();
-    await refreshProjects();
-  }, [queueCache, refreshProjects, writeModel]);
+    const current = workflowRef.current;
+    if (current) await createProjectWorkflow(current, nextState, refreshProjects);
+  }, [refreshProjects]);
 
   return {
     state,

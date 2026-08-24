@@ -21,7 +21,7 @@ import {
   UserRound,
   ZoomIn,
 } from 'lucide-react';
-import { formatDateTime } from '../domain';
+import { formatDateTime } from '../presentation/formatting';
 import { changeCheckpoint } from '../domain/index';
 import { commitStateChange, createMutationContext, type StateChangeSink } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';

@@ -1,6 +1,6 @@
 import { requestApi } from '../infrastructure/api-http';
 import { createMarketingCommands } from '../application';
-import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
+import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   ArrowRight,
@@ -15,7 +15,7 @@ import {
   Target,
   UsersRound,
 } from 'lucide-react';
-import { formatDateTime, money, shortMoney, uid } from '../domain';
+import { formatDateTime, money, shortMoney } from '../presentation/formatting';
 import type { AppState, Lead, LeadSource, LeadStage } from '../entities/index';
 import { Field, MetricCard, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 

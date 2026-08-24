@@ -1,5 +1,5 @@
 import { createProcurementCommands } from '../application';
-import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
+import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
@@ -15,7 +15,7 @@ import {
   Truck,
   Warehouse,
 } from 'lucide-react';
-import { formatDate, money, uid } from '../domain';
+import { formatDate, money } from '../presentation/formatting';
 import type { AppState, ProcurementStatus, UserRole } from '../entities/index';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';

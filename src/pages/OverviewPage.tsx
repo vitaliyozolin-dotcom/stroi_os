@@ -14,7 +14,9 @@ import {
   Truck,
 } from 'lucide-react';
 import type { CSSProperties } from 'react';
-import { financeTotals, formatDate, formatDateTime, isTaskOverdue, paidAmountFor, progressTotals, shortMoney, stageStatusLabel, taskStatusLabel } from '../domain';
+import { financeTotals, isTaskOverdue, paidAmountFor, projectProgressTotals as progressTotals } from '../domain/index';
+import { formatDate, formatDateTime, shortMoney } from '../presentation/formatting';
+import { stageStatusLabel, taskStatusLabel } from '../presentation/status-labels';
 import type { AppState, DashboardWidget, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { MetricCard, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';

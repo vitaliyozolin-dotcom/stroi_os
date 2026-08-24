@@ -1,5 +1,5 @@
 import { createFinanceCommands } from '../application';
-import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
+import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   ArrowDownLeft,
@@ -14,7 +14,8 @@ import {
   ShieldCheck,
   WalletCards,
 } from 'lucide-react';
-import { acceptedAmountFor, financeTotals, formatDate, lineTotals, money, paidAmountFor, shortMoney, uid } from '../domain';
+import { acceptedAmountFor, financeTotals, lineTotals, paidAmountFor } from '../domain/index';
+import { formatDate, money, shortMoney } from '../presentation/formatting';
 import type { AppState, ExpenseStatus, FinanceEntry, ProjectDocument } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { Field, MetricCard, Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
@@ -282,4 +283,3 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
     </div>
   );
 }
-

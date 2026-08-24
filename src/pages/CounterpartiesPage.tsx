@@ -1,10 +1,10 @@
 import { createCounterpartyCommands } from '../application';
-import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
+import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Building2, FileCheck2, Plus, Search, ShieldCheck, Truck, UsersRound } from 'lucide-react';
 import { CounterpartyModal } from '../components/CounterpartyModal';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
-import { money, uid } from '../domain';
+import { money } from '../presentation/formatting';
 import type { AppState, CounterpartyProfile, CounterpartyStatus, CounterpartyType, ProjectDocument } from '../entities/index';
 
 const typeLabels: Record<CounterpartyType, string> = { contractor: 'Подрядчик', supplier: 'Поставщик', service: 'Сервис', client: 'Заказчик' };

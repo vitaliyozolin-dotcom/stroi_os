@@ -21,18 +21,11 @@ import {
   UserRound,
   UsersRound,
 } from 'lucide-react';
-import {
-  formatDate,
-  formatDateTime,
-  isTaskClosed,
-  isTaskOverdue,
-  taskPriorityLabel,
-  taskStatusLabel,
-  uid,
-} from '../domain';
-import { addTaskComment, changeTaskStatus, saveTask as saveTaskChange } from '../domain/index';
+import { addTaskComment, changeTaskStatus, isTaskClosed, isTaskOverdue, saveTask as saveTaskChange } from '../domain/index';
+import { formatDate, formatDateTime } from '../presentation/formatting';
+import { taskPriorityLabel, taskStatusLabel } from '../presentation/status-labels';
 import { commitStateChange, createMutationContext, type StateChangeSink } from '../application';
-import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
+import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import type {
   AppState,
   AuthenticatedUser,

@@ -1,6 +1,6 @@
 import { requestApi } from '../infrastructure/api-http';
 import { createClientDecisionCommands } from '../application';
-import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
+import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
   ArrowRight,
@@ -22,7 +22,8 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
-import { financeTotals, formatDate, formatDateTime, money, progressTotals, uid } from '../domain';
+import { financeTotals, projectProgressTotals as progressTotals } from '../domain/index';
+import { formatDate, formatDateTime, money } from '../presentation/formatting';
 import type { AppState } from '../entities/index';
 import { Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 
@@ -189,4 +190,3 @@ export function ClientPage({ state, onChange }: { state: AppState; onChange: (ne
     </div>
   );
 }
-

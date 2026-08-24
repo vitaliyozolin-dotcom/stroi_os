@@ -1,5 +1,5 @@
 import { createScheduleCommands } from '../application';
-import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
+import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
@@ -24,7 +24,9 @@ import {
   ShieldCheck,
   UserRound,
 } from 'lucide-react';
-import { formatDate, money, paidAmountFor, progressTotals, stageFinanceTotals, stageStatusLabel, uid } from '../domain';
+import { paidAmountFor, projectProgressTotals as progressTotals, stageFinanceTotals } from '../domain/index';
+import { formatDate, money } from '../presentation/formatting';
+import { stageStatusLabel } from '../presentation/status-labels';
 import { addDaysKey, mondayOf, projectWeekNumber, projectWeekRange, stageWeekRange } from '../projectWeek';
 import type { AppState, ProjectTask, StageStatus, UserRole } from '../entities/index';
 import { Field, Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';

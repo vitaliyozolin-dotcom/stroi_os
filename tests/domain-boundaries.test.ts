@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { addTaskComment, changeCheckpoint, changeProjectState, isTaskClosed, isTaskOverdue, normalizeAppStateWithFallback } from '../src/domain/index.ts';
@@ -31,11 +31,10 @@ test('state normalization uses an explicit fallback without mutating either inpu
   assert.deepEqual(fallback, fallbackBefore);
 });
 
-test('legacy root files are compatibility facades, not parallel implementations', () => {
-  assert.match(source('src/domain.ts'), /from '\.\/domain\/index\.ts'/);
-  assert.match(source('src/progressEngine.ts'), /from '\.\/domain\/progress\.ts'/);
-  assert.match(source('src/conflict.ts'), /from '\.\/domain\/merge\.ts'/);
-  assert.doesNotMatch(source('src/domain.ts'), /new Intl\.|Date\.now\(|Math\.random\(/);
+test('removed domain compatibility facades cannot become parallel implementations again', () => {
+  for (const file of ['domain.ts', 'conflict.ts', 'progressEngine.ts']) {
+    assert.equal(existsSync(new URL(`../src/${file}`, import.meta.url)), false, `${file} was restored`);
+  }
 });
 
 test('task mutations produce auditable StateChange without mutating the source state', () => {

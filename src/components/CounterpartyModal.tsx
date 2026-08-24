@@ -14,7 +14,8 @@ import {
   ShieldCheck,
   Truck,
 } from 'lucide-react';
-import { acceptedAmountFor, formatDate, money, paidAmountFor } from '../domain';
+import { acceptedAmountFor, paidAmountFor } from '../domain/index';
+import { formatDate, money } from '../presentation/formatting';
 import type { AppState, ExpenseStatus, ProcurementStatus, StageStatus } from '../entities/index';
 import { Modal, StatusBadge } from './Ui';
 
@@ -125,4 +126,3 @@ export function CounterpartyModal({ state, counterpartyId, name, onClose, onOpen
     </Modal>
   );
 }
-

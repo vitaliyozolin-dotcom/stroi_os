@@ -45,7 +45,7 @@ import type { AuthenticatedUser, UserRole } from './entities/index';
 import type { PageId } from './presentation/navigation';
 import { useProjectState, type SyncPhase } from './useProjectState';
 import { createProjectState } from './seed';
-import { isTaskOverdue } from './domain';
+import { isTaskOverdue } from './domain/index';
 import { normalizeAppState, projectRepository } from './infrastructure/project-http';
 import { clearProjectCache, projectCacheFactory } from './infrastructure/project-cache';
 
