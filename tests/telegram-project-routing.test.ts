@@ -295,6 +295,7 @@ test('task callback key includes project identity for duplicate task ids', () =>
 test('project routing and confirmation are isolated by Telegram user, chat and draft project', () => {
   const worker = readFileSync(new URL('../sites/worker.js', import.meta.url), 'utf8');
   const bindings = readFileSync(new URL('../sites/telegram/bindings.js', import.meta.url), 'utf8');
+  const projectWrite = readFileSync(new URL('../sites/projects/write.js', import.meta.url), 'utf8');
   assert.match(worker, /PRIMARY KEY \(telegram_user_id, chat_id\)/);
   assert.match(worker, /saveTelegramProjectSelection\(env\.DB, telegramUserId, chatId, project\.id\)/);
   assert.match(worker, /bindingForTelegramProject\(env\.DB, telegramUserId, draft\.project_id\)/);
@@ -310,8 +311,8 @@ test('project routing and confirmation are isolated by Telegram user, chat and d
   assert.match(bindings, /SET used_at = \?, claim_id = \?/);
   assert.match(bindings, /export const unlinkTelegramBinding/);
   assert.match(worker, /pending: \{ type: 'command', command, sourceMessageId:/);
-  assert.match(worker, /await env\.DB\.batch\(\[stateStatement, \.\.\.outboxStatements\]\)/);
-  assert.match(worker, /WHERE project_id = \? AND revision = \? AND updated_at = \? AND updated_by = \?/);
+  assert.match(projectWrite, /await env\.DB\.batch\(\[stateStatement, \.\.\.outboxStatements\]\)/);
+  assert.match(projectWrite, /WHERE project_id = \? AND revision = \? AND updated_at = \? AND updated_by = \?/);
 });
 
 test('Telegram retries keep the update lease and queue confirmations before closing drafts', () => {

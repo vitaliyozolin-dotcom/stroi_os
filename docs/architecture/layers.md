@@ -16,12 +16,12 @@ presentation → application → domain → entities
 
 Публичная точка входа сущностей — `src/entities/index.ts`; её используют core, domain/sync, presentation и тесты. UI-контракт `PageId` принадлежит `src/presentation/navigation.ts`. Совместимый фасад `src/types.ts` удалён после миграции всех потребителей.
 
-Чистый domain-слой содержит финансовые расчёты, task/progress-правила, three-way merge и нормализацию состояния. Публичная точка входа — `src/domain/index.ts`. Форматирование и подписи статусов находятся в `src/presentation`, runtime-генератор идентификаторов — в `src/infrastructure`. Старые `src/domain.ts`, `src/progressEngine.ts` и `src/conflict.ts` временно сохраняются только как совместимые фасады.
+Чистый domain-слой содержит финансовые расчёты, task/progress-правила, three-way merge и нормализацию состояния. Публичная точка входа — `src/domain/index.ts`. Форматирование и подписи статусов находятся в `src/presentation`, runtime-генератор идентификаторов — в `src/infrastructure`. Переходные `src/domain.ts`, `src/progressEngine.ts` и `src/conflict.ts` удалены после миграции потребителей.
 
 Application-контракты находятся в `src/application`: `StateChange` передаёт состояние и audit-метаданные, а порты описывают project repository, cache, session, files, clock и ID generator без runtime-зависимостей. `useProjectState` сохраняет `action` и `summary` вместе с expected revision.
 Бизнес-страницы сохраняют изменения только через StateChange: Tasks и Quality используют отдельные domain-операции, остальные разделы проходят через application dispatcher с явными action/summary и сохранением существующих payload.
 
-Чистые переходы синхронизации находятся в src/application/project-sync.ts: локальные изменения, hydration, успешное сохранение и revision conflict обрабатываются без React и browser API. HTTP/DTO реализация перенесена в src/infrastructure/project-http.ts; src/storage.ts оставлен временным совместимым фасадом.
+Чистые переходы синхронизации находятся в src/application/project-sync.ts: локальные изменения, hydration, успешное сохранение и revision conflict обрабатываются без React и browser API. HTTP/DTO реализация перенесена в `src/infrastructure/project-http.ts`; переходный `src/storage.ts` удалён после миграции потребителей. Worker делегирует API dispatch, чтение и revision-aware запись проектов отдельным boundary-модулям.
 
 ## Правила миграции
 
