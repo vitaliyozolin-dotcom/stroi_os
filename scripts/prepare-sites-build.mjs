@@ -37,6 +37,7 @@ await Promise.all([
   copyFile(`${projectRoot}sites/telegram/drafts.js`, `${projectRoot}dist/server/telegram/drafts.js`),
   copyFile(`${projectRoot}sites/telegram/inbox.js`, `${projectRoot}dist/server/telegram/inbox.js`),
   copyFile(`${projectRoot}sites/telegram/outbox.js`, `${projectRoot}dist/server/telegram/outbox.js`),
+  copyFile(`${projectRoot}sites/telegram/project-store.js`, `${projectRoot}dist/server/telegram/project-store.js`),
   copyFile(`${projectRoot}sites/telegram/rendering.js`, `${projectRoot}dist/server/telegram/rendering.js`),
   copyFile(`${projectRoot}sites/telegram/transport.js`, `${projectRoot}dist/server/telegram/transport.js`),
 ]);
