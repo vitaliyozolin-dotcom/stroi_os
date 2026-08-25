@@ -22,6 +22,7 @@ await Promise.all([
   copyFile(`${projectRoot}sites/files/response.js`, `${projectRoot}dist/server/files/response.js`),
   copyFile(`${projectRoot}sites/files/routes.js`, `${projectRoot}dist/server/files/routes.js`),
   copyFile(`${projectRoot}sites/integrations/camera.js`, `${projectRoot}dist/server/integrations/camera.js`),
+  copyFile(`${projectRoot}sites/integrations/notifications.js`, `${projectRoot}dist/server/integrations/notifications.js`),
   copyFile(`${projectRoot}sites/lib/date.js`, `${projectRoot}dist/server/lib/date.js`),
   copyFile(`${projectRoot}sites/lib/http.js`, `${projectRoot}dist/server/lib/http.js`),
   copyFile(`${projectRoot}sites/lib/request-body.js`, `${projectRoot}dist/server/lib/request-body.js`),

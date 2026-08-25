@@ -59,7 +59,7 @@ test('Sites artifact includes Worker file-route modules', () => {
 test('both runtime artifacts include extracted project, access, integration and API boundaries', () => {
   const prepare = source('scripts/prepare-sites-build.mjs');
   const dockerfile = source('Dockerfile');
-  for (const modulePath of ['access/session', 'integrations/camera', 'projects/routes', 'projects/write', 'routes/api']) {
+  for (const modulePath of ['access/session', 'integrations/camera', 'integrations/notifications', 'projects/routes', 'projects/write', 'routes/api']) {
     assert.match(prepare, new RegExp(`sites/${modulePath}\\.js.*dist/server/${modulePath}\\.js`));
   }
   for (const directory of ['access', 'integrations', 'projects', 'routes']) {
