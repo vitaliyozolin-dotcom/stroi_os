@@ -15,6 +15,7 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   const connection = source('sites/telegram/connection.js');
   const rendering = source('sites/telegram/rendering.js');
   const projectStore = source('sites/telegram/project-store.js');
+  const battleAutomations = source('sites/automations/battle.js');
 
   assert.ok(worker.includes("from './telegram/transport.js'"));
   assert.ok(worker.includes("from './telegram/inbox.js'"));
@@ -25,6 +26,7 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.ok(worker.includes("from './telegram/connection.js'"));
   assert.ok(worker.includes("from './telegram/rendering.js'"));
   assert.ok(worker.includes("from './telegram/project-store.js'"));
+  assert.ok(worker.includes("from './automations/battle.js'"));
   assert.match(worker, /export const flushTelegramOutbox = \(env, limit = 10\) => flushTelegramOutboxModule\(env, limit, ensureSchema\)/);
   assert.doesNotMatch(worker, /const queueTelegramMessage/);
   assert.doesNotMatch(worker, /const readTelegramUpdateStatus/);
@@ -37,6 +39,7 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.doesNotMatch(worker, /const renderTaskDraft/);
   assert.doesNotMatch(worker, /INSERT INTO telegram_chat_candidates/);
   assert.doesNotMatch(worker, /UPDATE project_state[\s\S]*updated_role/);
+  assert.doesNotMatch(worker, /const applyBattleAutomations/);
   assert.match(transport, /export const telegramSend/);
   assert.match(outbox, /export const telegramDurableSend/);
   assert.match(inbox, /export const claimTelegramUpdate/);
@@ -57,6 +60,7 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.match(rendering, /export const renderTaskDraft/);
   assert.match(rendering, /export const renderExpenseDraft/);
   assert.match(projectStore, /export const createTelegramProjectStore/);
+  assert.match(battleAutomations, /export const applyBattleAutomations/);
   assert.match(projectStore, /WHERE project_id = \? AND revision = \?/);
   assert.match(outbox, /WHERE id = \? AND status = \? AND updated_at = \? AND attempts = \?/);
 });

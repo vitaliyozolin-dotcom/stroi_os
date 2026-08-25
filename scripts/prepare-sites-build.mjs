@@ -7,6 +7,7 @@ await mkdir(`${projectRoot}dist/.openai`, { recursive: true });
 await mkdir(`${projectRoot}dist/server`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/files`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/access`, { recursive: true });
+await mkdir(`${projectRoot}dist/server/automations`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/integrations`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/lib`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/projects`, { recursive: true });
@@ -18,6 +19,7 @@ await Promise.all([
   copyFile(`${projectRoot}sites/worker.js`, `${projectRoot}dist/server/index.js`),
   copyFile(`${projectRoot}sites/access-control.js`, `${projectRoot}dist/server/access-control.js`),
   copyFile(`${projectRoot}sites/access/session.js`, `${projectRoot}dist/server/access/session.js`),
+  copyFile(`${projectRoot}sites/automations/battle.js`, `${projectRoot}dist/server/automations/battle.js`),
   copyFile(`${projectRoot}sites/wrangler.json`, `${projectRoot}dist/server/wrangler.json`),
   copyFile(`${projectRoot}sites/files/response.js`, `${projectRoot}dist/server/files/response.js`),
   copyFile(`${projectRoot}sites/files/routes.js`, `${projectRoot}dist/server/files/routes.js`),
