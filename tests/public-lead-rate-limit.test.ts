@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { claimPublicLeadRateLimit } from '../sites/worker.js';
+import { claimPublicLeadRateLimit } from '../sites/leads/routes.js';
 
 class RateLimitDb {
   rows = new Map<string, { attempts: number; updatedAt: string }>();

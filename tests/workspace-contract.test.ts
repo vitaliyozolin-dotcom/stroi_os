@@ -27,19 +27,19 @@ test('training can be dismissed and is replaced with developer feedback', () => 
 
 test('IKIOMA lead ingress is public only for the dedicated endpoint and protected origins', () => {
   const routes = source('server/public-routes.js');
-  const worker = source('sites/worker.js');
+  const leads = source('sites/leads/routes.js');
 
   assert.match(routes, /'\/api\/public\/leads'/);
-  assert.match(worker, /https:\/\/ikioma\.ru/);
-  assert.match(worker, /https:\/\/www\.ikioma\.ru/);
-  assert.match(worker, /PUBLIC_LEAD_PROJECT_ID = 'ikioma-sales'/);
-  assert.match(worker, /telegramNotified/);
-  assert.match(worker, /duplicateAfter/);
-  assert.match(worker, /timeoutMs: 3_000/);
-  assert.match(worker, /claimPublicLeadRateLimit/);
-  assert.match(worker, /rate_limit_exceeded/);
-  assert.match(worker, /request\.headers\.get\('oai-client-ip'\)/);
-  assert.match(worker, /request\.headers\.get\('cf-connecting-ip'\)/);
+  assert.match(leads, /https:\/\/ikioma\.ru/);
+  assert.match(leads, /https:\/\/www\.ikioma\.ru/);
+  assert.match(leads, /PUBLIC_LEAD_PROJECT_ID = 'ikioma-sales'/);
+  assert.match(leads, /telegramNotified/);
+  assert.match(leads, /duplicateAfter/);
+  assert.match(leads, /timeoutMs: 3_000/);
+  assert.match(leads, /claimPublicLeadRateLimit/);
+  assert.match(leads, /rate_limit_exceeded/);
+  assert.match(leads, /request\.headers\.get\('oai-client-ip'\)/);
+  assert.match(leads, /request\.headers\.get\('cf-connecting-ip'\)/);
   assert.match(source('server/index.js'), /headers\.set\('oai-client-ip', clientKey\(incoming\)\)/);
 });
 

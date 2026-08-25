@@ -86,14 +86,13 @@ test('untrusted file endpoints force safe response headers and UI excludes activ
 });
 
 test('public lead JSON is streamed through a hard body limit before parsing', () => {
-  const worker = source('sites/worker.js');
+  const leads = source('sites/leads/routes.js');
   const requestBody = source('sites/lib/request-body.js');
-  const handler = worker.slice(worker.indexOf('const handlePublicLead'));
-  assert.match(worker, /const PUBLIC_LEAD_BODY_LIMIT = 32 \* 1024/);
+  assert.match(leads, /const PUBLIC_LEAD_BODY_LIMIT = 32 \* 1024/);
   assert.match(requestBody, /export const readJsonBodyLimited = async \(request, limit\)/);
   assert.match(requestBody, /if \(size > limit\)/);
-  assert.match(handler, /payload = await readJsonBodyLimited\(request, PUBLIC_LEAD_BODY_LIMIT\)/);
-  assert.match(handler, /error\?\.message === 'payload_too_large' \? 413 : 400/);
+  assert.match(leads, /payload = await readJsonBodyLimited\(request, PUBLIC_LEAD_BODY_LIMIT\)/);
+  assert.match(leads, /error\?\.message === 'payload_too_large' \? 413 : 400/);
 });
 
 test('large upload admission leaves two slots and rejects excess work immediately', () => {

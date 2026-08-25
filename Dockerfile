@@ -23,6 +23,7 @@ COPY --from=build /app/sites/company-os-export.js ./sites/company-os-export.js
 COPY --from=build /app/sites/company-os-investor-export.js ./sites/company-os-investor-export.js
 COPY --from=build /app/sites/files ./sites/files
 COPY --from=build /app/sites/integrations ./sites/integrations
+COPY --from=build /app/sites/leads ./sites/leads
 COPY --from=build /app/sites/projects ./sites/projects
 COPY --from=build /app/sites/routes ./sites/routes
 COPY --from=build /app/sites/telegram ./sites/telegram

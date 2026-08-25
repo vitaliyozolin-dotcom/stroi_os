@@ -21,7 +21,7 @@ presentation → application → domain → entities
 Application-контракты находятся в `src/application`: `StateChange` передаёт состояние и audit-метаданные, а порты описывают project repository, cache, session, files, clock и ID generator без runtime-зависимостей. `useProjectState` сохраняет `action` и `summary` вместе с expected revision.
 Бизнес-страницы сохраняют изменения только через StateChange: Tasks и Quality используют отдельные domain-операции, остальные разделы проходят через application dispatcher с явными action/summary и сохранением существующих payload.
 
-Чистые переходы синхронизации находятся в src/application/project-sync.ts: локальные изменения, hydration, успешное сохранение и revision conflict обрабатываются без React и browser API. HTTP/DTO реализация перенесена в `src/infrastructure/project-http.ts`; переходный `src/storage.ts` удалён после миграции потребителей. Worker делегирует API dispatch, чтение и revision-aware запись проектов, боевые автоматизации, а также планирование и доставку уведомлений отдельным boundary-модулям; Telegram list/CAS persistence изолирован в project-store adapter.
+Чистые переходы синхронизации находятся в src/application/project-sync.ts: локальные изменения, hydration, успешное сохранение и revision conflict обрабатываются без React и browser API. HTTP/DTO реализация перенесена в `src/infrastructure/project-http.ts`; переходный `src/storage.ts` удалён после миграции потребителей. Worker делегирует API dispatch, чтение и revision-aware запись проектов, боевые автоматизации, защищённый inbox и публичный ingress заявок, а также планирование и доставку уведомлений отдельным boundary-модулям; Telegram list/CAS persistence изолирован в project-store adapter.
 
 ## Правила миграции
 

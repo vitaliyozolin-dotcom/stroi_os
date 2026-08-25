@@ -9,6 +9,7 @@ await mkdir(`${projectRoot}dist/server/files`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/access`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/automations`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/integrations`, { recursive: true });
+await mkdir(`${projectRoot}dist/server/leads`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/lib`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/projects`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/routes`, { recursive: true });
@@ -25,6 +26,7 @@ await Promise.all([
   copyFile(`${projectRoot}sites/files/routes.js`, `${projectRoot}dist/server/files/routes.js`),
   copyFile(`${projectRoot}sites/integrations/camera.js`, `${projectRoot}dist/server/integrations/camera.js`),
   copyFile(`${projectRoot}sites/integrations/notifications.js`, `${projectRoot}dist/server/integrations/notifications.js`),
+  copyFile(`${projectRoot}sites/leads/routes.js`, `${projectRoot}dist/server/leads/routes.js`),
   copyFile(`${projectRoot}sites/lib/date.js`, `${projectRoot}dist/server/lib/date.js`),
   copyFile(`${projectRoot}sites/lib/http.js`, `${projectRoot}dist/server/lib/http.js`),
   copyFile(`${projectRoot}sites/lib/request-body.js`, `${projectRoot}dist/server/lib/request-body.js`),
