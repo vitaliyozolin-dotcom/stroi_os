@@ -210,6 +210,7 @@ export const createTelegramConnection = ({ ensureSchema, readSnapshot, reviveTel
 
   return {
     discoverTelegramChats,
+    readObservedTelegramChats,
     readTelegramBot,
     readTelegramConfig,
     rememberTelegramChatCandidates,

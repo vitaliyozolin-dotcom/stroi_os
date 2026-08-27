@@ -13,6 +13,7 @@ import { createAccessUsersHandler } from './access/users.js';
 import { createCameraHandlers } from './integrations/camera.js';
 import { createNotificationService, deepLink, notificationEvent } from './integrations/notifications.js';
 import { createTelegramAccessHandlers } from './integrations/telegram-access.js';
+import { createIntegrationHandlers } from './integrations/routes.js';
 import {
   claimPublicLeadRateLimit as claimPublicLeadRateLimitModule,
   createLeadHandlers,
@@ -403,6 +404,7 @@ const {
 
 const {
   discoverTelegramChats,
+  readObservedTelegramChats,
   readTelegramBot,
   readTelegramConfig,
   rememberTelegramChatCandidates,
@@ -2047,75 +2049,21 @@ const integrationStatus = async (env) => {
   };
 };
 
-const handleIntegrationStatus = async (request, env) => {
-  const identity = authenticatedIdentity(request, env);
-  if (!identity) return json({ ok: false, error: 'authentication_required' }, 401);
-  const status = await integrationStatus(env);
-  if (!identity.isOwner) status.telegramCandidates = [];
-  return json({ ok: true, integrations: status });
-};
-
-const handleIntegrationTest = async (request, env) => {
-  const identity = authenticatedIdentity(request, env);
-  if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
-  let payload;
-  try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
-    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
-  }
-  const channel = clean(payload?.channel, 30);
-  const message = clean(payload?.message, 500) || 'Тестовое уведомление ИКИОМА ОС';
-  const status = await integrationStatus(env);
-  if (channel === 'email') {
-    const to = clean(payload?.to, 240);
-    if (!status.email) return json({ ok: false, error: 'email_not_configured' }, 409);
-    if (!/^\S+@\S+\.\S+$/.test(to)) return json({ ok: false, error: 'invalid_recipient' }, 422);
-    try {
-      const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: env.EMAIL_FROM, to: [to], subject: 'ИКИОМА ОС: тест уведомлений', html: `<p>${message.replace(/[<>&]/g, '')}</p>` }) });
-      if (!response.ok) return json({ ok: false, error: 'provider_error' }, 502);
-      return json({ ok: true, channel: 'email' });
-    } catch { return json({ ok: false, error: 'provider_unavailable' }, 502); }
-  }
-  if (channel === 'telegram') {
-    if (!status.telegram) return json({ ok: false, error: status.telegramIssue || 'telegram_not_configured' }, 409);
-    try {
-      const connection = await resolveTelegramConnection(env, { discover: false });
-      const response = await telegramSend(env.TELEGRAM_BOT_TOKEN, connection.chat?.id, message);
-      if (!response.ok) return json({ ok: false, error: 'provider_error' }, 502);
-      await reviveTelegramOutbox(env.DB, connection.chat?.id);
-      await flushTelegramOutbox(env);
-      return json({ ok: true, channel: 'telegram' });
-    } catch { return json({ ok: false, error: 'provider_unavailable' }, 502); }
-  }
-  return json({ ok: false, error: 'unsupported_channel' }, 422);
-};
-
-const handleTelegramChatSelect = async (request, env) => {
-  const identity = authenticatedIdentity(request, env);
-  if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
-  if (!env.TELEGRAM_BOT_TOKEN || !env.DB) return json({ ok: false, error: 'telegram_not_configured' }, 409);
-
-  let payload;
-  try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
-    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
-  }
-  const chatId = clean(payload?.chatId, 120);
-  if (!chatId) return json({ ok: false, error: 'invalid_chat' }, 422);
-
-  const observedCandidates = await readObservedTelegramChats(env.DB);
-  let chat = observedCandidates.find((candidate) => candidate.id === chatId);
-  let bot = await readTelegramBot(env.TELEGRAM_BOT_TOKEN);
-  if (!chat) {
-    const discovered = await discoverTelegramChats(env.TELEGRAM_BOT_TOKEN);
-    if (!discovered.ok) return json({ ok: false, error: discovered.issue || 'provider_unavailable' }, 502);
-    chat = discovered.candidates.find((candidate) => candidate.id === chatId);
-    bot = discovered.bot;
-  }
-  if (!chat) return json({ ok: false, error: 'chat_not_found' }, 404);
-
-  const verification = await verifyAndStoreTelegramChat(env, chat, bot);
-  if (!verification.ok) return json({ ok: false, error: verification.issue || 'provider_error' }, 502);
-  return json({ ok: true, chat: { title: chat.title, type: chat.type } });
-};
+const {
+  status: handleIntegrationStatus,
+  test: handleIntegrationTest,
+  telegramChatSelect: handleTelegramChatSelect,
+} = createIntegrationHandlers({
+  integrationStatus,
+  resolveTelegramConnection,
+  telegramSend,
+  reviveTelegramOutbox,
+  flushTelegramOutbox,
+  readObservedTelegramChats,
+  readTelegramBot,
+  discoverTelegramChats,
+  verifyAndStoreTelegramChat,
+});
 
 const sendTelegramFieldHeadquartersGuide = async (connection, env) => {
   const chatId = clean(connection?.chat?.id, 120);
