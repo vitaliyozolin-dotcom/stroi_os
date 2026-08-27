@@ -12,6 +12,7 @@ import { createSessionHandler } from './access/session.js';
 import { createAccessUsersHandler } from './access/users.js';
 import { createCameraHandlers } from './integrations/camera.js';
 import { createNotificationService, deepLink, notificationEvent } from './integrations/notifications.js';
+import { createTelegramAccessHandlers } from './integrations/telegram-access.js';
 import {
   claimPublicLeadRateLimit as claimPublicLeadRateLimitModule,
   createLeadHandlers,
@@ -64,7 +65,6 @@ import {
   claimTelegramBinding,
   saveTelegramProjectSelection,
   selectTelegramBinding,
-  unlinkTelegramBinding,
 } from './telegram/bindings.js';
 import {
   commandFromText,
@@ -496,8 +496,6 @@ const { buildPlan: buildNotificationPlan, dispatch: dispatchNotifications } = cr
   sha256,
 });
 
-const shortId = () => crypto.randomUUID().replaceAll('-', '').slice(0, 16);
-
 const parseTaskDate = (text) => {
   const source = clean(text, 2000).toLocaleLowerCase('ru');
   const now = new Date();
@@ -697,6 +695,11 @@ const telegramBotUsername = async (env) => {
   return 'ikioma_bot';
 };
 
+const {
+  link: handleTelegramLink,
+  unlink: handleTelegramUnlink,
+} = createTelegramAccessHandlers({ ensureSchema, readSnapshot, telegramBotUsername, mutateProjectFromTelegram });
+
 export const telegramMessageMentionsBot = (message, botUsername) => {
   const expected = `@${clean(botUsername, 120).replace(/^@/u, '').toLocaleLowerCase('en-US')}`;
   if (expected === '@') return false;
@@ -706,103 +709,6 @@ export const telegramMessageMentionsBot = (message, botUsername) => {
     if (entity?.type !== 'mention') return false;
     return text.slice(Number(entity.offset) || 0, (Number(entity.offset) || 0) + (Number(entity.length) || 0)).toLocaleLowerCase('en-US') === expected;
   });
-};
-
-const handleTelegramLink = async (request, env) => {
-  if (!env.DB || !env.TELEGRAM_BOT_TOKEN) return json({ ok: false, error: 'telegram_not_configured' }, 409);
-  let payload;
-  try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
-    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
-  }
-  const projectId = clean(payload?.projectId, 100);
-  const userId = clean(payload?.userId, 100);
-  if (!validProjectId(projectId) || !userId) return json({ ok: false, error: 'invalid_link_target' }, 422);
-
-  try {
-    await ensureSchema(env.DB);
-    const snapshot = await readSnapshot(env.DB, projectId);
-    const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
-    if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
-    const user = (snapshot.state.settings?.users ?? []).find((item) => clean(item.id, 100) === userId && item.status !== 'disabled');
-    if (!user) return json({ ok: false, error: 'user_not_found' }, 404);
-    const username = await telegramBotUsername(env);
-    if (!username) return json({ ok: false, error: 'telegram_bot_unavailable' }, 502);
-
-    const code = `${shortId()}${shortId()}`;
-    const codeHash = await sha256(code);
-    const now = new Date();
-    const expiresAt = addDays(now, 1).toISOString();
-    await env.DB.batch([
-      env.DB.prepare(`
-        DELETE FROM telegram_link_codes
-        WHERE project_id = ? AND system_user_id = ? AND used_at IS NULL
-      `).bind(projectId, userId),
-      env.DB.prepare(`
-        INSERT INTO telegram_link_codes (
-          code_hash, project_id, system_user_id, created_at, expires_at, used_at, claim_id
-        ) VALUES (?, ?, ?, ?, ?, NULL, NULL)
-      `).bind(codeHash, projectId, userId, now.toISOString(), expiresAt),
-    ]);
-    return json({
-      ok: true,
-      url: `https://t.me/${username}?start=${code}`,
-      expiresAt,
-      user: { id: user.id, name: user.name },
-    }, 201);
-  } catch {
-    return json({ ok: false, error: 'telegram_link_failed' }, 500);
-  }
-};
-
-const handleTelegramUnlink = async (request, env) => {
-  if (!env.DB) return json({ ok: false, error: 'telegram_not_configured' }, 409);
-  let payload;
-  try { payload = await readJsonBodyLimited(request, MAX_JSON_BODY_BYTES); } catch (error) {
-    return json({ ok: false, error: error?.message === 'payload_too_large' ? 'payload_too_large' : 'invalid_json' }, error?.message === 'payload_too_large' ? 413 : 400);
-  }
-  const projectId = clean(payload?.projectId, 100);
-  const userId = clean(payload?.userId, 100);
-  if (!validProjectId(projectId) || !userId) return json({ ok: false, error: 'invalid_link_target' }, 422);
-
-  try {
-    await ensureSchema(env.DB);
-    const snapshot = await readSnapshot(env.DB, projectId);
-    const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
-    if (!identity?.isOwner) return json({ ok: false, error: 'owner_required' }, 403);
-    const user = (snapshot.state.settings?.users ?? []).find((item) => clean(item.id, 100) === userId);
-    if (!user) return json({ ok: false, error: 'user_not_found' }, 404);
-
-    const removed = await unlinkTelegramBinding(env.DB, projectId, userId);
-    try {
-      await mutateProjectFromTelegram(
-        env,
-        projectId,
-        identity.name,
-        'management',
-        'telegram.unlink',
-        `Telegram отключён: ${user.name}`,
-        (state) => {
-          state.settings.users = (state.settings?.users ?? []).map((item) => item.id === user.id ? {
-            ...item,
-            telegramChatId: undefined,
-            telegramBoundAt: undefined,
-          } : item);
-          state.activity = [{
-            id: `activity-${crypto.randomUUID()}`,
-            timestamp: new Date().toISOString(),
-            actor: identity.name,
-            text: `Отключил Telegram пользователя ${user.name}`,
-            tone: 'neutral',
-          }, ...(state.activity ?? [])];
-        },
-      );
-    } catch {
-      // Таблица привязок уже атомарно очищена и остаётся источником истины для UI и команд.
-    }
-    return json({ ok: true, removed: removed.removed, telegram: { status: 'not_connected' } });
-  } catch {
-    return json({ ok: false, error: 'telegram_unlink_failed' }, 500);
-  }
 };
 
 const reconcileTelegramUserState = async (env, projectId, user, from, privateChatId, now) => mutateProjectFromTelegram(
