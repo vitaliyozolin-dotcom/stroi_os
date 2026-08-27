@@ -6,6 +6,7 @@ const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 await mkdir(`${projectRoot}dist/.openai`, { recursive: true });
 await mkdir(`${projectRoot}dist/server`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/files`, { recursive: true });
+await mkdir(`${projectRoot}dist/server/feedback`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/access`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/automations`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/integrations`, { recursive: true });
@@ -20,10 +21,12 @@ await Promise.all([
   copyFile(`${projectRoot}sites/worker.js`, `${projectRoot}dist/server/index.js`),
   copyFile(`${projectRoot}sites/access-control.js`, `${projectRoot}dist/server/access-control.js`),
   copyFile(`${projectRoot}sites/access/session.js`, `${projectRoot}dist/server/access/session.js`),
+  copyFile(`${projectRoot}sites/access/users.js`, `${projectRoot}dist/server/access/users.js`),
   copyFile(`${projectRoot}sites/automations/battle.js`, `${projectRoot}dist/server/automations/battle.js`),
   copyFile(`${projectRoot}sites/wrangler.json`, `${projectRoot}dist/server/wrangler.json`),
   copyFile(`${projectRoot}sites/files/response.js`, `${projectRoot}dist/server/files/response.js`),
   copyFile(`${projectRoot}sites/files/routes.js`, `${projectRoot}dist/server/files/routes.js`),
+  copyFile(`${projectRoot}sites/feedback/routes.js`, `${projectRoot}dist/server/feedback/routes.js`),
   copyFile(`${projectRoot}sites/integrations/camera.js`, `${projectRoot}dist/server/integrations/camera.js`),
   copyFile(`${projectRoot}sites/integrations/notifications.js`, `${projectRoot}dist/server/integrations/notifications.js`),
   copyFile(`${projectRoot}sites/leads/routes.js`, `${projectRoot}dist/server/leads/routes.js`),
