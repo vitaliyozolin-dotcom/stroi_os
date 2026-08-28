@@ -15,6 +15,7 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   const connection = source('sites/telegram/connection.js');
   const rendering = source('sites/telegram/rendering.js');
   const projectStore = source('sites/telegram/project-store.js');
+  const readCommands = source('sites/telegram/read-commands.js');
   const battleAutomations = source('sites/automations/battle.js');
 
   assert.ok(worker.includes("from './telegram/transport.js'"));
@@ -26,6 +27,7 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.ok(worker.includes("from './telegram/connection.js'"));
   assert.ok(worker.includes("from './telegram/rendering.js'"));
   assert.ok(worker.includes("from './telegram/project-store.js'"));
+  assert.ok(worker.includes("from './telegram/read-commands.js'"));
   assert.ok(worker.includes("from './automations/battle.js'"));
   assert.match(worker, /export const flushTelegramOutbox = \(env, limit = 10\) => flushTelegramOutboxModule\(env, limit, ensureSchema\)/);
   assert.doesNotMatch(worker, /const queueTelegramMessage/);
@@ -37,6 +39,9 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.doesNotMatch(worker, /const telegramCommandDistance/);
   assert.doesNotMatch(worker, /const resolveTelegramConnection/);
   assert.doesNotMatch(worker, /const renderTaskDraft/);
+  assert.doesNotMatch(worker, /const telegramTasks/);
+  assert.doesNotMatch(worker, /const telegramFinance/);
+  assert.doesNotMatch(worker, /const telegramProjectStatus/);
   assert.doesNotMatch(worker, /INSERT INTO telegram_chat_candidates/);
   assert.doesNotMatch(worker, /UPDATE project_state[\s\S]*updated_role/);
   assert.doesNotMatch(worker, /const applyBattleAutomations/);
@@ -60,6 +65,8 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.match(rendering, /export const renderTaskDraft/);
   assert.match(rendering, /export const renderExpenseDraft/);
   assert.match(projectStore, /export const createTelegramProjectStore/);
+  assert.match(readCommands, /export const createTelegramReadCommands/);
+  assert.match(readCommands, /user\.role !== 'management'/);
   assert.match(battleAutomations, /export const applyBattleAutomations/);
   assert.match(projectStore, /WHERE project_id = \? AND revision = \?/);
   assert.match(outbox, /WHERE id = \? AND status = \? AND updated_at = \? AND attempts = \?/);

@@ -80,6 +80,7 @@ import {
 import { createTelegramConnection } from './telegram/connection.js';
 import { createTelegramProjectStore } from './telegram/project-store.js';
 import { createTelegramWebhookHandler } from './telegram/webhook.js';
+import { createTelegramReadCommands } from './telegram/read-commands.js';
 import {
   renderExpenseDraft,
   renderFileDraft,
@@ -812,13 +813,8 @@ const bindTelegramUser = async (message, code, env) => {
   await reviveTelegramOutbox(env.DB, privateChatId);
 };
 
-export const projectForBinding = async (env, binding) => {
-  const snapshot = await readSnapshot(env.DB, binding.project_id);
-  if (!snapshot) throw new Error('project_not_found');
-  const user = (snapshot.state.settings?.users ?? []).find((item) => item.id === binding.system_user_id);
-  if (!user || user.status === 'disabled') throw new Error('access_disabled');
-  return { snapshot, user };
-};
+const telegramReadCommands = createTelegramReadCommands({ readSnapshot, telegramSendPhoto });
+export const { projectForBinding } = telegramReadCommands;
 
 const telegramTaskDraft = async (message, binding, body, env) => {
   const { snapshot, user } = await projectForBinding(env, binding);
@@ -847,67 +843,6 @@ const telegramTaskDraft = async (message, binding, body, env) => {
   await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, card.text, { reply_markup: card.replyMarkup });
 };
 
-const telegramTasks = async (message, binding, env) => {
-  const { snapshot, user } = await projectForBinding(env, binding);
-  const tasks = (snapshot.state.tasks ?? [])
-    .filter((item) => !['done', 'canceled'].includes(item.status))
-    .filter((item) => user.role === 'management' || item.assigneeId === user.id)
-    .sort((a, b) => clean(a.dueDate, 20).localeCompare(clean(b.dueDate, 20)))
-    .slice(0, 10);
-  const title = user.role === 'management' ? 'Открытые задачи проекта' : 'Ваши открытые задачи';
-  const text = tasks.length
-    ? `${title} · ${snapshot.state.project?.code ?? ''}\n\n${tasks.map((item) => `• ${item.dueDate} · ${taskStatusLabel(item.status)}\n  ${item.title}${user.role === 'management' ? ` — ${item.assigneeName}` : ''}\n  ${deepLink(telegramOrigin(env), binding.project_id, 'tasks', item.id)}`).join('\n\n')}`
-    : `${title}: сейчас ничего открытого.`;
-  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, text);
-};
-
-const telegramStages = async (message, binding, env) => {
-  const { snapshot } = await projectForBinding(env, binding);
-  const stages = (snapshot.state.stages ?? []).slice().sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
-  const labels = { not_ready: 'ещё не готов', ready: 'готов к запуску', in_progress: 'в работе', blocked: 'заблокирован', awaiting_inspection: 'на проверке', accepted: 'принят', rework: 'доработка' };
-  const text = stages.length
-    ? `Этапы · ${snapshot.state.project?.code ?? ''}\n\n${stages.map((item) => `• ${item.name} — ${labels[item.status] ?? item.status}\n  срок: ${item.forecastEnd ?? item.planEnd ?? 'не указан'}`).join('\n\n')}`
-    : 'Этапы проекта пока не созданы.';
-  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, text);
-};
-
-const telegramCompletedTasks = async (message, binding, env) => {
-  const { snapshot, user } = await projectForBinding(env, binding);
-  const tasks = (snapshot.state.tasks ?? [])
-    .filter((item) => item.status === 'done')
-    .filter((item) => user.role === 'management' || item.assigneeId === user.id)
-    .sort((a, b) => clean(b.updatedAt ?? b.createdAt, 40).localeCompare(clean(a.updatedAt ?? a.createdAt, 40)))
-    .slice(0, 10);
-  const text = tasks.length
-    ? `Последние выполненные задачи · ${snapshot.state.project?.code ?? ''}\n\n${tasks.map((item) => `• ${item.title}\n  ${item.assigneeName} · ${new Date(item.updatedAt ?? item.createdAt).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })} МСК`).join('\n\n')}`
-    : 'Выполненных задач пока нет.';
-  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, text);
-};
-
-const telegramFinance = async (message, binding, env) => {
-  const { snapshot, user } = await projectForBinding(env, binding);
-  if (user.role !== 'management') {
-    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Финансовая сводка доступна только роли «Управление».');
-    return;
-  }
-  const entries = snapshot.state.financeEntries ?? [];
-  const expenses = entries.filter((item) => item.kind === 'expense');
-  const incomes = entries.filter((item) => item.kind === 'income');
-  const committed = expenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-  const paid = expenses.reduce((sum, item) => sum + (Number(item.paidAmount) || 0), 0);
-  const expectedIncome = incomes.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-  const received = incomes.reduce((sum, item) => sum + (Number(item.paidAmount) || 0), 0);
-  const money = (value) => `${Math.round(value).toLocaleString('ru-RU')} ₽`;
-  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
-    `Финансы · ${snapshot.state.project?.code ?? ''}`,
-    '',
-    `Расходы: обязательства ${money(committed)} · оплачено ${money(paid)}`,
-    `Доходы: ожидается ${money(expectedIncome)} · получено ${money(received)}`,
-    `Денежный баланс: ${money(received - paid)}`,
-    '',
-    deepLink(telegramOrigin(env), binding.project_id, 'finance'),
-  ].join('\n'));
-};
 
 const expenseSelectionFromDescription = (options, description) => {
   const source = clean(description, 500).toLocaleLowerCase('ru').replace(/ё/g, 'е');
@@ -960,44 +895,6 @@ const telegramExpenseDraft = async (message, binding, body, env) => {
   await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, card.text, { reply_markup: card.replyMarkup });
 };
 
-const telegramProjectStatus = async (message, binding, env) => {
-  const { snapshot } = await projectForBinding(env, binding);
-  const state = snapshot.state;
-  const today = dateKey();
-  const activeStages = (state.stages ?? []).filter((item) => ['in_progress', 'blocked', 'awaiting_inspection', 'rework'].includes(item.status));
-  const openTasks = (state.tasks ?? []).filter((item) => !['done', 'canceled'].includes(item.status));
-  const overdue = openTasks.filter((item) => clean(item.dueDate, 20) < today);
-  const riskySupply = (state.procurement ?? []).filter((item) => item.risk || ['need', 'rfq'].includes(item.status));
-  const accepted = (state.financeEntries ?? []).reduce((sum, item) => sum + (Number(item.acceptedAmount) || 0), 0);
-  const paid = (state.financeEntries ?? []).reduce((sum, item) => sum + (Number(item.paidAmount) || 0), 0);
-  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, [
-    `Статус · ${state.project?.name ?? state.project?.code}`,
-    '',
-    `Работы сейчас: ${activeStages.length ? activeStages.map((item) => item.name).join(', ') : 'активных этапов нет'}`,
-    `Задачи: ${openTasks.length} открыто · ${overdue.length} просрочено`,
-    `Снабжение: ${riskySupply.length} требуют внимания`,
-    `Принято / оплачено: ${accepted.toLocaleString('ru-RU')} ₽ / ${paid.toLocaleString('ru-RU')} ₽`,
-    `Прогноз сдачи: ${state.project?.forecastDate ?? 'не указан'}`,
-    '',
-    deepLink(telegramOrigin(env), binding.project_id, 'overview'),
-  ].join('\n'));
-};
-
-const telegramCamera = async (message, binding, env) => {
-  const { snapshot } = await projectForBinding(env, binding);
-  const caption = `Камера · ${snapshot.state.project?.name ?? snapshot.state.project?.code}\n${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })} МСК`;
-  if (env.CAMERA_SNAPSHOT_URL) {
-    const response = await telegramSendPhoto(env.TELEGRAM_BOT_TOKEN, message.chat.id, env.CAMERA_SNAPSHOT_URL, caption);
-    if (response.ok) return;
-  }
-  if (env.CAMERA_VIEW_URL) {
-    await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, `${caption}\n\nПрямой эфир доступен по кнопке:`, {
-      reply_markup: { inline_keyboard: [[{ text: 'Открыть камеру', url: deepLink(telegramOrigin(env), binding.project_id, 'client', 'camera') }]] },
-    });
-    return;
-  }
-  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Камера ещё не установлена. Команда уже готова и заработает после подключения оборудования.');
-};
 
 const telegramProjectsForBindings = async (env, bindings) => {
   const projects = [];
@@ -1165,14 +1062,14 @@ const telegramHandleCommand = async (message, binding, command, env, options = {
     return;
   }
   if (command.name === 'task') return telegramTaskDraft(message, binding, command.body, env);
-  if (command.name === 'tasks') return telegramTasks(message, binding, env);
-  if (command.name === 'stages') return telegramStages(message, binding, env);
-  if (command.name === 'done') return telegramCompletedTasks(message, binding, env);
-  if (command.name === 'finance') return telegramFinance(message, binding, env);
+  if (command.name === 'tasks') return telegramReadCommands.tasks(message, binding, env);
+  if (command.name === 'stages') return telegramReadCommands.stages(message, binding, env);
+  if (command.name === 'done') return telegramReadCommands.completedTasks(message, binding, env);
+  if (command.name === 'finance') return telegramReadCommands.finance(message, binding, env);
   if (command.name === 'expense') return telegramExpenseDraft(message, binding, command.body, env);
-  if (command.name === 'status') return telegramProjectStatus(message, binding, env);
+  if (command.name === 'status') return telegramReadCommands.projectStatus(message, binding, env);
   if (command.name === 'note') return telegramNoteDraft(message, binding, command.body, env);
-  if (command.name === 'camera') return telegramCamera(message, binding, env);
+  if (command.name === 'camera') return telegramReadCommands.camera(message, binding, env);
   if (command.name === 'doc') {
     await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, 'Пришлите файл в личный чат с ботом. В общем чате приложите к документу подпись /doc. Бот покажет категорию и попросит подтверждение.');
     return;
