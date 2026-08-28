@@ -37,6 +37,7 @@ await Promise.all([
   copyFile(`${projectRoot}sites/lib/date.js`, `${projectRoot}dist/server/lib/date.js`),
   copyFile(`${projectRoot}sites/lib/http.js`, `${projectRoot}dist/server/lib/http.js`),
   copyFile(`${projectRoot}sites/lib/request-body.js`, `${projectRoot}dist/server/lib/request-body.js`),
+  copyFile(`${projectRoot}sites/lib/secret.js`, `${projectRoot}dist/server/lib/secret.js`),
   copyFile(`${projectRoot}sites/lib/upload-admission.js`, `${projectRoot}dist/server/lib/upload-admission.js`),
   copyFile(`${projectRoot}sites/lib/validation.js`, `${projectRoot}dist/server/lib/validation.js`),
   copyFile(`${projectRoot}sites/projects/routes.js`, `${projectRoot}dist/server/projects/routes.js`),
@@ -51,4 +52,5 @@ await Promise.all([
   copyFile(`${projectRoot}sites/telegram/project-store.js`, `${projectRoot}dist/server/telegram/project-store.js`),
   copyFile(`${projectRoot}sites/telegram/rendering.js`, `${projectRoot}dist/server/telegram/rendering.js`),
   copyFile(`${projectRoot}sites/telegram/transport.js`, `${projectRoot}dist/server/telegram/transport.js`),
+  copyFile(`${projectRoot}sites/telegram/webhook.js`, `${projectRoot}dist/server/telegram/webhook.js`),
 ]);

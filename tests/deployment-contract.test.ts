@@ -26,7 +26,7 @@ test('production images are SHA-addressable and include Telegram modules', () =>
 test('Sites artifact includes every Telegram module imported by its Worker entrypoint', () => {
   const prepare = source('scripts/prepare-sites-build.mjs');
 
-  for (const moduleName of ['bindings', 'commands', 'connection', 'drafts', 'inbox', 'outbox', 'project-store', 'rendering', 'transport']) {
+  for (const moduleName of ['bindings', 'commands', 'connection', 'drafts', 'inbox', 'outbox', 'project-store', 'rendering', 'transport', 'webhook']) {
     assert.match(
       prepare,
       new RegExp(`sites/telegram/${moduleName}\\.js.*dist/server/telegram/${moduleName}\\.js`),
@@ -37,7 +37,7 @@ test('Sites artifact includes every Telegram module imported by its Worker entry
 test('Sites artifact includes Worker request-boundary modules', () => {
   const prepare = source('scripts/prepare-sites-build.mjs');
 
-  for (const moduleName of ['request-body', 'upload-admission']) {
+  for (const moduleName of ['request-body', 'secret', 'upload-admission']) {
     assert.match(
       prepare,
       new RegExp(`sites/lib/${moduleName}\\.js.*dist/server/lib/${moduleName}\\.js`),

@@ -84,9 +84,10 @@ test('Telegram common chat recheck is webhook-backed, observable and honestly la
   const settings = source('src/pages/SettingsPage.tsx');
   const worker = source('sites/worker.js');
   const integrationRoutes = source('sites/integrations/routes.js');
+  const webhook = source('sites/telegram/webhook.js');
 
   assert.match(worker, /CREATE TABLE IF NOT EXISTS telegram_chat_candidates/);
-  assert.match(worker, /rememberTelegramChatCandidates\(env\.DB, update\)/);
+  assert.match(webhook, /rememberTelegramChatCandidates\(env\.DB, update\)/);
   assert.match(worker, /readObservedTelegramChats/);
   assert.match(worker, /createIntegrationHandlers/);
   assert.match(integrationRoutes, /verifyAndStoreTelegramChat\(env, chat, bot\)/);
@@ -151,12 +152,13 @@ test('Telegram explains exactly what is read, drafted, saved or ignored', () => 
 test('Telegram webhook retries failures and reclaims only stale processing updates', () => {
   const worker = source('sites/worker.js');
   const transport = source('sites/telegram/transport.js');
+  const webhook = source('sites/telegram/webhook.js');
 
   const inbox = source('sites/telegram/inbox.js');
   assert.match(inbox, /TELEGRAM_UPDATE_LEASE_MS = 360_000/);
   assert.match(worker, /export const claimTelegramUpdate/);
   assert.match(inbox, /WHERE update_id = \? AND status = 'processing' AND received_at = \?/);
-  assert.match(worker, /return json\(\{ ok: false, error: 'telegram_update_failed' \}, 503\)/);
-  assert.doesNotMatch(worker, /context\.waitUntil\(work\)/);
+  assert.match(webhook, /return json\(\{ ok: false, error: 'telegram_update_failed' \}, 503\)/);
+  assert.doesNotMatch(webhook, /context\.waitUntil\(work\)/);
   assert.match(transport, /signal: AbortSignal\.timeout\(timeoutMs\)/);
 });
