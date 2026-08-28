@@ -67,13 +67,14 @@ test('lead timing and conversational Telegram summaries are visible and supporte
   const marketing = source('src/pages/MarketingPage.tsx');
   const settings = source('src/pages/SettingsPage.tsx');
   const worker = source('sites/worker.js');
+  const bootstrap = source('sites/integrations/telegram-bootstrap.js');
 
   assert.match(marketing, /Поступила: \{formatDateTime\(lead\.createdAt\)\}/);
   assert.match(settings, /Формы на ikioma\.ru/);
   assert.match(worker, /command\.name === 'stages'/);
   assert.match(worker, /command\.name === 'done'/);
   assert.match(worker, /command\.name === 'finance'/);
-  assert.match(worker, /command: 'finance'/);
+  assert.match(bootstrap, /command: 'finance'/);
   assert.match(worker, /naturalTelegramIntent/);
   assert.match(worker, /repliedToBot/);
 });
@@ -134,6 +135,7 @@ test('Telegram webhook is restored safely when the app starts', () => {
 test('Telegram explains exactly what is read, drafted, saved or ignored', () => {
   const worker = source('sites/worker.js');
   const rendering = source('sites/telegram/rendering.js');
+  const bootstrap = source('sites/integrations/telegram-bootstrap.js');
 
   assert.match(worker, /command\.name === 'note'/);
   assert.match(worker, /action === 'nc'/);
@@ -141,7 +143,7 @@ test('Telegram explains exactly what is read, drafted, saved or ignored', () => 
   assert.match(worker, /Ничего не записано в ИКИОМА ОС/);
   assert.match(rendering, /Молчание никогда не означает сохранение/);
   assert.match(worker, /telegramCommandSuggestion/);
-  assert.match(worker, /command: 'note'/);
+  assert.match(bootstrap, /command: 'note'/);
   assert.match(worker, /naturalTelegramCommand/);
   assert.match(worker, /addressedToBot/);
 });

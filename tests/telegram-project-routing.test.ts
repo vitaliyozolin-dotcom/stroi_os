@@ -295,12 +295,13 @@ test('task callback key includes project identity for duplicate task ids', () =>
 test('project routing and confirmation are isolated by Telegram user, chat and draft project', () => {
   const worker = readFileSync(new URL('../sites/worker.js', import.meta.url), 'utf8');
   const bindings = readFileSync(new URL('../sites/telegram/bindings.js', import.meta.url), 'utf8');
+  const drafts = readFileSync(new URL('../sites/telegram/drafts.js', import.meta.url), 'utf8');
   const projectWrite = readFileSync(new URL('../sites/projects/write.js', import.meta.url), 'utf8');
   assert.match(worker, /PRIMARY KEY \(telegram_user_id, chat_id\)/);
   assert.match(worker, /saveTelegramProjectSelection\(env\.DB, telegramUserId, chatId, project\.id\)/);
   assert.match(worker, /bindingForTelegramProject\(env\.DB, telegramUserId, draft\.project_id\)/);
   assert.match(worker, /runClaimedTelegramDraft\(callback, draft, env/);
-  assert.match(worker, /status = 'processing'/);
+  assert.match(drafts, /status = 'processing'/);
   assert.match(worker, /telegramConfirmVisible/);
   assert.match(worker, /replyAuthor\.username/);
   assert.match(worker, /К какому проекту относится это действие/);
