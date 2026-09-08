@@ -7,6 +7,7 @@ import {
 import { json } from '../lib/http.js';
 import { readJsonBodyLimited } from '../lib/request-body.js';
 import { clean, validProjectId } from '../lib/validation.js';
+import { validateFinanceChanges } from './finance.js';
 
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_JSON_BODY_BYTES = 32 * 1024;
@@ -76,6 +77,8 @@ export const createProjectWriteHandler = ({
     const mergedState = mergeStateForRole(previousSnapshot?.state ?? null, incomingState, identity, {
       serverManagedRoster: env.AUTH_ROSTER_MODE === 'local_password',
     });
+    const financeError = validateFinanceChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
+    if (financeError) return json({ ok: false, error: 'invalid_finance_transition', message: financeError }, 422);
     const state = applyAutomations(previousSnapshot?.state ?? null, mergedState, actor);
     let stateJson;
     try {

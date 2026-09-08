@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   WalletCards,
 } from 'lucide-react';
-import { acceptedAmountFor, financeTotals, lineTotals, paidAmountFor } from '../domain/index';
+import { acceptedAmountFor, financeTotals, lineTotals, paidAmountFor, financeMoney, needsExpenseApproval, expenseAcceptanceSources, financeActionError } from '../domain/index';
 import { formatDate, money, shortMoney } from '../presentation/formatting';
 import type { AppState, ExpenseStatus, FinanceEntry, ProjectDocument } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
@@ -27,7 +27,7 @@ const statusLabels: Record<ExpenseStatus, string> = {
   paid: 'Оплачено',
 };
 
-export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId) => void }) {
+export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpenQuestions }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenQuestions: () => void }) {
   const saveChange = createFinanceCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const totals = financeTotals(state);
   const [showForm, setShowForm] = useState(false);
@@ -39,13 +39,14 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
   const [summaryOpen, setSummaryOpen] = useState<'plan' | 'committed' | 'accepted' | 'balance' | null>(null);
   const [actionEntryId, setActionEntryId] = useState<string | null>(null);
   const [actionKind, setActionKind] = useState<'accept' | 'pay' | 'receive'>('accept');
-  const [actionForm, setActionForm] = useState({ amount: '', date: new Date().toISOString().slice(0, 10), document: '' });
+  const [actionForm, setActionForm] = useState({ amount: '', date: new Date().toISOString().slice(0, 10), document: '', source: '' });
+  const [actionError, setActionError] = useState('');
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [lineForm, setLineForm] = useState({ plan: '', forecast: '', version: state.budgetMeta.version, source: state.budgetMeta.source });
   const firstLine = state.budgetLines[0];
   const [form, setForm] = useState({
-    budgetLineId: firstLine.id,
-    stageId: firstLine.stageIds[0],
+    budgetLineId: firstLine?.id ?? '',
+    stageId: firstLine?.stageIds[0] ?? '',
     amount: '',
     counterpartyId: '',
     description: '',
@@ -63,9 +64,10 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
     event.preventDefault();
     const amount = Number(form.amount);
     const counterparty = state.counterparties.find((item) => item.id === form.counterpartyId);
-    if (!amount || amount <= 0 || !counterparty || !form.description.trim()) return;
+    if (!Number.isFinite(amount) || amount <= 0 || !counterparty || !form.description.trim()) return;
     const selectedLine = state.budgetLines.find((line) => line.id === form.budgetLineId) ?? firstLine;
-    const currentCommitted = lineTotals(state, selectedLine).committed;
+    if (formKind === 'expense' && (!selectedLine || !selectedLine.stageIds.includes(form.stageId))) return;
+    const currentCommitted = selectedLine ? lineTotals(state, selectedLine).committed : 0;
     const next: AppState = {
       ...state,
       budgetLines: formKind === 'expense' ? state.budgetLines.map((line) => line.id === selectedLine.id
@@ -75,6 +77,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
         id: uid('finance'),
         kind: formKind,
         status: 'committed',
+        createdBy: actor,
         amount,
         date: form.date,
         stageId: formKind === 'expense' ? form.stageId : undefined,
@@ -100,37 +103,42 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
   const selectedLine = state.budgetLines.find((line) => line.id === selectedLineId) ?? null;
   const balance = totals.received - totals.paid;
 
-  const canAcceptEntry = (entry: FinanceEntry) => {
-    if (!entry.stageId) return false;
-    const acceptedWork = state.checkpoints.some((checkpoint) => checkpoint.stageId === entry.stageId && checkpoint.status === 'accepted');
-    const acceptedMaterial = state.procurement.some((item) => item.stageId === entry.stageId && ['accepted', 'issued'].includes(item.status));
-    return acceptedWork || acceptedMaterial;
+  const canAcceptEntry = (entry: FinanceEntry) => !needsExpenseApproval(entry) && expenseAcceptanceSources(state, entry).length > 0;
+  const approvalRequired = (entry: FinanceEntry) => needsExpenseApproval(entry) ? 'Сначала утвердите расход в его карточке.' : 'Сначала примите связанную работу в «Качестве», поставку в «Снабжении» или этап в «Графике».';
+  const approveExpense = (entry: FinanceEntry) => {
+    if (!needsExpenseApproval(entry)) return;
+    const now = new Date().toISOString();
+    saveChange({ ...state, financeEntries: state.financeEntries.map((item) => item.id === entry.id ? { ...item, approvedBy: actor, approvedAt: now } : item), activity: [{ id: uid('activity'), timestamp: now, actor, text: `Утверждён расход ${money(entry.amount)} · ${entry.description}`, tone: 'positive' }, ...state.activity] });
   };
 
   const openAction = (entry: FinanceEntry, kind: 'accept' | 'pay' | 'receive') => {
-    const remaining = kind === 'accept' ? entry.amount - acceptedAmountFor(entry) : kind === 'pay' ? acceptedAmountFor(entry) - paidAmountFor(entry) : entry.amount - paidAmountFor(entry);
+    const remaining = financeMoney(kind === 'accept' ? entry.amount - acceptedAmountFor(entry) : kind === 'pay' ? acceptedAmountFor(entry) - paidAmountFor(entry) : entry.amount - paidAmountFor(entry));
     setActionEntryId(entry.id);
+    setSelectedEntryId(null);
+    setActionError('');
     setActionKind(kind);
-    setActionForm({ amount: String(Math.max(0, remaining)), date: new Date().toISOString().slice(0, 10), document: kind === 'accept' ? entry.acceptanceDocument ?? '' : entry.paymentDocument ?? '' });
+    setActionForm({ amount: String(Math.max(0, remaining)), date: new Date().toISOString().slice(0, 10), document: '', source: expenseAcceptanceSources(state, entry)[0]?.id ?? '' });
   };
 
   const saveAction = (event: FormEvent) => {
     event.preventDefault();
     const entry = state.financeEntries.find((item) => item.id === actionEntryId);
     const amount = Number(actionForm.amount);
-    if (!entry || amount <= 0) return;
+    if (!entry) return;
+    const error = financeActionError(state, entry, actionKind, amount, actionForm.date, actionForm.document, actionForm.source);
+    if (error) { setActionError(error); return; }
     const now = new Date().toISOString();
     let text = '';
     const financeEntries = state.financeEntries.map((item) => {
       if (item.id !== entry.id) return item;
       if (actionKind === 'accept') {
-        const acceptedAmount = Math.min(item.amount, acceptedAmountFor(item) + amount);
+        const acceptedAmount = financeMoney(acceptedAmountFor(item) + amount);
         text = `${item.description}: принято ${money(amount)}`;
-        return { ...item, status: 'accepted' as ExpenseStatus, acceptedAmount, acceptedAt: actionForm.date, acceptanceDocument: actionForm.document.trim() || undefined, document: actionForm.document.trim() || item.document };
+        return { ...item, status: 'accepted' as ExpenseStatus, acceptedAmount, acceptedAt: actionForm.date, acceptedBy: actor, acceptanceSource: actionForm.source, acceptanceDocument: actionForm.document.trim(), document: actionForm.document.trim() };
       }
-      const paidAmount = Math.min(actionKind === 'pay' ? acceptedAmountFor(item) : item.amount, paidAmountFor(item) + amount);
+      const paidAmount = financeMoney(paidAmountFor(item) + amount);
       text = `${item.description}: ${actionKind === 'receive' ? 'получено' : 'оплачено'} ${money(amount)}`;
-      return { ...item, status: paidAmount >= item.amount ? 'paid' as ExpenseStatus : item.status, paidAmount, paidAt: actionForm.date, paymentDocument: actionForm.document.trim() || undefined };
+      return { ...item, status: paidAmount >= item.amount ? 'paid' as ExpenseStatus : item.status, paidAmount, paidAt: actionForm.date, paidBy: actor, paymentDocument: actionForm.document.trim() };
     });
     const document: ProjectDocument | null = actionForm.document.trim() ? { id: uid('document'), name: actionForm.document.trim(), type: actionKind === 'accept' ? 'Акт / приёмка' : 'Платёжный документ', category: actionKind === 'accept' ? 'act' : 'other', documentDate: actionForm.date, updatedAt: now, clientVisible: false, status: 'current', direction: actionKind === 'accept' ? 'incoming' : 'outgoing', counterpartyId: entry.counterpartyId, stageId: entry.stageId, financeEntryId: entry.id, receivedAt: actionKind === 'accept' ? now : undefined, sentAt: actionKind === 'accept' ? undefined : now, storageLocation: `ИКИОМА ОС / ${state.project.code} / Финансы` } : null;
     saveChange({ ...state, financeEntries, documents: document ? [document, ...state.documents] : state.documents, activity: [{ id: uid('activity'), timestamp: now, actor, text, tone: actionKind === 'accept' ? 'neutral' : 'positive' }, ...state.activity] });
@@ -177,6 +185,11 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
         <MetricCard label="Доступный баланс" value={shortMoney(balance)} detail={<span>получено {shortMoney(totals.received)} · маржа {shortMoney(state.project.contractValue - totals.forecast)}</span>} icon={Banknote} tone="dark" onClick={() => setSummaryOpen('balance')} />
       </section>
 
+      <section className="panel expense-guide" data-tour="expense-approval">
+        <div><strong>Кто утверждает расходы</strong><p>Владелец и активные сотрудники с ролью «Управление» добавляют и утверждают расходы, фиксируют приёмку и оплату. Прораб ведёт работы и поставки.</p></div>
+        <ol><li>Создайте обязательство: сумма, этап, статья, контрагент и основание.</li><li>Утвердите расход в его карточке. Утверждение не записывает оплату.</li><li>Примите работу или поставку, затем зафиксируйте принятую сумму и документ.</li><li>После реальной выплаты отдельно укажите сумму, дату и платёжный документ.</li></ol>
+        <button type="button" className="text-button" onClick={onOpenQuestions}>Вопросы и подсказки</button>
+      </section>
       <section className="panel finance-summary" data-tour="budget-plan">
         <SectionHeader eyebrow={`Смета ${state.budgetMeta.version}`} title="Бюджет по пакетам работ" action={<div className="finance-summary__legend"><span>План</span><span>Прогноз</span><span>Оплачено</span></div>} />
         <div className="budget-source"><div><small>Откуда берётся план</small><strong>{state.budgetMeta.source}</strong><p>{state.budgetMeta.approvedBy ? `Утвердил: ${state.budgetMeta.approvedBy}` : 'Ещё не утверждена'}{state.budgetMeta.approvedAt ? ` · ${formatDate(state.budgetMeta.approvedAt, true)}` : ''}</p></div><div><small>Откуда берётся проект</small><strong>{state.project.source ?? 'Создан в ИКИОМА ОС'}</strong><p>{state.project.contractNumber ? `Договор ${state.project.contractNumber}` : state.project.model}</p></div><p>{state.budgetMeta.note}</p></div>
@@ -223,9 +236,9 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
                 <div className="transaction-row__main"><strong>{entry.description}</strong><span><button type="button" className="entity-link entity-link--inline" onClick={(event) => { event.stopPropagation(); setCounterpartyId(entry.counterpartyId ?? null); }}>{entry.counterparty}</button>{stage ? ` · ${stage.shortName}` : ''}{entry.document ? ` · ${entry.document}` : ''}</span></div>
                 <span className="transaction-row__date">{formatDate(entry.date, true)}</span>
                 <div className="transaction-status-cell">
-                  <StatusBadge label={entry.kind === 'income' && entry.status === 'paid' ? 'Получено' : statusLabels[entry.status]} tone={entry.status === 'paid' ? 'positive' : entry.status === 'accepted' ? 'blue' : 'neutral'} />
-                  {entry.kind === 'expense' && acceptedAmountFor(entry) < entry.amount && <button type="button" disabled={!canAcceptEntry(entry)} onClick={(event) => { event.stopPropagation(); openAction(entry, 'accept'); }} title={!canAcceptEntry(entry) ? 'Сначала примите связанную работу или поставку' : 'Зафиксировать фактически принятый объём'}>Принять</button>}
-                  {entry.kind === 'expense' && paidAmountFor(entry) < acceptedAmountFor(entry) && <button type="button" onClick={(event) => { event.stopPropagation(); openAction(entry, 'pay'); }}>Оплатить</button>}
+                  <StatusBadge label={needsExpenseApproval(entry) ? 'К утверждению' : entry.kind === 'income' && entry.status === 'paid' ? 'Получено' : statusLabels[entry.status]} tone={entry.status === 'paid' ? 'positive' : entry.status === 'accepted' ? 'blue' : 'neutral'} />
+                  {entry.kind === 'expense' && acceptedAmountFor(entry) < entry.amount && <button type="button" disabled={!canAcceptEntry(entry)} onClick={(event) => { event.stopPropagation(); openAction(entry, 'accept'); }} title={!canAcceptEntry(entry) ? approvalRequired(entry) : 'Зафиксировать фактически принятый объём'}>Принять</button>}
+                  {entry.kind === 'expense' && paidAmountFor(entry) < acceptedAmountFor(entry) && <button type="button" onClick={(event) => { event.stopPropagation(); openAction(entry, 'pay'); }}>Записать оплату</button>}
                   {entry.kind === 'income' && paidAmountFor(entry) < entry.amount && <button type="button" onClick={(event) => { event.stopPropagation(); openAction(entry, 'receive'); }}>Получить</button>}
                 </div>
                 <strong className={entry.kind === 'income' ? 'positive-text' : ''}>{entry.kind === 'income' ? '+' : '−'}{money(entry.amount)}</strong>
@@ -256,14 +269,14 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
                   {state.stages.filter((stage) => (state.budgetLines.find((line) => line.id === form.budgetLineId)?.stageIds ?? []).includes(stage.id)).map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
                 </select>
               </Field>
-              <Field label="Сумма, ₽"><input required min="1" inputMode="numeric" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="350000" /></Field>
+              <Field label="Сумма, ₽"><input required min="0.01" step="0.01" inputMode="decimal" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="350000" /></Field>
               <Field label="Статус"><div className="locked-field"><LockKeyhole size={15} /> Обязательство</div></Field>
             </div>
             </>}
-            {formKind === 'income' && <div className="form-grid"><Field label="Сумма, ₽"><input required min="1" inputMode="numeric" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="1400000" /></Field><Field label="Статус"><div className="locked-field"><LockKeyhole size={15} /> Запланировано</div></Field></div>}
+            {formKind === 'income' && <div className="form-grid"><Field label="Сумма, ₽"><input required min="0.01" step="0.01" inputMode="decimal" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="1400000" /></Field><Field label="Статус"><div className="locked-field"><LockKeyhole size={15} /> Запланировано</div></Field></div>}
             <Field label="Основание операции" hint="Счёт, договор, акт, платёж или конкретная поставка"><textarea required rows={3} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="За что платим или какое поступление ожидаем" /></Field>
             <div className="form-grid"><Field label={formKind === 'expense' ? 'Контрагент' : 'Плательщик'} hint="Выбор из единого справочника"><select required value={form.counterpartyId} onChange={(event) => setForm({ ...form, counterpartyId: event.target.value })}><option value="">Выберите контрагента</option>{state.counterparties.filter((item) => item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}{item.specialty ? ` · ${item.specialty}` : ''}</option>)}</select></Field><Field label="Дата"><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></Field></div>
-            {formKind === 'expense' && <div className="form-warning"><ReceiptText size={18} /><span>Сначала создаётся обязательство. Перевести его в «принято» можно только после приёмки связанной работы или поставки, а затем — оплатить.</span></div>}
+            {formKind === 'expense' && <div className="form-warning"><ReceiptText size={18} /><span>Сначала создаётся обязательство. Управление утверждает расход в карточке. После приёмки связанной работы или поставки фиксируются принятая сумма и отдельно фактическая оплата.</span></div>}
             <div className="modal__actions"><button className="button button--ghost" type="button" onClick={() => setShowForm(false)}>Отмена</button><button className="button button--primary" type="submit" disabled={!state.counterparties.length}><CircleDollarSign size={18} /> Добавить в поток</button></div>
           </form>
         </Modal>
@@ -271,13 +284,23 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate }: { s
 
       {summaryOpen && <Modal wide title={summaryOpen === 'plan' ? 'План себестоимости' : summaryOpen === 'committed' ? 'Законтрактованные расходы' : summaryOpen === 'accepted' ? 'Принятые работы и материалы' : 'Баланс проекта'} subtitle={summaryOpen === 'plan' ? `${state.budgetMeta.source} · ${state.budgetMeta.version}` : 'Каждая цифра раскрывается до операции, контрагента и документа.'} onClose={() => setSummaryOpen(null)}><div className="finance-drilldown"><div><small>План</small><strong>{money(totals.plan)}</strong></div><div><small>Прогноз</small><strong>{money(totals.forecast)}</strong></div><div><small>Обязательства</small><strong>{money(totals.committed)}</strong></div><div><small>Принято</small><strong>{money(totals.accepted)}</strong></div><div><small>Оплачено</small><strong>{money(totals.paid)}</strong></div><div><small>Получено</small><strong>{money(totals.received)}</strong></div><div className="finance-drilldown__accent"><small>Доступный баланс</small><strong>{money(balance)}</strong></div><div className="finance-drilldown__accent"><small>Прогноз маржи</small><strong>{money(state.project.contractValue - totals.forecast)}</strong></div></div><div className="entity-related-list">{summaryOpen === 'plan' ? state.budgetLines.map((line) => <button type="button" key={line.id} onClick={() => { setSummaryOpen(null); setSelectedLineId(line.id); }}><span><strong>{line.name}</strong><small>{line.stageIds.length} этапа · прогноз {money(line.forecast)}</small></span><strong>{money(line.plan)}</strong></button>) : state.financeEntries.filter((entry) => summaryOpen === 'committed' ? entry.kind === 'expense' : summaryOpen === 'accepted' ? entry.kind === 'expense' && acceptedAmountFor(entry) > 0 : entry.kind === 'income' || paidAmountFor(entry) > 0).map((entry) => <button type="button" key={entry.id} onClick={() => { setSummaryOpen(null); setSelectedEntryId(entry.id); }}><span><strong>{entry.description}</strong><small>{entry.counterparty} · {entry.kind === 'income' ? 'поступление' : `принято ${money(acceptedAmountFor(entry))} · оплачено ${money(paidAmountFor(entry))}`}</small></span><strong>{money(entry.amount)}</strong></button>)}</div></Modal>}
 
-      {selectedEntry && <Modal title={selectedEntry.description} subtitle={`${selectedEntry.kind === 'expense' ? 'Расход' : 'Поступление'} · ${formatDate(selectedEntry.date, true)}`} onClose={() => setSelectedEntryId(null)}><div className="entity-detail-grid"><section className="entity-detail-card"><small>Обязательство</small><strong>{money(selectedEntry.amount)}</strong><span>{selectedEntry.kind === 'income' ? 'ожидаемое поступление' : statusLabels[selectedEntry.status]}</span></section><section className="entity-detail-card"><small>{selectedEntry.kind === 'income' ? 'Получено' : 'Принято'}</small><strong>{money(selectedEntry.kind === 'income' ? paidAmountFor(selectedEntry) : acceptedAmountFor(selectedEntry))}</strong><span>{selectedEntry.kind === 'income' ? selectedEntry.paymentDocument ?? 'Без платёжного документа' : selectedEntry.acceptanceDocument ?? 'Акт не указан'}</span></section>{selectedEntry.kind === 'expense' && <section className="entity-detail-card"><small>Оплачено</small><strong>{money(paidAmountFor(selectedEntry))}</strong><span>{selectedEntry.paymentDocument ?? 'Платёжный документ не указан'}</span></section>}<section className="entity-detail-card"><small>Контрагент</small><button type="button" className="entity-link" onClick={() => { setSelectedEntryId(null); setCounterpartyId(selectedEntry.counterpartyId ?? null); }}>{selectedEntry.counterparty} <ArrowUpRight size={15} /></button><span>{selectedEntry.document ?? 'Основание не приложено'}</span></section><section className="entity-detail-card"><small>Связь</small><strong>{state.stages.find((item) => item.id === selectedEntry.stageId)?.name ?? 'Без этапа'}</strong><span>{state.budgetLines.find((item) => item.id === selectedEntry.budgetLineId)?.name ?? 'Без статьи бюджета'}</span></section></div><div className="modal__actions">{selectedEntry.kind === 'expense' && acceptedAmountFor(selectedEntry) < selectedEntry.amount && <button type="button" className="button button--secondary" disabled={!canAcceptEntry(selectedEntry)} onClick={() => { setSelectedEntryId(null); openAction(selectedEntry, 'accept'); }}>Зафиксировать приёмку</button>}{selectedEntry.kind === 'expense' && paidAmountFor(selectedEntry) < acceptedAmountFor(selectedEntry) && <button type="button" className="button button--primary" onClick={() => { setSelectedEntryId(null); openAction(selectedEntry, 'pay'); }}>Зафиксировать оплату</button>}{selectedEntry.kind === 'income' && paidAmountFor(selectedEntry) < selectedEntry.amount && <button type="button" className="button button--primary" onClick={() => { setSelectedEntryId(null); openAction(selectedEntry, 'receive'); }}>Зафиксировать поступление</button>}</div></Modal>}
+      {selectedEntry && <Modal title={selectedEntry.description} subtitle={`${selectedEntry.kind === 'expense' ? 'Расход' : 'Поступление'} · ${formatDate(selectedEntry.date, true)}`} onClose={() => setSelectedEntryId(null)}><div className="entity-detail-grid"><section className="entity-detail-card"><small>Обязательство</small><strong>{money(selectedEntry.amount)}</strong><span>{selectedEntry.kind === 'income' ? 'ожидаемое поступление' : statusLabels[selectedEntry.status]}</span></section><section className="entity-detail-card"><small>{selectedEntry.kind === 'income' ? 'Получено' : 'Принято'}</small><strong>{money(selectedEntry.kind === 'income' ? paidAmountFor(selectedEntry) : acceptedAmountFor(selectedEntry))}</strong><span>{selectedEntry.kind === 'income' ? selectedEntry.paymentDocument ?? 'Без платёжного документа' : selectedEntry.acceptanceDocument ?? 'Акт не указан'}</span></section>{selectedEntry.kind === 'expense' && <section className="entity-detail-card"><small>Оплачено</small><strong>{money(paidAmountFor(selectedEntry))}</strong><span>{selectedEntry.paymentDocument ?? 'Платёжный документ не указан'}</span></section>}<section className="entity-detail-card"><small>Контрагент</small><button type="button" className="entity-link" onClick={() => { setSelectedEntryId(null); setCounterpartyId(selectedEntry.counterpartyId ?? null); }}>{selectedEntry.counterparty} <ArrowUpRight size={15} /></button><span>{selectedEntry.document ?? 'Основание не приложено'}</span></section><section className="entity-detail-card"><small>Связь</small><strong>{state.stages.find((item) => item.id === selectedEntry.stageId)?.name ?? 'Без этапа'}</strong><span>{state.budgetLines.find((item) => item.id === selectedEntry.budgetLineId)?.name ?? 'Без статьи бюджета'}</span></section></div>{selectedEntry.kind === 'expense' && <section className="expense-guide" aria-label="Порядок проведения расхода">
+        <strong>{needsExpenseApproval(selectedEntry) ? 'Следующий шаг: утвердить расход' : acceptedAmountFor(selectedEntry) < selectedEntry.amount ? 'Следующий шаг: приёмка работ или материалов' : paidAmountFor(selectedEntry) < selectedEntry.amount ? 'Следующий шаг: записать фактическую оплату' : 'Расход полностью принят и оплачен'}</strong>
+        <p>{selectedEntry.approvedAt ? `Утвердил: ${selectedEntry.approvedBy ?? 'Управление'} · ${formatDate(selectedEntry.approvedAt, true)}` : acceptedAmountFor(selectedEntry) > 0 ? 'Ранее принятый расход: отдельное утверждение в старой записи не фиксировалось.' : 'Утверждает владелец или сотрудник с ролью «Управление». У вас эта роль: кнопка утверждения доступна ниже.'}</p>
+        {selectedEntry.createdBy && <p>Добавил: {selectedEntry.createdBy}</p>}
+        {selectedEntry.acceptedBy && <p>Приёмку записал: {selectedEntry.acceptedBy}</p>}
+        {selectedEntry.paidBy && <p>Оплату записал: {selectedEntry.paidBy}</p>}
+        {!needsExpenseApproval(selectedEntry) && acceptedAmountFor(selectedEntry) < selectedEntry.amount && !canAcceptEntry(selectedEntry) && <><p role="status">{approvalRequired(selectedEntry)} Ответственный за этап: {state.stages.find((item) => item.id === selectedEntry.stageId)?.responsible || 'не назначен'}. После приёмки вернитесь в эту карточку.</p><div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => onNavigate(selectedEntry.procurementItemId ? 'procurement' : 'quality', selectedEntry.procurementItemId ?? state.checkpoints.find((item) => item.stageId === selectedEntry.stageId && item.status !== 'accepted')?.id)}>{selectedEntry.procurementItemId ? 'Открыть снабжение' : 'Открыть качество'}</button>{!selectedEntry.procurementItemId && <button type="button" className="button button--ghost" onClick={() => onNavigate('schedule', selectedEntry.stageId)}>Открыть этапы</button>}</div></>}
+        <p>Обязательство — договорённость о расходе. Утверждение — разрешение расхода. Приёмка — подтверждённый результат. Оплата — уже выплаченные деньги. Система не переводит деньги в банк.</p>
+        <button type="button" className="text-button" onClick={() => { setSelectedEntryId(null); onOpenQuestions(); }}>Вопросы по расходам</button>
+      </section>}
+      <div className="modal__actions">{needsExpenseApproval(selectedEntry) && <button type="button" className="button button--primary" onClick={() => approveExpense(selectedEntry)}>Утвердить расход</button>}{selectedEntry.kind === 'expense' && acceptedAmountFor(selectedEntry) < selectedEntry.amount && <button type="button" className="button button--secondary" disabled={!canAcceptEntry(selectedEntry)} onClick={() => { setSelectedEntryId(null); openAction(selectedEntry, 'accept'); }}>Зафиксировать приёмку</button>}{selectedEntry.kind === 'expense' && paidAmountFor(selectedEntry) < acceptedAmountFor(selectedEntry) && <button type="button" className="button button--primary" onClick={() => { setSelectedEntryId(null); openAction(selectedEntry, 'pay'); }}>Зафиксировать оплату</button>}{selectedEntry.kind === 'income' && paidAmountFor(selectedEntry) < selectedEntry.amount && <button type="button" className="button button--primary" onClick={() => { setSelectedEntryId(null); openAction(selectedEntry, 'receive'); }}>Зафиксировать поступление</button>}</div></Modal>}
 
       {selectedLine && <Modal wide title={selectedLine.name} subtitle="Статья сметы и все связанные обязательства." onClose={() => setSelectedLineId(null)}><div className="finance-drilldown"><div><small>План</small><strong>{money(selectedLine.plan)}</strong></div><div><small>Прогноз</small><strong>{money(selectedLine.forecast)}</strong></div><div><small>Обязательства</small><strong>{money(lineTotals(state, selectedLine).committed)}</strong></div><div><small>Принято</small><strong>{money(lineTotals(state, selectedLine).accepted)}</strong></div><div><small>Оплачено</small><strong>{money(lineTotals(state, selectedLine).paid)}</strong></div></div><div className="entity-related-list">{state.financeEntries.filter((entry) => entry.budgetLineId === selectedLine.id).map((entry) => <button type="button" key={entry.id} onClick={() => { setSelectedLineId(null); setSelectedEntryId(entry.id); }}><span><strong>{entry.description}</strong><small>{entry.counterparty} · {formatDate(entry.date, true)}</small></span><strong>{money(entry.amount)}</strong></button>)}{!state.financeEntries.some((entry) => entry.budgetLineId === selectedLine.id) && <div className="table-empty">По статье ещё нет обязательств и оплат.</div>}</div><div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => openLineEdit(selectedLine)}>Изменить план и прогноз</button><button type="button" className="button button--primary" onClick={() => { setSelectedLineId(null); setForm({ ...form, budgetLineId: selectedLine.id, stageId: selectedLine.stageIds[0] }); setShowForm(true); }}>Добавить обязательство</button></div></Modal>}
 
       {counterpartyId && <CounterpartyModal state={state} counterpartyId={counterpartyId} onClose={() => setCounterpartyId(null)} onOpenFinanceEntry={(id) => { setCounterpartyId(null); setSelectedEntryId(id); }} />}
 
-      {actionEntryId && (() => { const entry = state.financeEntries.find((item) => item.id === actionEntryId); if (!entry) return null; const title = actionKind === 'accept' ? 'Фактическая приёмка' : actionKind === 'pay' ? 'Фактическая оплата' : 'Фактическое поступление'; return <Modal title={title} subtitle={`${entry.description} · ${entry.counterparty}`} onClose={() => setActionEntryId(null)}><form className="modal-form" onSubmit={saveAction}><div className="finance-action-context"><div><small>Обязательство</small><strong>{money(entry.amount)}</strong></div><div><small>{actionKind === 'accept' ? 'Уже принято' : actionKind === 'receive' ? 'Уже получено' : 'Уже оплачено'}</small><strong>{money(actionKind === 'accept' ? acceptedAmountFor(entry) : paidAmountFor(entry))}</strong></div></div><div className="form-grid"><Field label="Фактическая сумма, ₽"><input required min="1" max={actionKind === 'accept' ? entry.amount - acceptedAmountFor(entry) : actionKind === 'pay' ? acceptedAmountFor(entry) - paidAmountFor(entry) : entry.amount - paidAmountFor(entry)} type="number" inputMode="numeric" value={actionForm.amount} onChange={(event) => setActionForm({ ...actionForm, amount: event.target.value })} /></Field><Field label="Фактическая дата"><input required type="date" value={actionForm.date} onChange={(event) => setActionForm({ ...actionForm, date: event.target.value })} /></Field></div><Field label={actionKind === 'accept' ? 'Акт / УПД / ТН' : 'Платёжное поручение / чек'} hint="Документ автоматически попадёт в историю контрагента"><input value={actionForm.document} onChange={(event) => setActionForm({ ...actionForm, document: event.target.value })} placeholder={actionKind === 'accept' ? 'Акт №…' : 'Платёжное поручение №…'} /></Field><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setActionEntryId(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить факт</button></div></form></Modal>; })()}
+      {actionEntryId && (() => { const entry = state.financeEntries.find((item) => item.id === actionEntryId); if (!entry) return null; const title = actionKind === 'accept' ? 'Фактическая приёмка' : actionKind === 'pay' ? 'Фактическая оплата' : 'Фактическое поступление'; return <Modal title={title} subtitle={`${entry.description} · ${entry.counterparty}`} onClose={() => setActionEntryId(null)}><form className="modal-form" onSubmit={saveAction}>{actionError && <p role="alert" className="form-warning">{actionError}</p>}{actionKind === 'accept' && <Field label="Принятая работа или поставка" hint="Выберите конкретное основание, к которому относится эта сумма"><select required value={actionForm.source} onChange={(event) => setActionForm({ ...actionForm, source: event.target.value })}><option value="">Выберите основание</option>{expenseAcceptanceSources(state, entry).map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}</select></Field>}<div className="finance-action-context"><div><small>Обязательство</small><strong>{money(entry.amount)}</strong></div><div><small>{actionKind === 'accept' ? 'Уже принято' : actionKind === 'receive' ? 'Уже получено' : 'Уже оплачено'}</small><strong>{money(actionKind === 'accept' ? acceptedAmountFor(entry) : paidAmountFor(entry))}</strong></div></div><div className="form-grid"><Field label="Фактическая сумма, ₽"><input required min="0.01" step="0.01" max={financeMoney(actionKind === 'accept' ? entry.amount - acceptedAmountFor(entry) : actionKind === 'pay' ? acceptedAmountFor(entry) - paidAmountFor(entry) : entry.amount - paidAmountFor(entry))} type="number" inputMode="numeric" value={actionForm.amount} onChange={(event) => setActionForm({ ...actionForm, amount: event.target.value })} /></Field><Field label="Фактическая дата"><input required type="date" value={actionForm.date} onChange={(event) => setActionForm({ ...actionForm, date: event.target.value })} /></Field></div><Field label={actionKind === 'accept' ? 'Акт / УПД / ТН' : 'Платёжное поручение / чек'} hint="Документ автоматически попадёт в историю контрагента"><input required value={actionForm.document} onChange={(event) => setActionForm({ ...actionForm, document: event.target.value })} placeholder={actionKind === 'accept' ? 'Акт №…' : 'Платёжное поручение №…'} /></Field><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setActionEntryId(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить факт</button></div></form></Modal>; })()}
 
       {editingLineId && <Modal title="Изменить статью сметы" subtitle={state.budgetLines.find((item) => item.id === editingLineId)?.name} onClose={() => setEditingLineId(null)}><form className="modal-form" onSubmit={saveLine}><div className="form-grid"><Field label="План, ₽" hint="Утверждённая базовая сумма"><input required min="0" type="number" inputMode="numeric" value={lineForm.plan} onChange={(event) => setLineForm({ ...lineForm, plan: event.target.value })} /></Field><Field label="Прогноз, ₽" hint="Ожидаемый итог с учётом изменений"><input required min="0" type="number" inputMode="numeric" value={lineForm.forecast} onChange={(event) => setLineForm({ ...lineForm, forecast: event.target.value })} /></Field><Field label="Версия сметы"><input value={lineForm.version} onChange={(event) => setLineForm({ ...lineForm, version: event.target.value })} /></Field></div><Field label="Источник плана"><input required value={lineForm.source} onChange={(event) => setLineForm({ ...lineForm, source: event.target.value })} /></Field><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingLineId(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить статью</button></div></form></Modal>}
     </div>

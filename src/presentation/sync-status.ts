@@ -15,6 +15,7 @@ export interface LocalCacheView {
 }
 
 export const syncErrorMessage = (error: unknown, cachePhase: LocalCacheView['phase']) => {
+  if (error instanceof Error && error.message.startsWith('invalid_finance_transition')) return `Сервер не сохранил финансовую операцию. ${error.message.split(': ').slice(1).join(': ') || 'Проверьте утверждение, основание приёмки и суммы.'} Исправьте запись перед повторной синхронизацией.`;
   if (error instanceof Error && error.message === 'payload_too_large') return 'Данные слишком велики для сохранения. Проверьте вложения.';
   if (cachePhase === 'failed') return 'Сервер недоступен, локальная копия тоже не сохранена. Не закрывайте вкладку.';
   if (cachePhase === 'saving') return 'Нет связи с сервером. Локальная копия ещё сохраняется на этом устройстве.';

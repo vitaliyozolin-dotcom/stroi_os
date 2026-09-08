@@ -2,7 +2,8 @@ export const money = (value: number, compact = false) =>
   new Intl.NumberFormat('ru-RU', {
     style: 'currency',
     currency: 'RUB',
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: compact ? 0 : 2,
     notation: compact ? 'compact' : 'standard',
   }).format(value);
 

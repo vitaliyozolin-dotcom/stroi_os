@@ -25,11 +25,17 @@ export const createDeveloperFeedbackHandler = ({ ensureSchema, readSnapshot }) =
     const identity = snapshot ? projectIdentity(request, env, snapshot.state) : authenticatedIdentity(request, env);
     if (!identity || identity.role !== 'management') return json({ ok: false, error: 'project_access_denied' }, 403);
     if (request.method === 'GET') {
-      const result = await env.DB.prepare(`
+      const questionsOnly = url.searchParams.get('category') === 'Вопрос';
+      const offset = Math.min(100000, Math.max(0, Number.parseInt(url.searchParams.get('offset') || '0', 10) || 0));
+      const query = questionsOnly ? env.DB.prepare(`
+        SELECT id, project_id, created_at, created_by, page, category, title, details, status
+        FROM developer_feedback WHERE project_id = ? AND category = ? ORDER BY created_at DESC, id DESC LIMIT 51 OFFSET ?
+      `).bind(projectId, 'Вопрос', offset) : env.DB.prepare(`
         SELECT id, project_id, created_at, created_by, page, category, title, details, status
         FROM developer_feedback WHERE project_id = ? ORDER BY created_at DESC LIMIT 50
-      `).bind(projectId).all();
-      return json({ ok: true, items: (result.results ?? []).map((row) => ({
+      `).bind(projectId);
+      const result = await query.all();
+      return json({ ok: true, hasMore: questionsOnly && (result.results?.length ?? 0) > 50, items: (result.results ?? []).slice(0, 50).map((row) => ({
         id: row.id, projectId: row.project_id, createdAt: row.created_at, createdBy: row.created_by,
         page: row.page, category: row.category, title: row.title, details: row.details, status: row.status,
       })) });

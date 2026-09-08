@@ -96,3 +96,17 @@ test('developer feedback persistence is isolated from the Worker', () => {
   assert.match(feedback, /FROM developer_feedback WHERE project_id = \? ORDER BY created_at DESC LIMIT 50/);
   assert.match(feedback, /identity\.role !== 'management'/);
 });
+
+test('question registry filters on server before pagination and keeps project isolation', async () => {
+  const sqlCalls: Array<{ sql: string; args: unknown[] }> = [];
+  const handler = createDeveloperFeedbackHandler({ ensureSchema: async () => undefined, readSnapshot: async () => ({ state: projectState }) });
+  const DB = { prepare: (sql: string) => ({ bind: (...args: unknown[]) => ({ all: async () => { sqlCalls.push({ sql, args }); return { results: Array.from({ length: 51 }, (_, id) => ({ id: String(id), category: 'Вопрос', project_id: 'project-1', title: 'Вопрос', details: 'Описание' })) }; } }) }) };
+  const query = new Request('https://app.test/api/developer-feedback?projectId=project-1&category=%D0%92%D0%BE%D0%BF%D1%80%D0%BE%D1%81&offset=50', { headers: { 'oai-authenticated-user-email': 'manager@example.test' } });
+  const response = await handler(query, { ...env, DB });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.items.length, 50);
+  assert.equal(body.hasMore, true);
+  assert.match(sqlCalls[0].sql, /WHERE project_id = \? AND category = \?.*ORDER BY.*LIMIT 51 OFFSET \?/s);
+  assert.deepEqual(sqlCalls[0].args, ['project-1', 'Вопрос', 50]);
+});
