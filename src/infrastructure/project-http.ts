@@ -20,8 +20,8 @@ export { ProjectRevisionConflict as RevisionConflictError };
 export class StorageRequestError extends Error {
   code: string;
 
-  constructor(code: string) {
-    super(code);
+  constructor(code: string, detail?: string) {
+    super(code === 'invalid_finance_transition' && detail ? `${code}: ${detail}` : code);
     this.name = 'StorageRequestError';
     this.code = code;
   }
@@ -53,7 +53,7 @@ export const fetchRemoteProjects = async (): Promise<ProjectListItem[]> => {
   if (!response.ok) {
     redirectAfterAuthenticationFailure(response);
     const body = await readError(response);
-    throw new StorageRequestError(body.error ?? `http_${response.status}`);
+    throw new StorageRequestError(body.error ?? `http_${response.status}`, body.message);
   }
   const body = await response.json() as { projects?: ProjectListItem[] };
   return Array.isArray(body.projects) ? body.projects : [];
@@ -61,7 +61,7 @@ export const fetchRemoteProjects = async (): Promise<ProjectListItem[]> => {
 
 const readError = async (response: Response) => {
   try {
-    return await response.json() as { error?: string; current?: RemoteSnapshot };
+    return await response.json() as { error?: string; message?: string; current?: RemoteSnapshot };
   } catch {
     return {};
   }
@@ -83,7 +83,7 @@ export const fetchRemoteProject = async (projectId: string): Promise<RemoteSnaps
   if (!response.ok) {
     redirectAfterAuthenticationFailure(response);
     const body = await readError(response);
-    throw new StorageRequestError(body.error ?? `http_${response.status}`);
+    throw new StorageRequestError(body.error ?? `http_${response.status}`, body.message);
   }
 
   const body = await response.json() as { snapshot?: RemoteSnapshot };
@@ -155,7 +155,7 @@ export const saveRemoteProject = async ({
   if (!response.ok) {
     redirectAfterAuthenticationFailure(response);
     const body = await readError(response);
-    throw new StorageRequestError(body.error ?? `http_${response.status}`);
+    throw new StorageRequestError(body.error ?? `http_${response.status}`, body.message);
   }
 
   const body = await response.json() as { snapshot?: SaveResult };

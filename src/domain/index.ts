@@ -6,6 +6,7 @@ export {
   stageFinanceTotals,
 } from './finance.ts';
 export { mergeProjectStates } from './merge.ts';
+export { financeMoney, needsExpenseApproval, expenseAcceptanceSources, financeActionError } from './expense-workflow.ts';
 export { normalizeAppStateWithFallback } from './normalization.ts';
 export {
   projectProgressTotals,

@@ -30,6 +30,12 @@ export interface FinanceEntry {
   description: string;
   document?: string;
   procurementItemId?: string;
+  createdBy?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  acceptedBy?: string;
+  acceptanceSource?: string;
+  paidBy?: string;
   acceptedAmount?: number;
   acceptedAt?: string;
   acceptanceDocument?: string;

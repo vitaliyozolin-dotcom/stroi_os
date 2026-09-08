@@ -40,6 +40,7 @@ import { CounterpartiesPage } from './pages/CounterpartiesPage';
 import { TasksPage } from './pages/TasksPage';
 import { ProjectPage } from './pages/ProjectPage';
 import { HelpCenter } from './components/HelpCenter';
+import { QuestionRegistry } from './components/QuestionRegistry';
 import { Field, Modal, StatusBadge } from './components/Ui';
 import type { AuthenticatedUser, UserRole } from './entities/index';
 import type { PageId } from './presentation/navigation';
@@ -125,6 +126,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [questionsOpen, setQuestionsOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [projectForm, setProjectForm] = useState({ code: 'H-001', name: '', address: '', model: '', area: '', clientNames: '', contractValue: '', targetCost: '', startDate: new Date().toISOString().slice(0, 10), targetDate: '', foreman: state.project.foreman, source: '' });
@@ -236,7 +238,7 @@ function App() {
       case 'tasks': return <TasksPage state={state} role={role} session={session!} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />;
       case 'marketing': return <MarketingPage state={state} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'counterparties': return <CounterpartiesPage state={state} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
-      case 'finance': return <FinancePage state={state} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />;
+      case 'finance': return <FinancePage onOpenQuestions={() => setQuestionsOpen(true)} state={state} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />;
       case 'schedule': return <SchedulePage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'procurement': return <ProcurementPage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'quality': return <QualityPage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
@@ -411,7 +413,8 @@ function App() {
 
       {createProjectOpen && <Modal wide title="Новый строительный проект" subtitle="Сначала основные параметры и сроки. Неизвестные финансовые цифры можно оставить пустыми и заполнить после сметы." onClose={() => setCreateProjectOpen(false)}><form className="modal-form" onSubmit={submitProject}><div className="form-grid"><Field label="Код проекта"><input required value={projectForm.code} onChange={(event) => setProjectForm({ ...projectForm, code: event.target.value })} placeholder="H-001" /></Field><Field label="Название"><input required value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} placeholder="Рабочее название объекта" /></Field><Field label="Клиент"><input value={projectForm.clientNames} onChange={(event) => setProjectForm({ ...projectForm, clientNames: event.target.value })} /></Field><Field label="Адрес"><input value={projectForm.address} onChange={(event) => setProjectForm({ ...projectForm, address: event.target.value })} /></Field></div><div className="form-grid"><Field label="Модель / технология"><input value={projectForm.model} onChange={(event) => setProjectForm({ ...projectForm, model: event.target.value })} /></Field><Field label="Площадь, м²"><input required min="1" type="number" inputMode="decimal" value={projectForm.area} onChange={(event) => setProjectForm({ ...projectForm, area: event.target.value })} /></Field><Field label="Стоимость договора, ₽" hint="Можно заполнить позже"><input min="0" type="number" inputMode="numeric" value={projectForm.contractValue} onChange={(event) => setProjectForm({ ...projectForm, contractValue: event.target.value })} /></Field><Field label="Плановая себестоимость, ₽" hint="Можно заполнить после сметы"><input min="0" type="number" inputMode="numeric" value={projectForm.targetCost} onChange={(event) => setProjectForm({ ...projectForm, targetCost: event.target.value })} /></Field></div><div className="form-grid"><Field label="Начало"><input required type="date" value={projectForm.startDate} onChange={(event) => setProjectForm({ ...projectForm, startDate: event.target.value })} /></Field><Field label="Плановая сдача"><input required type="date" value={projectForm.targetDate} onChange={(event) => setProjectForm({ ...projectForm, targetDate: event.target.value })} /></Field><Field label="Прораб"><input value={projectForm.foreman} onChange={(event) => setProjectForm({ ...projectForm, foreman: event.target.value })} /></Field><Field label="Основание проекта"><input value={projectForm.source} onChange={(event) => setProjectForm({ ...projectForm, source: event.target.value })} placeholder="Договор, заявка или внутреннее решение" /></Field></div><div className="form-warning"><ClipboardCheck size={18} /><span>ИКИОМА ОС создаст 13 этапов. Если указана плановая себестоимость, она предварительно распределится по пакетам; до подтверждения это будет черновик.</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setCreateProjectOpen(false)}>Отмена</button><button type="submit" className="button button--primary"><Plus size={17} /> Создать проект</button></div></form></Modal>}
 
-      {role === 'management' && <HelpCenter projectId={state.project.id} currentPage={page} onNavigate={navigate} onOpenProjects={() => setProjectOpen(true)} onCloseProjects={() => setProjectOpen(false)} />}
+      {role === 'management' && questionsOpen && <QuestionRegistry key={state.project.id} projectId={state.project.id} currentPage={page} onClose={() => setQuestionsOpen(false)} />}
+      {role === 'management' && <HelpCenter onOpenQuestions={() => setQuestionsOpen(true)} projectId={state.project.id} currentPage={page} onNavigate={navigate} onOpenProjects={() => setProjectOpen(true)} onCloseProjects={() => setProjectOpen(false)} />}
     </div>
   );
 }
