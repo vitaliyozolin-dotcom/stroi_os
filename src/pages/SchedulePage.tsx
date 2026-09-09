@@ -1,5 +1,7 @@
 import { BaselinePanel, planShiftLabel } from '../components/BaselinePanel';
 import { StageControlModal } from '../components/StageControlModal';
+import { ScheduleReconciliation } from '../components/ScheduleReconciliation';
+import { forecastSchedule } from '../../sites/lib/schedule-forecast.js';
 import type { StageAction } from '../application/stage-control';
 import { planDays as baselineDays } from '../../sites/lib/plan-baseline.js';
 import { createScheduleCommands } from '../application';
@@ -59,10 +61,13 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
   const [selectedId, setSelectedId] = useState(defaultStage?.id ?? '');
   const [counterpartyId, setCounterpartyId] = useState<string | null>(null);
   const [editingDates, setEditingDates] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const [stageAction, setStageAction] = useState<StageAction | null>(null);
   const [dateError, setDateError] = useState('');
   const [dateForm, setDateForm] = useState({ planStart: '', planEnd: '', forecastEnd: '', dependencyId: '', responsibleId: '', reason: '' });
   const selected = state.stages.find((stage) => stage.id === selectedId) ?? defaultStage!;
+  const forecast = useMemo(() => forecastSchedule(state), [state]);
+  const calculated = forecast.end ? forecast.rows.find((row) => row.id === selected.id) : undefined;
   useEffect(() => {
     if (focusId && state.stages.some((stage) => stage.id === focusId)) setSelectedId(focusId);
   }, [focusId, state.stages]);
@@ -84,7 +89,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
 
   const gantt = useMemo(() => {
     const parse = (value: string) => new Date(`${value}T12:00:00Z`).getTime();
-    const dates = state.stages.flatMap((stage) => [stage.planStart, stage.planEnd, stage.forecastEnd, stage.baseline?.start || '', stage.baseline?.end || '']).filter(Boolean).map(parse).filter(Number.isFinite);
+    const dates = [...state.stages.flatMap((stage) => [stage.planStart, stage.planEnd, stage.baseline?.start || '', stage.baseline?.end || '']), ...(forecast.end ? forecast.rows.flatMap((row) => [row.start, row.end]) : [])].filter(Boolean).map(parse).filter(Number.isFinite);
     const projectStart = parse(state.project.startDate);
     const projectEnd = parse(state.project.targetDate);
     const minTime = Math.min(...dates, projectStart);
@@ -113,7 +118,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
     const todayOffset = Math.round((parse(todayKey) - startTime) / dayMs);
     const currentWeekOffset = Math.round((parse(currentWeek.start) - startTime) / dayMs);
     return { dayMs, dayWidth, offset, totalDays, width, ticks, todayOffset, currentWeekOffset };
-  }, [currentWeek.start, state.project.startDate, state.project.targetDate, state.stages, todayKey]);
+  }, [currentWeek.start, state.project.startDate, state.project.targetDate, state.stages, todayKey, forecast]);
 
   const openDateEdit = () => {
     const dependencyStage = state.stages.find((stage) => stage.id === selected.dependencyId)
@@ -138,8 +143,8 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
         planStart: dateForm.planStart,
         planEnd: dateForm.planEnd,
         forecastEnd: dateForm.forecastEnd,
-        dependencyId: dependency?.id,
-        dependency: dependency?.name,
+        dependencyId: stage.schedule ? stage.dependencyId : dependency?.id,
+        dependency: stage.schedule ? stage.dependency : dependency?.name,
         responsibleId: responsible?.id,
         responsible: responsible?.name ?? 'Не назначен',
       } : stage),
@@ -155,7 +160,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
   const clearBlocker = () => setStageAction('start');
 
   const renderActions = () => {
-    if (role === 'client' || selected.status === 'accepted') return null;
+    if (role === 'client' || selected.status === 'accepted' || role !== 'management' && selected.schedule && selected.schedule.reporterId !== userId) return null;
     if (selected.status === 'ready' || selected.status === 'not_ready') return <button className="button button--primary" type="button" onClick={() => setStageAction('start')}><Play size={17} /> Зафиксировать начало</button>;
     if (selected.status === 'in_progress' || selected.status === 'rework') return (
       <button className="button button--primary" type="button" onClick={() => setStageAction('complete')}><Send size={17} /> Зафиксировать выполнение</button>
@@ -170,6 +175,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
   return (
     <div className="page-stack">
       {stageAction && <StageControlModal state={state} stageId={selected.id} action={stageAction} role={role} actor={actor} userId={userId} onChange={saveChange} onClose={() => setStageAction(null)} />}
+      {reviewing && <ScheduleReconciliation state={state} role={role} actor={actor} userId={userId} initialId={selected.id} onChange={saveChange} onClose={() => setReviewing(false)} />}
       <section className="page-title-row">
         <div>
           <span className="eyebrow">Производственный план · {state.stages.length} этапов</span>
@@ -177,16 +183,17 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
           <p>{projectStarted && currentWeek.number > 0 ? `Сейчас идёт ${currentWeek.number}-я неделя проекта · ${formatDate(currentWeek.start)} — ${formatDate(currentWeek.end)}` : `Проект ещё не начался · старт ${formatDate(state.project.startDate, true)}`}</p>
         </div>
         <div className="schedule-summary">
-          <span><strong>{progress.physical}%</strong> физически</span>
+          <span><strong>{progress.physical}%</strong> по задачам</span>
           <ArrowRight size={18} />
           <span><strong>{progress.accepted}%</strong> принято</span>
         </div>
       </section>
 
       <BaselinePanel state={state} role={role} actor={actor} onChange={saveChange} />
+      <section className="panel schedule-brief"><SectionHeader title={forecast.end ? `Окончание работ: ${formatDate(forecast.end)}` : 'Для расчёта окончания нужна сверка'} action={<button className="button button--primary" type="button" onClick={() => setReviewing(true)}>{role === 'client' ? 'Посмотреть сведения' : 'Сверить ППР и факты'}</button>} /><p>{forecast.end ? 'Ниже отдельно показаны исходный план, действующий план и расчёт/факт.' : 'Неподтверждённые прогнозные даты на диаграмме не показаны. Откройте сверку: структура, состояние и остатки работ.'}</p></section>
 
       <section className="panel gantt-panel">
-        <SectionHeader eyebrow="Диаграмма Ганта · недели с понедельника" title="Начало, окончание и последовательность" action={<div className="gantt-legend"><span><i className="gantt-legend__baseline" /> План 0</span><span><i className="gantt-legend__plan" /> действующий план</span><span><i className="gantt-legend__forecast" /> прогноз</span><span><i className="gantt-legend__today" /> сегодня</span></div>} />
+        <SectionHeader eyebrow="Диаграмма Ганта · недели с понедельника" title="Начало, окончание и последовательность" action={<div className="gantt-legend"><span><i className="gantt-legend__baseline" /> План 0</span><span><i className="gantt-legend__plan" /> действующий план</span><span><i className="gantt-legend__forecast" /> расчёт / факт</span><span><i className="gantt-legend__today" /> сегодня</span></div>} />
         <div className="gantt-scroll">
           <div className="gantt-chart" style={{ width: `${250 + gantt.width}px` }}>
             <div className="gantt-header">
@@ -199,14 +206,15 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
             {state.stages.map((stage) => {
               const left = gantt.offset(stage.planStart) * gantt.dayWidth;
               const planDays = Math.max(1, gantt.offset(stage.planEnd) - gantt.offset(stage.planStart) + 1);
-              const forecastDays = Math.max(planDays, gantt.offset(stage.forecastEnd) - gantt.offset(stage.planStart) + 1);
+              const row = forecast.end ? forecast.rows.find((r) => r.id === stage.id) : undefined;
+              const forecastDays = row ? Math.max(1, gantt.offset(row.end) - gantt.offset(row.start) + 1) : 0;
               return (
                 <button type="button" className={stage.id === selected.id ? 'gantt-row gantt-row--selected' : 'gantt-row'} key={stage.id} onClick={() => setSelectedId(stage.id)}>
-                  <span className="gantt-row__label"><i>{String(stage.order).padStart(2, '0')}</i><span><strong>{stage.shortName}</strong><small>{stage.dependency ? `после: ${stage.dependency}` : 'начало цепочки'}</small></span></span>
+                  <span className="gantt-row__label"><i>{String(stage.order).padStart(2, '0')}</i><span><strong>{stage.shortName}</strong><small>{stage.schedule ? `${stage.schedule.phase} · связей: ${stage.schedule.dependencies.length}` : 'структура не сверена'}</small></span></span>
                   <span className="gantt-row__timeline" style={{ width: `${gantt.width}px`, backgroundSize: `${gantt.dayWidth * 7}px 100%` }}>
                     {projectStarted && gantt.currentWeekOffset >= 0 && gantt.currentWeekOffset <= gantt.totalDays && <i aria-hidden="true" style={{ position: 'absolute', left: `${gantt.currentWeekOffset * gantt.dayWidth}px`, top: 0, bottom: 0, width: `${gantt.dayWidth * 7}px`, background: 'rgba(42, 113, 82, .045)', pointerEvents: 'none' }} />}
                     {gantt.todayOffset >= 0 && gantt.todayOffset <= gantt.totalDays && <i className="gantt-today-line" style={{ left: `${gantt.todayOffset * gantt.dayWidth}px` }} />}
-                    {forecastDays > planDays && <i className="gantt-forecast-bar" style={{ left: `${left}px`, width: `${forecastDays * gantt.dayWidth}px` }} />}
+                    {row && <i className={`gantt-forecast-bar${row.source === 'fact' ? ' gantt-forecast-bar--fact' : ''}`} title={`${row.source === 'fact' ? 'Факт' : 'Расчёт'}: ${row.start} — ${row.end}`} style={{ left: `${gantt.offset(row.start) * gantt.dayWidth}px`, width: `${forecastDays * gantt.dayWidth}px` }} />}
                     {stage.baseline && <i className="gantt-baseline-bar" title={`План 0: ${stage.baseline.start || 'начало не указано'} — ${stage.baseline.end}`} style={{ left: `${gantt.offset(stage.baseline.start || stage.baseline.end) * gantt.dayWidth}px`, width: `${Math.max(1, (baselineDays(stage.baseline.end, stage.baseline.start || stage.baseline.end) || 0) + 1) * gantt.dayWidth}px` }} />}
                     <i className={`gantt-plan-bar gantt-plan-bar--${stage.status}`} style={{ left: `${left}px`, width: `${planDays * gantt.dayWidth}px` }}><span>{stage.progress}%</span></i>
                   </span>
@@ -230,7 +238,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
                 <span className="stage-row__line" aria-hidden="true" />
                 <span className="stage-row__body">
                   <span className="stage-row__title"><strong>{stage.name}</strong><StatusBadge label={stageStatusLabel[stage.status]} tone={statusTone(stage.status)} /></span>
-                  <span className="stage-row__dates">{formatDate(stage.planStart)} — {formatDate(stage.planEnd)}<i>Нед. {weeks.start}{weeks.end !== weeks.start ? `–${weeks.end}` : ''} · прогноз {formatDate(stage.forecastEnd)}</i></span>
+                  <span className="stage-row__dates">{formatDate(stage.planStart)} — {formatDate(stage.planEnd)}<i>Нед. {weeks.start}{weeks.end !== weeks.start ? `–${weeks.end}` : ''} · действующий план</i></span>
                   {(stage.progress > 0 || stage.status === 'accepted') && <ProgressBar value={stage.progress} tone={stage.status === 'rework' ? 'red' : 'green'} />}
                 </span>
                 <ChevronRight className="stage-row__chevron" size={17} />
@@ -252,7 +260,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
               <div><CalendarDays size={18} /><span><small>План 0 этапа</small><strong>{selected.baseline ? `${selected.baseline.start ? formatDate(selected.baseline.start) : '—'} — ${formatDate(selected.baseline.end)}` : 'Не зафиксирован'}</strong></span></div>
               <div><Clock3 size={18} /><span><small>Перенос окончания к Плану 0</small><strong>{planShiftLabel(baselineDays(selected.planEnd, selected.baseline?.end))}</strong></span></div>
               <div><CalendarDays size={18} /><span><small>Действующий план</small><strong>{formatDate(selected.planStart)} — {formatDate(selected.planEnd)}</strong></span></div>
-              <div><Clock3 size={18} /><span><small>Прогноз окончания</small><strong>{formatDate(selected.forecastEnd, true)}</strong></span></div>
+              <div><Clock3 size={18} /><span><small>{calculated?.source === 'fact' ? 'Факт окончания' : 'Расчётное окончание'}</small><strong>{calculated ? formatDate(calculated.end, true) : 'Нужна сверка'}</strong></span></div>
               <div><UserRound size={18} /><span><small>Ответственный</small>{selectedCounterparty ? <button type="button" className="entity-link entity-link--compact" onClick={() => setCounterpartyId(selectedCounterparty.id)}>{selected.responsible}</button> : <strong>{selected.responsible}</strong>}</span></div>
               <div><CircleDot size={18} /><span><small>Вес в готовности</small><strong>{selected.weight}% проекта</strong></span></div>
             </div>
@@ -317,7 +325,20 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
         </aside>
       </section>
       {counterpartyId && <CounterpartyModal state={state} counterpartyId={counterpartyId} onClose={() => setCounterpartyId(null)} />}
-      {editingDates && <Modal title={`График: ${selected.shortName}`} subtitle="Действующий план можно перенести с причиной. План 0 остаётся неизменным." onClose={() => setEditingDates(false)}><form className="modal-form" onSubmit={saveDates}><div className="form-grid"><Field label="Начало"><input required type="date" value={dateForm.planStart} onChange={(event) => setDateForm({ ...dateForm, planStart: event.target.value })} /></Field><Field label="Плановое окончание"><input required type="date" min={dateForm.planStart} value={dateForm.planEnd} onChange={(event) => setDateForm({ ...dateForm, planEnd: event.target.value })} /></Field><Field label="Прогноз окончания"><input required type="date" min={dateForm.planStart} value={dateForm.forecastEnd} onChange={(event) => setDateForm({ ...dateForm, forecastEnd: event.target.value })} /></Field><Field label="Предшествующий этап"><select value={dateForm.dependencyId} onChange={(event) => setDateForm({ ...dateForm, dependencyId: event.target.value })}><option value="">Нет зависимости</option>{state.stages.filter((stage) => stage.id !== selected.id && stage.order < selected.order).map((stage) => <option value={stage.id} key={stage.id}>{stage.order}. {stage.name}</option>)}</select></Field><Field label="Подрядчик / ответственный"><select value={dateForm.responsibleId} onChange={(event) => setDateForm({ ...dateForm, responsibleId: event.target.value })}><option value="">Не назначен</option>{state.counterparties.filter((item) => ['contractor', 'service'].includes(item.type) && item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}{item.specialty ? ` · ${item.specialty}` : ''}</option>)}</select></Field></div><Field label="Причина изменения плана / прогноза"><input required={dateForm.planStart !== selected.planStart || dateForm.planEnd !== selected.planEnd || dateForm.forecastEnd !== selected.forecastEnd} value={dateForm.reason} onChange={(event) => setDateForm({ ...dateForm, reason: event.target.value })} /></Field>{dateError && <p role="alert" className="danger-text">{dateError}</p>}{selected.baseline && <p className="muted">План 0: {selected.baseline.start ? formatDate(selected.baseline.start) : '—'} — {formatDate(selected.baseline.end)} · {selected.baseline.note}</p>}{selected.planHistory?.slice(-5).reverse().map((h, i) => <p className="baseline-history" key={i}>{h.before || '—'} → {h.after || '—'} · {h.reason}<small>{h.actor} · {formatDate(h.at.slice(0, 10))}</small></p>)}<div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingDates(false)}>Отмена</button><button type="submit" className="button button--primary">Сохранить график</button></div></form></Modal>}
+      {editingDates && <Modal title={`График: ${selected.shortName}`} subtitle="Действующий план можно перенести с причиной. План 0 остаётся неизменным." onClose={() => setEditingDates(false)}><form className="modal-form" onSubmit={saveDates}>
+        <div className="form-grid">
+          <Field label="Начало"><input required type="date" value={dateForm.planStart} onChange={(event) => setDateForm({ ...dateForm, planStart: event.target.value })} /></Field>
+          <Field label="Плановое окончание"><input required type="date" min={dateForm.planStart} value={dateForm.planEnd} onChange={(event) => setDateForm({ ...dateForm, planEnd: event.target.value })} /></Field>
+          <Field label="Ручная оценка окончания (не расчёт)"><input required type="date" min={dateForm.planStart} value={dateForm.forecastEnd} onChange={(event) => setDateForm({ ...dateForm, forecastEnd: event.target.value })} /></Field>
+          {!selected.schedule && <Field label="Предшествующий этап"><select value={dateForm.dependencyId} onChange={(event) => setDateForm({ ...dateForm, dependencyId: event.target.value })}><option value="">Нет зависимости</option>{state.stages.filter((stage) => stage.id !== selected.id && stage.order < selected.order).map((stage) => <option value={stage.id} key={stage.id}>{stage.order}. {stage.name}</option>)}</select></Field>}
+          <Field label="Подрядчик / ответственный"><select value={dateForm.responsibleId} onChange={(event) => setDateForm({ ...dateForm, responsibleId: event.target.value })}><option value="">Не назначен</option>{state.counterparties.filter((item) => ['contractor', 'service'].includes(item.type) && item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}{item.specialty ? ` · ${item.specialty}` : ''}</option>)}</select></Field>
+        </div>
+        {selected.schedule && <p className="muted">Связи, бригада и сотрудник, подтверждающий состояние, изменяются в «Сверить ППР и факты».</p>}
+        <Field label="Причина изменения плана / оценки"><input required={dateForm.planStart !== selected.planStart || dateForm.planEnd !== selected.planEnd || dateForm.forecastEnd !== selected.forecastEnd} value={dateForm.reason} onChange={(event) => setDateForm({ ...dateForm, reason: event.target.value })} /></Field>
+        {dateError && <p role="alert" className="danger-text">{dateError}</p>}{selected.baseline && <p className="muted">План 0: {selected.baseline.start ? formatDate(selected.baseline.start) : '—'} — {formatDate(selected.baseline.end)} · {selected.baseline.note}</p>}
+        {selected.planHistory?.slice(-5).reverse().map((h, i) => <p className="baseline-history" key={i}>{h.before || '—'} → {h.after || '—'} · {h.reason}<small>{h.actor} · {formatDate(h.at.slice(0, 10))}</small></p>)}
+        <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingDates(false)}>Отмена</button><button type="submit" className="button button--primary">Сохранить график</button></div>
+      </form></Modal>}
     </div>
   );
 }

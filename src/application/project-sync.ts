@@ -1,6 +1,7 @@
 import { mergeProjectStates, synchronizeDerivedProgress } from '../domain/index.ts';
 import type { ChangeMetadata } from '../domain/change.ts';
-import type { AppState } from '../entities/index.ts';
+import type { AppState, StageSchedule, StageSiteUpdate } from '../entities/index.ts';
+import { schedulePayload, sitePayload } from '../../sites/lib/schedule-forecast.js';
 
 export interface SyncSnapshot {
   state: AppState;
@@ -84,7 +85,17 @@ const acknowledgePlanFields = (sent: AppState, local: AppState, server: AppState
     const before = sentItem as Record<string, unknown>, item = localItem as Record<string, unknown>, saved = serverItem as Record<string, unknown>;
     const hasNewPlan = dateFields.some((field) => before[field] !== item[field]) || before.planChangeReason !== item.planChangeReason;
     const newStatus = before.status !== item.status || before.statusNote !== item.statusNote;
-    for (const field of ['baseline', 'originalDueDate', 'planHistory', 'statusHistory', 'forecastUpdatedAt', 'forecastUpdatedBy', 'workForecastUpdatedAt', 'workForecastUpdatedBy', 'acceptedAt', 'acceptedBy']) {
+    const newRecovery = before.factRecoveryNote !== item.factRecoveryNote;
+    for (const field of ['schedule', 'siteUpdate'] as const) {
+      const payload = (value: unknown) => field === 'schedule' ? schedulePayload(value as StageSchedule | undefined) : sitePayload(value as StageSiteUpdate | undefined);
+      const pending = (value: unknown) => (value as { requestId?: string } | undefined)?.requestId;
+      const changed = JSON.stringify(payload(before[field])) !== JSON.stringify(payload(item[field])) || pending(before[field]) !== pending(item[field]);
+      if (saved[field] !== undefined) {
+        before[field] = structuredClone(saved[field]);
+        if (!changed) item[field] = structuredClone(saved[field]);
+      }
+    }
+    for (const field of ['baseline', 'originalDueDate', 'planHistory', 'statusHistory', 'scheduleHistory', 'forecastUpdatedAt', 'forecastUpdatedBy', 'workForecastUpdatedAt', 'workForecastUpdatedBy', 'acceptedAt', 'acceptedBy']) {
       if (saved[field] !== undefined) { before[field] = structuredClone(saved[field]); item[field] = structuredClone(saved[field]); }
       else if (field === 'planHistory') { delete before[field]; delete item[field]; }
     }
@@ -92,6 +103,8 @@ const acknowledgePlanFields = (sent: AppState, local: AppState, server: AppState
     if (!hasNewPlan) delete item.planChangeReason;
     delete before.statusNote;
     if (!newStatus) delete item.statusNote;
+    delete before.factRecoveryNote;
+    if (!newRecovery) delete item.factRecoveryNote;
   };
   accept(base.project, current.project, server.project, ['startDate', 'targetDate']);
   for (const collection of ['tasks', 'stages', 'checkpoints'] as const) {

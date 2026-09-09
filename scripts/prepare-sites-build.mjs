@@ -17,6 +17,8 @@ await mkdir(`${projectRoot}dist/server/routes`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
 
 await Promise.all([
+  copyFile(`${projectRoot}sites/lib/schedule-forecast.js`, `${projectRoot}dist/server/lib/schedule-forecast.js`),
+  copyFile(`${projectRoot}sites/projects/schedule-review.js`, `${projectRoot}dist/server/projects/schedule-review.js`),
   copyFile(`${projectRoot}sites/lib/stage-control.js`, `${projectRoot}dist/server/lib/stage-control.js`),
   copyFile(`${projectRoot}sites/projects/stage-control.js`, `${projectRoot}dist/server/projects/stage-control.js`),
   copyFile(`${projectRoot}sites/lib/plan-baseline.js`, `${projectRoot}dist/server/lib/plan-baseline.js`),

@@ -2,19 +2,24 @@ import type { AppState, UserRole } from '../entities/index';
 import { planToday, validPlanDate } from '../../sites/lib/plan-baseline.js';
 import { stageCanStart, stageGaps } from '../../sites/lib/stage-control.js';
 
-export type StageAction = 'start' | 'complete' | 'accept' | 'delay' | 'rework';
+export type StageAction = 'start' | 'not_started' | 'complete' | 'accept' | 'delay' | 'rework';
 export function applyStageControl(state: AppState, id: string, action: StageAction, input: { date: string; note: string; tasks: string[]; blockerResolved?: boolean }, actor: string, role: UserRole, userId?: string): AppState {
   if (role === 'client') throw new Error('Нет прав на изменение этапа.');
   const next = structuredClone(state), stage = next.stages.find((s) => s.id === id);
   if (!stage || stage.status === 'accepted') throw new Error('Этап уже принят или не найден.');
+  if (role !== 'management' && stage.schedule && (!userId || userId !== stage.schedule.reporterId)) throw new Error('Состояние этой работы подтверждает назначенный сотрудник или управление.');
   if (!input.note.trim()) throw new Error('Укажите результат или причину.');
   if (stage.blocker && ['start', 'complete', 'accept'].includes(action) && !input.blockerResolved) throw new Error('Подтвердите, что препятствие устранено.');
   if (!validPlanDate(input.date)) throw new Error('Укажите дату.');
+  if (action === 'accept' && !validPlanDate(stage.completedOn || stage.actualEnd)) throw new Error('Сначала подтвердите или уточните фактическую дату выполнения. Дата приёмки её не заменяет.');
   const today = planToday(), now = new Date().toISOString();
   if (action !== 'delay' && input.date > today) throw new Error('Дата факта не может быть в будущем.');
   if (action === 'delay' && (input.date < today || input.date < stage.planStart)) throw new Error('Ожидаемое окончание должно быть сегодня или позже начала этапа.');
   stage.statusNote = input.note.trim();
-  if (action === 'start') {
+  if (action === 'not_started') {
+    if (stage.actualStart || stage.completedOn || !['not_ready', 'ready', 'blocked'].includes(stage.status)) throw new Error('Начатую или выполненную работу нельзя отметить как не начатую.');
+    stage.status = 'not_ready'; stage.blocker = input.note.trim();
+  } else if (action === 'start') {
     stage.actualStart ||= input.date;
     stage.status = 'in_progress'; stage.blocker = undefined;
   } else if (action === 'delay') {
@@ -31,7 +36,7 @@ export function applyStageControl(state: AppState, id: string, action: StageActi
       task.completionNote = input.note.trim(); task.updatedAt = now;
       task.history.unshift({ id: crypto.randomUUID(), timestamp: now, actor, kind: 'completed', text: `Отмечено при выполнении этапа: ${input.note.trim()}` });
     }
-    stage.completedOn = action === 'accept' ? stage.completedOn || input.date : input.date;
+    stage.completedOn = action === 'accept' ? stage.completedOn || stage.actualEnd! : input.date;
     stage.completionNote = input.note.trim(); stage.blocker = undefined;
     if (stage.actualStart && stage.completedOn < stage.actualStart) throw new Error('Выполнение не может быть раньше фактического начала.');
     if (action === 'accept') {
@@ -43,7 +48,7 @@ export function applyStageControl(state: AppState, id: string, action: StageActi
       if (tracking) { tracking.status = 'done'; tracking.completedAt = now; tracking.completionNote = input.note.trim(); }
     } else stage.status = 'awaiting_inspection';
   }
-  for (const candidate of next.stages) if (candidate.status === 'not_ready' && (candidate.dependencyId || candidate.dependency) && stageCanStart(next, candidate)) candidate.status = 'ready';
+  for (const candidate of next.stages) if (!candidate.schedule && candidate.status === 'not_ready' && (candidate.dependencyId || candidate.dependency) && stageCanStart(next, candidate)) candidate.status = 'ready';
   next.activity.unshift({ id: crypto.randomUUID(), timestamp: now, actor, text: `Этап «${stage.name}»: ${input.note.trim()}`, tone: action === 'delay' || action === 'rework' ? 'warning' : 'positive' });
   return next;
 }

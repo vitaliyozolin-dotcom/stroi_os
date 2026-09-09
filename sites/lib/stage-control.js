@@ -1,6 +1,45 @@
-import { planDays, planToday, validPlanDate } from './plan-baseline.js';
+import { planDays, planToday, taskBaselineEnd, validPlanDate } from './plan-baseline.js';
+
+// Read-only record status. An unclosed record is not proof of a project delay.
+export function recordedScheduleStatus(state, today = planToday()) {
+  const stages = state.stages ?? [];
+  const tasks = (state.tasks ?? []).filter((t) => !t.id.startsWith('auto-stage-') && t.status !== 'canceled');
+  const group = (records, dueDate, baselineDate, reviewStatus, doneStatus) => {
+    const open = records.filter((r) => r.status !== reviewStatus && r.status !== doneStatus);
+    const rows = open.map((record) => ({ record, days: planDays(today, dueDate(record)), baselineDays: planDays(today, baselineDate(record)) }));
+    const overdue = rows.filter((r) => r.days !== null && r.days > 0).sort((a, b) => b.days - a.days);
+    const baselineOverdue = rows.filter((r) => r.baselineDays !== null && r.baselineDays > 0).sort((a, b) => b.baselineDays - a.baselineDays);
+    return { recordCount: records.length, overdue, baselineOverdue, maxDays: overdue[0]?.days ?? 0, maxBaselineDays: baselineOverdue[0]?.baselineDays ?? 0,
+      awaitingReview: records.filter((r) => r.status === reviewStatus).length,
+      missingDue: rows.filter((r) => r.days === null).length,
+      missingBaseline: rows.filter((r) => r.baselineDays === null).length };
+  };
+  return { today,
+    stages: group(stages, (s) => s.planEnd, (s) => s.baseline?.end, 'awaiting_inspection', 'accepted'),
+    tasks: group(tasks, (t) => t.dueDate, taskBaselineEnd, 'review', 'done') };
+}
 
 export const stageCanStart = (state, stage) => {
+  if (stage.schedule) {
+    if (!stage.schedule.updatedAt || stage.schedule.kind === 'summary') return false;
+    return (stage.schedule.dependencies ?? []).every((dependency) => {
+      const previous = (state.stages ?? []).find((s) => s.id === dependency.stageId);
+      const complete = (row, seen = new Set()) => {
+        if (!row || seen.has(row.id)) return null;
+        seen.add(row.id);
+        if (row.schedule?.kind === 'summary') {
+          const dates = row.schedule.summaryOf.map((id) => complete(state.stages.find((s) => s.id === id), new Set(seen)));
+          if (!dates.length || !dates.every(Boolean)) return null;
+          const childrenEnd = dates.sort().at(-1), fact = row.completedOn || row.actualEnd;
+          if (['accepted', 'awaiting_inspection'].includes(row.status)) return validPlanDate(fact) && fact >= childrenEnd ? fact : null;
+          return childrenEnd;
+        }
+        return ['accepted', 'awaiting_inspection'].includes(row.status) ? row.completedOn || row.actualEnd : null;
+      };
+      const day = dependency.gate === 'accepted' ? (previous?.status === 'accepted' && Number.isFinite(Date.parse(previous.acceptedAt || '')) ? planToday(new Date(previous.acceptedAt)) : null) : complete(previous);
+      return validPlanDate(day) && planDays(planToday(), day) > dependency.lagDays;
+    });
+  }
   if (!stage.dependencyId && !stage.dependency) return true;
   const previous = (state.stages ?? []).find((s) => stage.dependencyId ? s.id === stage.dependencyId : [s.name, s.shortName].includes(stage.dependency));
   return previous?.status === 'accepted';
