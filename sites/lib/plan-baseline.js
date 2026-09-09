@@ -54,8 +54,9 @@ export function baselineOverview(state) {
   const currentDates = stages.map((stage) => stage.planEnd).filter(validPlanDate);
   const pprComplete = stages.length > 0 && dates.length === stages.length;
   const end = pprComplete ? dates.sort().at(-1) : null;
-  const currentEnd = currentDates.length ? currentDates.sort().at(-1) : null;
+  const currentComplete = stages.length > 0 && currentDates.length === stages.length;
+  const currentEnd = currentComplete ? currentDates.sort().at(-1) : null;
   const shiftedStages = stages.filter((stage) => (planDays(stage.planEnd, stage.baseline?.end) ?? 0) > 0);
   const shiftedTasks = (state.tasks ?? []).filter((task) => task.status !== 'canceled' && (planDays(task.dueDate, taskBaselineEnd(task)) ?? 0) > 0);
-  return { end, currentEnd, shift: planDays(currentEnd, end), pprComplete, recorded: dates.length, total: stages.length, shiftedStages, shiftedTasks };
+  return { end, currentEnd, shift: planDays(currentEnd, end), pprComplete, currentComplete, recorded: dates.length, currentRecorded: currentDates.length, total: stages.length, shiftedStages, shiftedTasks };
 }

@@ -18,11 +18,12 @@ function StageForm({ state, stageId, action, actor, role, userId, onChange, onCl
   const [tasks, setTasks] = useState<string[]>([]), [error, setError] = useState(''), [resolved, setResolved] = useState(false);
   const gaps = stageGaps(state, stageId);
   const expenses = state.financeEntries.filter((e) => e.stageId === stageId && e.kind === 'expense');
-  const labels = { start: 'Работы начались', complete: 'Этап выполнен?', accept: 'Приёмка этапа', delay: 'Что задерживает этап?', rework: 'Вернуть на доработку' };
+  const labels = { start: 'Работы начались', not_started: 'Работы ещё не начались', complete: 'Этап выполнен?', accept: 'Приёмка этапа', delay: 'Что задерживает этап?', rework: 'Вернуть на доработку' };
   const submit = (event: FormEvent) => { event.preventDefault(); try { onChange(applyStageControl(state, stageId, action, { date, note, tasks, blockerResolved: resolved }, actor, role, userId)); onClose(); } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); } };
   const open = (p: PageId) => { onClose(); onNavigate?.(p); };
   return <Modal title={labels[action]} subtitle={stage.name} onClose={onClose}><form className="modal-form stage-control-form" onSubmit={submit}>
-    {action === 'start' && !stageCanStart(state, stage) && <p className="blocker-note">Предшествующий этап ещё не принят. Если работы уже фактически идут, укажите в комментарии причину раннего начала.</p>}
+    {action === 'start' && !stageCanStart(state, stage) && <p className="blocker-note">Готовность по зависимостям не подтверждена. Если работы уже фактически идут, укажите причину раннего начала; связи потребуется сверить.</p>}
+    {action === 'not_started' && <p className="muted">Дата ниже — дата наблюдения, а не начало работ. Ожидаемый старт и остаток укажите в сверке. Факты выполнения и расходы не создаются.</p>}
     <Field label={action === 'delay' ? 'Ожидаемое окончание этапа' : action === 'accept' ? 'Дата приёмки' : action === 'start' ? 'Фактическое начало' : 'Дата факта'}><input required type="date" min={action === 'delay' ? planToday() : undefined} max={action !== 'delay' ? planToday() : undefined} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
     <Field label={action === 'delay' ? 'Причина · кто решает · ближайшее действие' : 'Результат / основание'}><textarea required rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что сделано или что мешает; акт, замер, ссылка на подтверждение" /></Field>
     {stage.blocker && ['start', 'complete', 'accept'].includes(action) && <label className="stage-check"><input type="checkbox" checked={resolved} onChange={(e) => setResolved(e.target.checked)} /><span>Препятствие устранено: {stage.blocker}</span></label>}

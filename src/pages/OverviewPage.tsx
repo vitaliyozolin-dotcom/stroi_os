@@ -1,5 +1,6 @@
-import { BaselinePanel } from '../components/BaselinePanel';
-import { StageRadar } from '../components/StageRadar';
+import { ScheduleBrief } from '../components/ScheduleBrief';
+import { recordedScheduleStatus } from '../../sites/lib/stage-control.js';
+import { planToday } from '../../sites/lib/plan-baseline.js';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -16,7 +17,7 @@ import {
   Truck,
 } from 'lucide-react';
 import type { CSSProperties } from 'react';
-import { financeTotals, isTaskOverdue, paidAmountFor, projectProgressTotals as progressTotals } from '../domain/index';
+import { financeTotals, paidAmountFor, projectProgressTotals as progressTotals } from '../domain/index';
 import { formatDate, formatDateTime, shortMoney } from '../presentation/formatting';
 import { stageStatusLabel, taskStatusLabel } from '../presentation/status-labels';
 import type { AppState, DashboardWidget, UserRole } from '../entities/index';
@@ -49,11 +50,12 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
   const reviewCount = state.checkpoints.filter((item) => item.status === 'in_review').length;
   const reworkCount = state.checkpoints.filter((item) => item.status === 'rework').length;
   const riskySupply = state.procurement.filter((item) => item.risk);
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = planToday();
+  const overdueTaskIds = new Set(recordedScheduleStatus(state, todayKey).tasks.overdue.map((row) => row.record.id));
   const activeTasks = state.tasks
-    .filter((task) => !['done', 'canceled'].includes(task.status))
-    .sort((a, b) => Number(isTaskOverdue(b, todayKey)) - Number(isTaskOverdue(a, todayKey)) || a.dueDate.localeCompare(b.dueDate));
-  const overdueTaskCount = activeTasks.filter((task) => isTaskOverdue(task, todayKey)).length;
+    .filter((task) => !task.id.startsWith('auto-stage-') && !['done', 'canceled'].includes(task.status))
+    .sort((a, b) => Number(overdueTaskIds.has(b.id)) - Number(overdueTaskIds.has(a.id)) || a.dueDate.localeCompare(b.dueDate));
+  const overdueTaskCount = overdueTaskIds.size;
   const nextDecision = state.decisions.find((item) => item.status === 'waiting');
   const margin = state.project.contractValue - finance.forecast;
   const marginPercent = state.project.contractValue > 0 ? Math.round(margin / state.project.contractValue * 100) : null;
@@ -127,7 +129,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
 
   return (
     <div className="page-stack">
-      {show('project') && <section className="project-heading">
+      {show('project') && <section className="project-heading project-heading--overview">
         <div>
           <div className="project-heading__meta">
             <StatusBadge label={`${state.project.code} · активный проект`} tone="positive" />
@@ -138,22 +140,21 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
         </div>
       </section>}
 
-      <BaselinePanel compact state={state} role={role} actor={actor} onChange={onChange} />
-      <StageRadar state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
+      <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
 
       {(show('progress') || show('finance')) && <section className="metric-grid">
         {show('progress') &&
         <MetricCard
-          label="Физический прогресс"
+          label="Выполнение по задачам"
           value={`${progress.physical}%`}
-          detail={<><ProgressBar value={progress.physical} /><span>{progress.accepted}% подтверждено контролем</span></>}
+          detail={<><ProgressBar value={progress.physical} /><span>Учётный показатель, не физический объём дома</span></>}
           icon={TrendingUp}
           tone="dark"
           onClick={() => onNavigate('schedule')}
         />}
         {role === 'foreman' && currentStage ? (
           <>
-            <MetricCard label="Текущий этап" value={`${currentStage.progress}%`} detail={<span>{currentStage.name} · до {formatDate(currentStage.forecastEnd)}</span>} icon={Clock3} onClick={() => onNavigate('schedule')} />
+            <MetricCard label="Запись для проверки" value={stageStatusLabel[currentStage.status]} detail={<span>{currentStage.name}</span>} icon={Clock3} onClick={() => onNavigate('schedule')} />
             <MetricCard label="Контроль качества" value={`${reviewCount + reworkCount} отчёта`} detail={<span>{reviewCount} на проверке · {reworkCount} требует доработки</span>} icon={ShieldCheck} tone={reworkCount ? 'warning' : 'positive'} onClick={() => onNavigate('quality')} />
             <MetricCard label="Поставки с риском" value={`${riskySupply.length}`} detail={<span>{riskySupply[0]?.risk ?? 'Рисков по поставкам нет'}</span>} icon={Truck} tone={riskySupply.length ? 'warning' : 'positive'} onClick={() => onNavigate('procurement')} />
           </>
@@ -186,7 +187,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
       </section>}
 
       {(show('progress') || show('decisions')) && <section className="dashboard-grid dashboard-grid--main">
-        {show('progress') && currentStage && <article className="panel panel--progress">
+        {show('progress') && currentStage && <details className="panel panel--progress"><summary>Подробности выполнения по задачам</summary>
           <SectionHeader
             eyebrow="Производство"
             title="Ход строительства"
@@ -204,10 +205,10 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
               </div>
               <div className="current-stage-card__progress">
                 <ProgressBar value={currentStage.progress} />
-                <strong>{currentStage.progress}%</strong>
+                <strong>{currentStage.progress}% по задачам</strong>
               </div>
               <div className="current-stage-card__meta">
-                <span><Clock3 size={15} /> прогноз до {formatDate(currentStage.forecastEnd)}</span>
+                <span><Clock3 size={15} /> текущий план до {formatDate(currentStage.planEnd)}</span>
                 <span>Ответственный: {currentStage.responsible}</span>
               </div>
             </div>
@@ -222,7 +223,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
               </button>
             ))}
           </div>
-        </article>}
+        </details>}
 
         {show('decisions') && <article className="panel decision-panel">
           <SectionHeader eyebrow="Контроль" title="Требует решения" action={<span className="count-badge">{reworkCount + riskySupply.length + (nextDecision ? 1 : 0)}</span>} />
@@ -306,10 +307,10 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
         />
         <div className="overview-task-list">
           {activeTasks.slice(0, 3).map((task) => (
-            <button type="button" key={task.id} className={isTaskOverdue(task, todayKey) ? 'overview-task overview-task--overdue' : 'overview-task'} onClick={() => onNavigate('tasks')}>
+            <button type="button" key={task.id} className={overdueTaskIds.has(task.id) ? 'overview-task overview-task--overdue' : 'overview-task'} onClick={() => onNavigate('tasks')}>
               <span><ListTodo size={17} /></span>
               <div><strong>{task.title}</strong><small>{task.assigneeName} · {taskStatusLabel[task.status]}</small></div>
-              <div><small>{isTaskOverdue(task, todayKey) ? 'Просрочено' : 'Срок'}</small><strong>{formatDate(task.dueDate)}</strong></div>
+              <div><small>{task.status === 'review' ? 'На проверке' : overdueTaskIds.has(task.id) ? 'Просрочено' : 'Срок'}</small><strong>{formatDate(task.dueDate)}</strong></div>
               <ChevronRight size={16} />
             </button>
           ))}

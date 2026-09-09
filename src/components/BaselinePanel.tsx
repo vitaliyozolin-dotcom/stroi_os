@@ -2,14 +2,16 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { CalendarDays, LockKeyhole } from 'lucide-react';
 import type { AppState, UserRole } from '../entities/index';
 import { baselineOverview, planDays } from '../../sites/lib/plan-baseline.js';
+import { recordedScheduleStatus } from '../../sites/lib/stage-control.js';
 import { formatDate } from '../presentation/formatting';
 import { Field, Modal, SectionHeader } from './Ui';
 
-export const planShiftLabel = (days: number | null) => days === null ? 'Нет исходного срока' : days > 0 ? `+${days} дн.` : days < 0 ? `${days} дн.` : 'Без переноса';
+export const planShiftLabel = (days: number | null) => days === null ? 'Нет исходного срока' : days > 0 ? `+${days} дн.` : days < 0 ? `${days} дн.` : '0 дн.';
 export function BaselinePanel({ state, role, actor, onChange, compact = false }: {
   state: AppState; role: UserRole; actor: string; onChange: (state: AppState) => void; compact?: boolean;
 }) {
   const summary = baselineOverview(state);
+  const records = recordedScheduleStatus(state);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ source: 'document', note: '', start: '', end: '', targetDate: '', reason: '', stages: [] as {id: string; start: string; end: string}[] });
   const [error, setError] = useState('');
@@ -40,16 +42,34 @@ export function BaselinePanel({ state, role, actor, onChange, compact = false }:
     next.activity.unshift({ id: crypto.randomUUID(), timestamp: now, actor, text: `План 0: зафиксировано исходных сроков — ${additions}.${form.reason.trim() ? ` Действующая сдача: ${form.targetDate}. ${form.reason.trim()}` : ''}`, tone: 'neutral' });
     onChange(next); setEditing(false);
   };
-  return <section className="panel baseline-panel" data-tour="plan-zero">
-    <SectionHeader eyebrow="Исходные обязательства сохраняются" title="План 0" action={role === 'management' ? <button type="button" className="button button--ghost" onClick={open}><CalendarDays size={16} /> ППР и исходные сроки</button> : <LockKeyhole size={19} />} />
-    <div className="baseline-metrics">
-      <div><small>Окончание исходного ППР</small><strong>{summary.end ? formatDate(summary.end, true) : 'Не зафиксировано полностью'}</strong><span>{summary.recorded} из {summary.total} этапов с исходными датами</span></div>
-      <div><small>Окончание текущего ППР</small><strong>{summary.currentEnd ? formatDate(summary.currentEnd, true) : 'Нет этапов'}</strong><span>{planShiftLabel(summary.shift)} к исходному ППР</span></div>
-      <div><small>Исходный срок сдачи проекта</small><strong>{state.project.baseline ? formatDate(state.project.baseline.end, true) : 'Не зафиксирован'}</strong><span>{state.project.baseline?.source === 'snapshot' ? 'Версия на дату фиксации' : state.project.baseline?.note || 'Дата сдачи фиксируется отдельно от ППР'}</span></div>
-      <div><small>Действующий срок сдачи</small><strong>{formatDate(state.project.targetDate, true)}</strong><span>{planShiftLabel(planDays(state.project.targetDate, state.project.baseline?.end))}</span></div>
+  const handover = <div className="baseline-metrics baseline-metrics--handover">
+    <div><small>Сдача клиенту · План 0</small><strong>{state.project.baseline ? formatDate(state.project.baseline.end, true) : 'Не зафиксирована'}</strong><span>{state.project.baseline?.source === 'snapshot' ? 'Версия на дату фиксации' : state.project.baseline?.note || 'Не подменяется датой окончания ППР'}</span></div>
+    <div><small>Сдача клиенту · текущая</small><strong>{formatDate(state.project.targetDate, true)}</strong><span>{state.project.baseline ? `Сдвиг срока: ${planShiftLabel(planDays(state.project.targetDate, state.project.baseline.end))}` : 'Сдвиг неизвестен без исходной даты'}</span></div>
+  </div>;
+  return <section className={`panel baseline-panel${compact ? ' baseline-panel--compact' : ''}`} data-tour="plan-zero">
+    <SectionHeader title="План 0 и сроки" action={role === 'management' ? <button type="button" className="button button--ghost" onClick={open}><CalendarDays size={16} /> Исходные даты</button> : <LockKeyhole size={19} />} />
+    <div className="schedule-records">
+      <p className="schedule-records__label">Просрочка по записям · на {formatDate(records.today)}</p>
+      <div className="schedule-records__grid">{([{ label: 'Этапы', group: records.stages }, { label: 'Задачи', group: records.tasks }]).map(({ label, group }) => <div className={group.overdue.length ? 'schedule-records__metric schedule-records__metric--late' : 'schedule-records__metric'} key={label}>
+        <span>{label} · {group.overdue.length}</span><strong>{!group.recordCount ? 'Нет записей' : group.overdue.length ? `до ${group.maxDays} дн.` : group.missingDue ? 'Есть пробелы' : '0 дн.'}</strong>
+        {group.recordCount > 0 && <small>По Плану 0: {group.missingBaseline && !group.baselineOverdue.length ? 'нет полных данных' : `${group.baselineOverdue.length} · до ${group.maxBaselineDays} дн.`}{group.missingBaseline ? `; без исходной даты: ${group.missingBaseline}` : ''}</small>}
+      </div>)}</div>
+      <p className="schedule-records__note">{records.stages.overdue.length || records.tasks.overdue.length ? 'Срок прошёл, выполнение не отмечено. Максимум по одной записи, не по всему дому.' : !records.stages.recordCount && !records.tasks.recordCount ? 'Добавьте этапы и задачи, чтобы сравнить сроки с выполнением.' : 'По известным действующим срокам открытой просрочки нет. Это не прогноз сдачи дома.'}</p>
+      <details className="schedule-records__details"><summary>Расшифровка{records.stages.awaitingReview || records.tasks.awaitingReview ? ' · есть ожидающие приёмки' : ''}</summary>
+      {records.stages.overdue[0] && <p className="schedule-records__source">Самый старый срок этапа: <strong>{records.stages.overdue[0].record.name}</strong> · {formatDate(records.stages.overdue[0].record.planEnd)}.</p>}
+      {records.tasks.overdue[0] && <p className="schedule-records__source">Самый старый срок задачи: <strong>{records.tasks.overdue[0].record.title}</strong> · {formatDate(records.tasks.overdue[0].record.dueDate)}.</p>}
+      <p className="schedule-records__note">Дни считаются по незакрытым записям. Это не отставание всего дома; дни параллельных работ не складываются.</p>
+      {(records.stages.awaitingReview > 0 || records.tasks.awaitingReview > 0) && <p className="schedule-records__note">Отдельно ждут приёмки: этапов — {records.stages.awaitingReview}, задач — {records.tasks.awaitingReview}. В просрочку работ выше не включены.</p>}
+      {(records.stages.missingDue > 0 || records.tasks.missingDue > 0) && <p className="schedule-records__note">Без действующего срока: этапов — {records.stages.missingDue}, задач — {records.tasks.missingDue}. Их просрочка неизвестна.</p>}
+      <p className="schedule-records__note">Считаются действующие сроки, отдельно — План 0. Выполненные, отменённые и служебные задачи этапов не включены.</p>
+      </details>
     </div>
-    <p className="baseline-caption">Перенесено позже исходного срока: этапов — {summary.shiftedStages.length}, задач — {summary.shiftedTasks.length}. Отклонения указаны в календарных днях.</p>
-    {!compact && <p className="muted">План 0 показывает первоначальные даты. Прогноз и фактическое выполнение учитываются отдельно; перенос действующего срока не меняет План 0.</p>}
+    <div className="baseline-metrics">
+      <div><small>Окончание работ · План 0</small><strong>{summary.end ? formatDate(summary.end, true) : 'Недостаточно дат'}</strong><span>Исходный ППР: {summary.recorded} из {summary.total} этапов</span></div>
+      <div><small>Окончание работ · план</small><strong>{summary.currentEnd ? formatDate(summary.currentEnd, true) : 'Недостаточно дат'}</strong><span>{summary.shift === null ? `Для сравнения нужны все даты ППР (текущих: ${summary.currentRecorded} из ${summary.total})` : summary.shift === 0 ? 'Дату в плане не меняли' : `Сдвиг плана: ${planShiftLabel(summary.shift)}`}</span></div>
+    </div>
+    {compact ? <details className="baseline-handover"><summary>Сдача клиенту · {formatDate(state.project.targetDate)}</summary>{handover}<p className="baseline-caption">Сдача клиенту и окончание работ по ППР — разные сроки. Разница между ними не является отставанием.</p></details> : handover}
+    <details className="baseline-explanation"><summary>Как читать сроки и переносы</summary><p>План показывает записанные даты, а не фактическую готовность. Даже при неизменном плане могут быть просроченные работы.</p><p>Позже Плана 0 перенесено: этапов — {summary.shiftedStages.length}, задач — {summary.shiftedTasks.length}. Это количество этапов и задач с перенесённым сроком, не дни отставания. Все дни — календарные.</p></details>
     {editing && <Modal wide title="План 0 · первоначальные сроки" subtitle="Укажите даты из исходного ППР. Уже зафиксированные даты защищены от перезаписи." onClose={() => setEditing(false)}><form className="modal-form baseline-form" onSubmit={save}>
       <div className="baseline-form__intro"><p>Известные исходные сроки уже заполнены. Неизвестные можно оставить пустыми.</p><button type="button" className="button button--secondary" onClick={fillCurrent}>Зафиксировать текущую версию</button></div>
       <div className="form-grid"><Field label="Источник дат"><select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}><option value="document">Первоначальный ППР / договорённость</option><option value="snapshot">Текущая версия на дату фиксации</option></select></Field><Field label="Документ или договорённость"><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Например: ППР.xlsx, согласован 17 августа" /></Field></div>
