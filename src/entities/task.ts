@@ -1,4 +1,5 @@
 import type { ProjectAttachment } from './content';
+import type { PlanBaseline, PlanChange } from './baseline';
 
 export type TaskStatus = 'todo' | 'in_progress' | 'waiting' | 'review' | 'done' | 'canceled';
 export type TaskPriority = 'low' | 'normal' | 'high' | 'critical';
@@ -27,6 +28,10 @@ export interface ProjectTask {
   updatedAt: string;
   dueDate: string;
   originalDueDate: string;
+  baseline?: PlanBaseline;
+  plannedStart?: string;
+  planHistory?: PlanChange[];
+  planChangeReason?: string;
   completedAt?: string;
   completionNote?: string;
   stageId?: string;

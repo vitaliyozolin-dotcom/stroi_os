@@ -1,4 +1,10 @@
+import type { PlanBaseline, PlanChange } from './baseline';
+
 export interface HouseProject {
+  workForecastDate?: string;
+  workForecastNote?: string;
+  workForecastUpdatedAt?: string;
+  workForecastUpdatedBy?: string;
   id: string;
   code: string;
   name: string;
@@ -11,6 +17,9 @@ export interface HouseProject {
   startDate: string;
   targetDate: string;
   forecastDate: string;
+  baseline?: PlanBaseline;
+  planHistory?: PlanChange[];
+  planChangeReason?: string;
   foreman: string;
   cameraStatus: 'online' | 'offline';
   cameraUrl?: string;

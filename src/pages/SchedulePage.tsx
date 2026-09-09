@@ -1,3 +1,7 @@
+import { BaselinePanel, planShiftLabel } from '../components/BaselinePanel';
+import { StageControlModal } from '../components/StageControlModal';
+import type { StageAction } from '../application/stage-control';
+import { planDays as baselineDays } from '../../sites/lib/plan-baseline.js';
 import { createScheduleCommands } from '../application';
 import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
@@ -29,7 +33,7 @@ import { formatDate, money } from '../presentation/formatting';
 import { stageStatusLabel } from '../presentation/status-labels';
 import { addDaysKey, mondayOf, projectWeekNumber, projectWeekRange, stageWeekRange } from '../projectWeek';
 import type { AppState, ProjectTask, StageStatus, UserRole } from '../entities/index';
-import { Field, Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
+import { EmptyState, Field, Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';
 
 const statusTone = (status: StageStatus): 'neutral' | 'positive' | 'warning' | 'danger' | 'blue' => {
@@ -40,31 +44,24 @@ const statusTone = (status: StageStatus): 'neutral' | 'positive' | 'warning' | '
   return 'neutral';
 };
 
-const taskTemplates: Record<string, string[]> = {
-  prebuild: ['Проверить границы, оси и отметки участка', 'Подготовить подъезд и временные сети', 'Зафиксировать готовность участка к старту'],
-  foundation: ['Выполнить разбивку фундамента', 'Выполнить монтаж фундамента по проекту', 'Проверить отметки и геометрию фундамента'],
-  floor: ['Смонтировать нижнюю обвязку', 'Смонтировать перекрытие', 'Проверить плоскость и диагонали перекрытия'],
-  sip: ['Смонтировать наружные SIP-стены', 'Смонтировать внутренние стены и несущие узлы', 'Проверить геометрию и проёмы SIP-контура'],
-  roof: ['Собрать несущую систему кровли', 'Выполнить гидроизоляцию и кровельное покрытие', 'Проверить примыкания и водоотведение'],
-  openings: ['Проверить размеры проёмов', 'Смонтировать окна и входные двери', 'Проверить монтажные швы и работу створок'],
-  facade: ['Подготовить защитный контур фасада', 'Выполнить фасадные работы', 'Проверить узлы, примыкания и внешний вид'],
-  electric: ['Разметить и проложить кабельные трассы', 'Собрать щит и оконечные точки', 'Провести измерения и проверку электрики'],
-  engineering: ['Смонтировать воду и канализацию', 'Смонтировать отопление и вентиляцию', 'Провести опрессовку и испытания инженерных систем'],
-  rough: ['Подготовить поверхности и инженерные выводы', 'Выполнить черновые отделочные работы', 'Проверить геометрию и готовность к чистовой отделке'],
-  finish: ['Выполнить чистовую отделку поверхностей', 'Установить чистовые элементы и оборудование', 'Провести итоговую проверку отделки'],
-  commissioning: ['Проверить работу инженерных систем', 'Составить и закрыть дефектную ведомость', 'Зафиксировать результаты пусконаладки'],
-  handover: ['Провести финальный осмотр дома', 'Собрать акты, инструкции и комплект документов', 'Передать объект и зафиксировать итоговую приёмку'],
-};
-
 const taskDone = (task: ProjectTask) => ['done', 'canceled'].includes(task.status);
 
-export function SchedulePage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
+type SchedulePageProps = { state: AppState; role: UserRole; actor: string; userId?: string; focusId?: string | null; onChange: (next: AppState) => void };
+
+export function SchedulePage(props: SchedulePageProps) {
+  if (!props.state.stages.length) return <div className="page-stack"><BaselinePanel state={props.state} role={props.role} actor={props.actor} onChange={props.onChange} /><EmptyState icon={CalendarDays} title="График пока не составлен" text="После добавления этапов здесь появятся исходные и действующие сроки." /></div>;
+  return <ScheduleWithStages key={props.state.project.id} {...props} />;
+}
+
+function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: SchedulePageProps) {
   const saveChange = createScheduleCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const defaultStage = state.stages.find((stage) => ['in_progress', 'rework', 'awaiting_inspection', 'blocked'].includes(stage.status)) ?? state.stages[0];
   const [selectedId, setSelectedId] = useState(defaultStage?.id ?? '');
   const [counterpartyId, setCounterpartyId] = useState<string | null>(null);
   const [editingDates, setEditingDates] = useState(false);
-  const [dateForm, setDateForm] = useState({ planStart: '', planEnd: '', forecastEnd: '', dependencyId: '', responsibleId: '' });
+  const [stageAction, setStageAction] = useState<StageAction | null>(null);
+  const [dateError, setDateError] = useState('');
+  const [dateForm, setDateForm] = useState({ planStart: '', planEnd: '', forecastEnd: '', dependencyId: '', responsibleId: '', reason: '' });
   const selected = state.stages.find((stage) => stage.id === selectedId) ?? defaultStage!;
   useEffect(() => {
     if (focusId && state.stages.some((stage) => stage.id === focusId)) setSelectedId(focusId);
@@ -74,7 +71,7 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
   const progress = progressTotals(state);
   const checkpoints = state.checkpoints.filter((item) => item.stageId === selected.id);
   const stageTasks = state.tasks.filter((item) => item.stageId === selected.id);
-  const openStageTasks = stageTasks.filter((item) => !taskDone(item));
+  const openStageTasks = stageTasks.filter((item) => item.id !== `auto-stage-${selected.id}` && !taskDone(item));
   const unacceptedCheckpoints = checkpoints.filter((item) => item.status !== 'accepted');
   const stageFinance = state.financeEntries.filter((item) => item.stageId === selected.id);
   const stageProcurement = state.procurement.filter((item) => item.stageId === selected.id);
@@ -87,7 +84,7 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
 
   const gantt = useMemo(() => {
     const parse = (value: string) => new Date(`${value}T12:00:00Z`).getTime();
-    const dates = state.stages.flatMap((stage) => [stage.planStart, stage.planEnd, stage.forecastEnd]).filter(Boolean).map(parse).filter(Number.isFinite);
+    const dates = state.stages.flatMap((stage) => [stage.planStart, stage.planEnd, stage.forecastEnd, stage.baseline?.start || '', stage.baseline?.end || '']).filter(Boolean).map(parse).filter(Number.isFinite);
     const projectStart = parse(state.project.startDate);
     const projectEnd = parse(state.project.targetDate);
     const minTime = Math.min(...dates, projectStart);
@@ -121,19 +118,23 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
   const openDateEdit = () => {
     const dependencyStage = state.stages.find((stage) => stage.id === selected.dependencyId)
       ?? state.stages.find((stage) => stage.name === selected.dependency || stage.shortName === selected.dependency);
-    setDateForm({ planStart: selected.planStart, planEnd: selected.planEnd, forecastEnd: selected.forecastEnd, dependencyId: dependencyStage?.id ?? '', responsibleId: selected.responsibleId ?? '' });
+    setDateForm({ planStart: selected.planStart, planEnd: selected.planEnd, forecastEnd: selected.forecastEnd, dependencyId: dependencyStage?.id ?? '', responsibleId: selected.responsibleId ?? '', reason: '' });
+    setDateError('');
     setEditingDates(true);
   };
 
   const saveDates = (event: FormEvent) => {
     event.preventDefault();
     if (!dateForm.planStart || dateForm.planEnd < dateForm.planStart || dateForm.forecastEnd < dateForm.planStart) return;
+    if ((dateForm.planStart !== selected.planStart || dateForm.planEnd !== selected.planEnd || dateForm.forecastEnd !== selected.forecastEnd) && !dateForm.reason.trim()) { setDateError('Укажите причину изменения срока.'); return; }
     const dependency = state.stages.find((stage) => stage.id === dateForm.dependencyId);
     const responsible = state.counterparties.find((item) => item.id === dateForm.responsibleId);
     saveChange({
       ...state,
       stages: state.stages.map((stage) => stage.id === selected.id ? {
         ...stage,
+        planChangeReason: dateForm.reason.trim(),
+        forecastReason: dateForm.reason.trim(),
         planStart: dateForm.planStart,
         planEnd: dateForm.planEnd,
         forecastEnd: dateForm.forecastEnd,
@@ -147,73 +148,31 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
     setEditingDates(false);
   };
 
-  const buildTasksForStage = () => {
-    if (stageTasks.length) return state.tasks;
-    const assignee = state.settings.users.find((user) => user.role === 'foreman' && user.status === 'active')
-      ?? state.settings.users.find((user) => user.role === 'management' && user.status === 'active');
-    const createdAt = new Date().toISOString();
-    const titles = taskTemplates[selected.id] ?? [`Выполнить работы этапа «${selected.name}»`, `Проверить и подготовить этап «${selected.name}» к приёмке`];
-    const created = titles.map((title, index): ProjectTask => ({
-      id: uid('task'),
-      title,
-      description: `Автоматическая задача этапа «${selected.name}». Результат должен быть подтверждён до передачи этапа на проверку.`,
-      status: 'todo',
-      priority: index === titles.length - 1 ? 'high' : 'normal',
-      assigneeId: assignee?.id ?? 'user-owner',
-      assigneeName: assignee?.name ?? actor,
-      createdBy: 'ИКИОМА ОС',
-      createdAt,
-      updatedAt: createdAt,
-      dueDate: selected.planEnd,
-      originalDueDate: selected.planEnd,
-      stageId: selected.id,
-      rescheduleCount: 0,
-      history: [{ id: uid('history'), timestamp: createdAt, actor: 'ИКИОМА ОС', kind: 'created', text: `Создана автоматически при старте этапа «${selected.name}»` }],
-    }));
-    return [...created, ...state.tasks];
+  const moveStage = (status: StageStatus, _progressValue: number, _text: string) => {
+    setStageAction(status === 'in_progress' ? 'start' : status === 'accepted' ? 'accept' : status === 'rework' ? 'rework' : 'complete');
   };
 
-  const moveStage = (status: StageStatus, progressValue: number, text: string) => {
-    const acceptedIndex = state.stages.findIndex((stage) => stage.id === selected.id);
-    const nextStages = state.stages.map((stage, index) => {
-      if (stage.id === selected.id) return { ...stage, status, progress: progressValue, actualEnd: status === 'accepted' ? new Date().toISOString().slice(0, 10) : stage.actualEnd, blocker: status === 'accepted' ? undefined : stage.blocker };
-      if (status === 'accepted' && index === acceptedIndex + 1 && stage.status === 'not_ready') return { ...stage, status: 'ready' as StageStatus };
-      return stage;
-    });
-    saveChange({
-      ...state,
-      stages: nextStages,
-      tasks: status === 'in_progress' && selected.status === 'ready' ? buildTasksForStage() : state.tasks,
-      activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text, tone: status === 'rework' || status === 'blocked' ? 'warning' : status === 'accepted' ? 'positive' : 'neutral' }, ...state.activity],
-    });
-  };
-
-  const clearBlocker = () => {
-    saveChange({
-      ...state,
-      stages: state.stages.map((stage) => stage.id === selected.id ? { ...stage, blocker: undefined } : stage),
-      activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `Устранено препятствие: ${selected.shortName}`, tone: 'positive' }, ...state.activity],
-    });
-  };
+  const clearBlocker = () => setStageAction('start');
 
   const renderActions = () => {
-    if (role === 'client' || selected.status === 'accepted' || selected.status === 'not_ready') return null;
-    if (selected.status === 'ready') return <button className="button button--primary" type="button" onClick={() => moveStage('in_progress', 5, `Начат этап «${selected.name}»`)}><Play size={17} /> Начать этап</button>;
+    if (role === 'client' || selected.status === 'accepted') return null;
+    if (selected.status === 'ready' || selected.status === 'not_ready') return <button className="button button--primary" type="button" onClick={() => setStageAction('start')}><Play size={17} /> Зафиксировать начало</button>;
     if (selected.status === 'in_progress' || selected.status === 'rework') return (
-      <button className="button button--primary" disabled={Boolean(selected.blocker) || openStageTasks.length > 0} type="button" onClick={() => moveStage('awaiting_inspection', 90, `Этап «${selected.name}» отправлен на проверку`)}><Send size={17} /> Отправить на проверку</button>
+      <button className="button button--primary" type="button" onClick={() => setStageAction('complete')}><Send size={17} /> Зафиксировать выполнение</button>
     );
     if (selected.status === 'blocked') return <button className="button button--primary" type="button" onClick={() => moveStage('in_progress', Math.max(selected.progress, 10), `Работы по этапу «${selected.name}» возобновлены`)}><Play size={17} /> Возобновить</button>;
     if (selected.status === 'awaiting_inspection' && role === 'management') return (
-      <div className="action-pair"><button className="button button--danger-soft" type="button" onClick={() => moveStage('rework', 75, `Этап «${selected.name}» возвращён на доработку`)}><RotateCcw size={17} /> На доработку</button><button className="button button--primary" disabled={openStageTasks.length > 0 || unacceptedCheckpoints.length > 0} type="button" onClick={() => moveStage('accepted', 100, `Этап «${selected.name}» принят`)}><Check size={17} /> Принять этап</button></div>
+      <div className="action-pair"><button className="button button--danger-soft" type="button" onClick={() => moveStage('rework', 75, `Этап «${selected.name}» возвращён на доработку`)}><RotateCcw size={17} /> На доработку</button><button className="button button--primary" type="button" onClick={() => moveStage('accepted', 100, `Этап «${selected.name}» принят`)}><Check size={17} /> Принять этап</button></div>
     );
     return null;
   };
 
   return (
     <div className="page-stack">
+      {stageAction && <StageControlModal state={state} stageId={selected.id} action={stageAction} role={role} actor={actor} userId={userId} onChange={saveChange} onClose={() => setStageAction(null)} />}
       <section className="page-title-row">
         <div>
-          <span className="eyebrow">Производственный план · 13 этапов</span>
+          <span className="eyebrow">Производственный план · {state.stages.length} этапов</span>
           <h1>График и готовность работ</h1>
           <p>{projectStarted && currentWeek.number > 0 ? `Сейчас идёт ${currentWeek.number}-я неделя проекта · ${formatDate(currentWeek.start)} — ${formatDate(currentWeek.end)}` : `Проект ещё не начался · старт ${formatDate(state.project.startDate, true)}`}</p>
         </div>
@@ -224,8 +183,10 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
         </div>
       </section>
 
+      <BaselinePanel state={state} role={role} actor={actor} onChange={saveChange} />
+
       <section className="panel gantt-panel">
-        <SectionHeader eyebrow="Диаграмма Ганта · недели с понедельника" title="Начало, окончание и последовательность" action={<div className="gantt-legend"><span><i className="gantt-legend__plan" /> план</span><span><i className="gantt-legend__forecast" /> прогноз</span><span><i className="gantt-legend__today" /> сегодня</span></div>} />
+        <SectionHeader eyebrow="Диаграмма Ганта · недели с понедельника" title="Начало, окончание и последовательность" action={<div className="gantt-legend"><span><i className="gantt-legend__baseline" /> План 0</span><span><i className="gantt-legend__plan" /> действующий план</span><span><i className="gantt-legend__forecast" /> прогноз</span><span><i className="gantt-legend__today" /> сегодня</span></div>} />
         <div className="gantt-scroll">
           <div className="gantt-chart" style={{ width: `${250 + gantt.width}px` }}>
             <div className="gantt-header">
@@ -246,6 +207,7 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
                     {projectStarted && gantt.currentWeekOffset >= 0 && gantt.currentWeekOffset <= gantt.totalDays && <i aria-hidden="true" style={{ position: 'absolute', left: `${gantt.currentWeekOffset * gantt.dayWidth}px`, top: 0, bottom: 0, width: `${gantt.dayWidth * 7}px`, background: 'rgba(42, 113, 82, .045)', pointerEvents: 'none' }} />}
                     {gantt.todayOffset >= 0 && gantt.todayOffset <= gantt.totalDays && <i className="gantt-today-line" style={{ left: `${gantt.todayOffset * gantt.dayWidth}px` }} />}
                     {forecastDays > planDays && <i className="gantt-forecast-bar" style={{ left: `${left}px`, width: `${forecastDays * gantt.dayWidth}px` }} />}
+                    {stage.baseline && <i className="gantt-baseline-bar" title={`План 0: ${stage.baseline.start || 'начало не указано'} — ${stage.baseline.end}`} style={{ left: `${gantt.offset(stage.baseline.start || stage.baseline.end) * gantt.dayWidth}px`, width: `${Math.max(1, (baselineDays(stage.baseline.end, stage.baseline.start || stage.baseline.end) || 0) + 1) * gantt.dayWidth}px` }} />}
                     <i className={`gantt-plan-bar gantt-plan-bar--${stage.status}`} style={{ left: `${left}px`, width: `${planDays * gantt.dayWidth}px` }}><span>{stage.progress}%</span></i>
                   </span>
                 </button>
@@ -287,7 +249,9 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
             <h2>{selected.name}</h2>
             <div className="stage-detail__progress"><ProgressBar value={selected.progress} tone={selected.status === 'rework' ? 'red' : 'green'} /><strong>{selected.progress}%</strong></div>
             <div className="stage-facts">
-              <div><CalendarDays size={18} /><span><small>План</small><strong>{formatDate(selected.planStart)} — {formatDate(selected.planEnd)}</strong></span></div>
+              <div><CalendarDays size={18} /><span><small>План 0 этапа</small><strong>{selected.baseline ? `${selected.baseline.start ? formatDate(selected.baseline.start) : '—'} — ${formatDate(selected.baseline.end)}` : 'Не зафиксирован'}</strong></span></div>
+              <div><Clock3 size={18} /><span><small>Перенос окончания к Плану 0</small><strong>{planShiftLabel(baselineDays(selected.planEnd, selected.baseline?.end))}</strong></span></div>
+              <div><CalendarDays size={18} /><span><small>Действующий план</small><strong>{formatDate(selected.planStart)} — {formatDate(selected.planEnd)}</strong></span></div>
               <div><Clock3 size={18} /><span><small>Прогноз окончания</small><strong>{formatDate(selected.forecastEnd, true)}</strong></span></div>
               <div><UserRound size={18} /><span><small>Ответственный</small>{selectedCounterparty ? <button type="button" className="entity-link entity-link--compact" onClick={() => setCounterpartyId(selectedCounterparty.id)}>{selected.responsible}</button> : <strong>{selected.responsible}</strong>}</span></div>
               <div><CircleDot size={18} /><span><small>Вес в готовности</small><strong>{selected.weight}% проекта</strong></span></div>
@@ -306,7 +270,7 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
 
           <article className="panel stage-gates">
             <SectionHeader eyebrow="Работа этапа" title="Подэтапы и задачи" action={<span className="count-badge">{stageTasks.filter(taskDone).length}/{stageTasks.length}</span>} />
-            {stageTasks.length ? <div className="gate-list">{stageTasks.map((task) => <div key={task.id}><span className={`gate-list__icon gate-list__icon--${taskDone(task) ? 'accepted' : task.status === 'waiting' ? 'rework' : 'pending'}`}>{taskDone(task) ? <CheckCircle2 size={17} /> : <ListTodo size={17} />}</span><span><strong>{task.title}</strong><small>{task.assigneeName} · срок {formatDate(task.dueDate, true)} · {taskDone(task) ? 'выполнено' : task.status === 'in_progress' ? 'в работе' : task.status === 'review' ? 'на проверке' : task.status === 'waiting' ? 'есть препятствие' : 'запланировано'}</small></span></div>)}</div> : <div className="locked-gate"><ListTodo size={22} /><p>При запуске этапа ИКИОМА ОС автоматически создаст типовые задачи и привяжет их к этому этапу.</p></div>}
+            {stageTasks.length ? <div className="gate-list">{stageTasks.map((task) => <div key={task.id}><span className={`gate-list__icon gate-list__icon--${taskDone(task) ? 'accepted' : task.status === 'waiting' ? 'rework' : 'pending'}`}>{taskDone(task) ? <CheckCircle2 size={17} /> : <ListTodo size={17} />}</span><span><strong>{task.title}</strong><small>{task.assigneeName} · срок {formatDate(task.dueDate, true)} · {taskDone(task) ? 'выполнено' : task.status === 'in_progress' ? 'в работе' : task.status === 'review' ? 'на проверке' : task.status === 'waiting' ? 'есть препятствие' : 'запланировано'}</small></span></div>)}</div> : <div className="locked-gate"><ListTodo size={22} /><p>Задачи связываются с этапом в разделе «Задачи». При старте сохраняются существующие контрольные точки.</p></div>}
           </article>
 
           <article className="panel stage-gates">
@@ -353,7 +317,7 @@ export function SchedulePage({ state, role, actor, focusId, onChange }: { state:
         </aside>
       </section>
       {counterpartyId && <CounterpartyModal state={state} counterpartyId={counterpartyId} onClose={() => setCounterpartyId(null)} />}
-      {editingDates && <Modal title={`График: ${selected.shortName}`} subtitle="План фиксирует базовый срок, прогноз показывает текущую ожидаемую дату." onClose={() => setEditingDates(false)}><form className="modal-form" onSubmit={saveDates}><div className="form-grid"><Field label="Начало"><input required type="date" value={dateForm.planStart} onChange={(event) => setDateForm({ ...dateForm, planStart: event.target.value })} /></Field><Field label="Плановое окончание"><input required type="date" min={dateForm.planStart} value={dateForm.planEnd} onChange={(event) => setDateForm({ ...dateForm, planEnd: event.target.value })} /></Field><Field label="Прогноз окончания"><input required type="date" min={dateForm.planStart} value={dateForm.forecastEnd} onChange={(event) => setDateForm({ ...dateForm, forecastEnd: event.target.value })} /></Field><Field label="Предшествующий этап"><select value={dateForm.dependencyId} onChange={(event) => setDateForm({ ...dateForm, dependencyId: event.target.value })}><option value="">Нет зависимости</option>{state.stages.filter((stage) => stage.id !== selected.id && stage.order < selected.order).map((stage) => <option value={stage.id} key={stage.id}>{stage.order}. {stage.name}</option>)}</select></Field><Field label="Подрядчик / ответственный"><select value={dateForm.responsibleId} onChange={(event) => setDateForm({ ...dateForm, responsibleId: event.target.value })}><option value="">Не назначен</option>{state.counterparties.filter((item) => ['contractor', 'service'].includes(item.type) && item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}{item.specialty ? ` · ${item.specialty}` : ''}</option>)}</select></Field></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingDates(false)}>Отмена</button><button type="submit" className="button button--primary">Сохранить график</button></div></form></Modal>}
+      {editingDates && <Modal title={`График: ${selected.shortName}`} subtitle="Действующий план можно перенести с причиной. План 0 остаётся неизменным." onClose={() => setEditingDates(false)}><form className="modal-form" onSubmit={saveDates}><div className="form-grid"><Field label="Начало"><input required type="date" value={dateForm.planStart} onChange={(event) => setDateForm({ ...dateForm, planStart: event.target.value })} /></Field><Field label="Плановое окончание"><input required type="date" min={dateForm.planStart} value={dateForm.planEnd} onChange={(event) => setDateForm({ ...dateForm, planEnd: event.target.value })} /></Field><Field label="Прогноз окончания"><input required type="date" min={dateForm.planStart} value={dateForm.forecastEnd} onChange={(event) => setDateForm({ ...dateForm, forecastEnd: event.target.value })} /></Field><Field label="Предшествующий этап"><select value={dateForm.dependencyId} onChange={(event) => setDateForm({ ...dateForm, dependencyId: event.target.value })}><option value="">Нет зависимости</option>{state.stages.filter((stage) => stage.id !== selected.id && stage.order < selected.order).map((stage) => <option value={stage.id} key={stage.id}>{stage.order}. {stage.name}</option>)}</select></Field><Field label="Подрядчик / ответственный"><select value={dateForm.responsibleId} onChange={(event) => setDateForm({ ...dateForm, responsibleId: event.target.value })}><option value="">Не назначен</option>{state.counterparties.filter((item) => ['contractor', 'service'].includes(item.type) && item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}{item.specialty ? ` · ${item.specialty}` : ''}</option>)}</select></Field></div><Field label="Причина изменения плана / прогноза"><input required={dateForm.planStart !== selected.planStart || dateForm.planEnd !== selected.planEnd || dateForm.forecastEnd !== selected.forecastEnd} value={dateForm.reason} onChange={(event) => setDateForm({ ...dateForm, reason: event.target.value })} /></Field>{dateError && <p role="alert" className="danger-text">{dateError}</p>}{selected.baseline && <p className="muted">План 0: {selected.baseline.start ? formatDate(selected.baseline.start) : '—'} — {formatDate(selected.baseline.end)} · {selected.baseline.note}</p>}{selected.planHistory?.slice(-5).reverse().map((h, i) => <p className="baseline-history" key={i}>{h.before || '—'} → {h.after || '—'} · {h.reason}<small>{h.actor} · {formatDate(h.at.slice(0, 10))}</small></p>)}<div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingDates(false)}>Отмена</button><button type="submit" className="button button--primary">Сохранить график</button></div></form></Modal>}
     </div>
   );
 }

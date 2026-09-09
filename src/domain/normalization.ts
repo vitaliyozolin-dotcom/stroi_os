@@ -26,7 +26,7 @@ export const normalizeAppStateWithFallback = (state: AppState, fallback: AppStat
         : []
     ).map((task) => ({
       ...task,
-      originalDueDate: task.originalDueDate ?? task.dueDate,
+      originalDueDate: task.originalDueDate ?? '',
       rescheduleCount: Number(task.rescheduleCount) || 0,
       attachments: Array.isArray(task.attachments) ? task.attachments : [],
       history: Array.isArray(task.history) ? task.history : [],

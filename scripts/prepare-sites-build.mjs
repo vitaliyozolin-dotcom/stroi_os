@@ -17,6 +17,10 @@ await mkdir(`${projectRoot}dist/server/routes`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
 
 await Promise.all([
+  copyFile(`${projectRoot}sites/lib/stage-control.js`, `${projectRoot}dist/server/lib/stage-control.js`),
+  copyFile(`${projectRoot}sites/projects/stage-control.js`, `${projectRoot}dist/server/projects/stage-control.js`),
+  copyFile(`${projectRoot}sites/lib/plan-baseline.js`, `${projectRoot}dist/server/lib/plan-baseline.js`),
+  copyFile(`${projectRoot}sites/projects/baseline.js`, `${projectRoot}dist/server/projects/baseline.js`),
   copyFile(`${projectRoot}.openai/hosting.json`, `${projectRoot}dist/.openai/hosting.json`),
   copyFile(`${projectRoot}sites/worker.js`, `${projectRoot}dist/server/index.js`),
   copyFile(`${projectRoot}sites/access-control.js`, `${projectRoot}dist/server/access-control.js`),

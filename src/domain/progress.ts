@@ -31,7 +31,7 @@ const taskWeight = (task: ProjectTask) => {
 const tasksByStage = (tasks: ProjectTask[]) => {
   const grouped = new Map<string, ProjectTask[]>();
   for (const task of tasks) {
-    if (!task.stageId || task.status === 'canceled') continue;
+    if (!task.stageId || task.status === 'canceled' || task.id === `auto-stage-${task.stageId}`) continue;
     const stageTasks = grouped.get(task.stageId);
     if (stageTasks) stageTasks.push(task);
     else grouped.set(task.stageId, [task]);
@@ -41,8 +41,8 @@ const tasksByStage = (tasks: ProjectTask[]) => {
 
 const progressForStage = (stage: AppState['stages'][number], tasks: ProjectTask[]) => {
   if (!tasks.length) {
-    const completed = stage.status === 'accepted' ? 100 : 0;
-    return { physical: completed, accepted: completed };
+    const accepted = stage.status === 'accepted' ? 100 : 0;
+    return { physical: stage.completedOn && stage.status === 'awaiting_inspection' ? 100 : accepted, accepted };
   }
   const totalWeight = tasks.reduce((sum, task) => sum + taskWeight(task), 0);
   const physical = tasks.reduce((sum, task) => sum + taskWeight(task) * (taskPhysicalProgress(task) || 0), 0) / totalWeight;
@@ -55,7 +55,7 @@ const progressForStage = (stage: AppState['stages'][number], tasks: ProjectTask[
 export const stageProgressTotals = (state: AppState, stageId: string) => {
   const stage = state.stages.find((item) => item.id === stageId);
   if (!stage) return { physical: 0, accepted: 0 };
-  const tasks = state.tasks.filter((task) => task.stageId === stageId && task.status !== 'canceled');
+  const tasks = state.tasks.filter((task) => task.stageId === stageId && task.status !== 'canceled' && task.id !== `auto-stage-${stageId}`);
   return progressForStage(stage, tasks);
 };
 

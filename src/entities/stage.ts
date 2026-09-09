@@ -1,3 +1,5 @@
+import type { PlanBaseline, PlanChange } from './baseline';
+
 export type StageStatus =
   | 'not_ready'
   | 'ready'
@@ -19,6 +21,19 @@ export interface Stage {
   planEnd: string;
   forecastEnd: string;
   actualEnd?: string;
+  actualStart?: string;
+  completedOn?: string;
+  completionNote?: string;
+  acceptedAt?: string;
+  acceptedBy?: string;
+  statusNote?: string;
+  forecastReason?: string;
+  forecastUpdatedAt?: string;
+  forecastUpdatedBy?: string;
+  statusHistory?: { at: string; actor: string; status: StageStatus; note: string }[];
+  baseline?: PlanBaseline;
+  planHistory?: PlanChange[];
+  planChangeReason?: string;
   responsible: string;
   responsibleId?: string;
   dependencyId?: string;

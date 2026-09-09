@@ -76,13 +76,42 @@ export const reconcileRemoteSnapshot = (model: SyncModel, remote: SyncSnapshot):
   };
 };
 
+// Acknowledging our own write must accept server stamps even if another field
+// in the same task/project was edited while the request was in flight.
+const acknowledgePlanFields = (sent: AppState, local: AppState, server: AppState) => {
+  const base = structuredClone(sent), current = structuredClone(local);
+  const accept = (sentItem: object, localItem: object, serverItem: object, dateFields: string[]) => {
+    const before = sentItem as Record<string, unknown>, item = localItem as Record<string, unknown>, saved = serverItem as Record<string, unknown>;
+    const hasNewPlan = dateFields.some((field) => before[field] !== item[field]) || before.planChangeReason !== item.planChangeReason;
+    const newStatus = before.status !== item.status || before.statusNote !== item.statusNote;
+    for (const field of ['baseline', 'originalDueDate', 'planHistory', 'statusHistory', 'forecastUpdatedAt', 'forecastUpdatedBy', 'workForecastUpdatedAt', 'workForecastUpdatedBy', 'acceptedAt', 'acceptedBy']) {
+      if (saved[field] !== undefined) { before[field] = structuredClone(saved[field]); item[field] = structuredClone(saved[field]); }
+      else if (field === 'planHistory') { delete before[field]; delete item[field]; }
+    }
+    delete before.planChangeReason;
+    if (!hasNewPlan) delete item.planChangeReason;
+    delete before.statusNote;
+    if (!newStatus) delete item.statusNote;
+  };
+  accept(base.project, current.project, server.project, ['startDate', 'targetDate']);
+  for (const collection of ['tasks', 'stages', 'checkpoints'] as const) {
+    const fields = collection === 'tasks' ? ['plannedStart', 'dueDate'] : collection === 'stages' ? ['planStart', 'planEnd'] : [];
+    for (const saved of server[collection]) {
+      const before = base[collection].find((item) => item.id === saved.id), item = current[collection].find((item) => item.id === saved.id);
+      if (before && item) accept(before, item, saved, fields);
+    }
+  }
+  return { base, current };
+};
+
 export const reconcileSavedSnapshot = (model: SyncModel, sent: AppState, remote: SyncSnapshot): SyncModel => {
   const serverState = synchronizeDerivedProgress(remote.state ?? sent);
   let state = model.state;
   if (model.state === sent) state = serverState;
   else if (remote.state) {
-    const merged = mergeProjectStates(sent, model.state, serverState);
-    if (!merged.conflicts.length) state = synchronizeDerivedProgress(merged.state);
+    const accepted = acknowledgePlanFields(sent, model.state, serverState);
+    const merged = mergeProjectStates(accepted.base, accepted.current, serverState);
+    state = synchronizeDerivedProgress(merged.conflicts.length ? accepted.current : merged.state);
   }
   return { ...model, state, base: serverState, revision: remote.revision, updatedAt: remote.updatedAt };
 };

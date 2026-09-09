@@ -1,3 +1,4 @@
+import { restoreKnownPprBaseline } from '../sites/lib/plan-baseline.js';
 import type { AppState, Stage } from './entities/index';
 
 const IMPORT_MARKER = 'ppr-kelosi-2026-08-17-v2-exact';
@@ -44,8 +45,9 @@ const pprStage = ({
   responsible,
 });
 
-export const applyKelosiPpr = (state: AppState): AppState => {
-  if (!isKelosiProject(state) || state.activity.some((event) => event.id === IMPORT_MARKER)) return state;
+const applyKelosiPprData = (state: AppState): AppState => {
+  if (!isKelosiProject(state) || state.activity.some((event) => event.id === IMPORT_MARKER)
+    || state.stages.some((stage) => stage.id.startsWith('kelosi-ppr-'))) return state;
 
   const responsible = state.project.foreman.trim() || 'Не назначен';
   const stages: Stage[] = [
@@ -79,3 +81,5 @@ export const applyKelosiPpr = (state: AppState): AppState => {
     ],
   };
 };
+
+export const applyKelosiPpr = (state: AppState): AppState => restoreKnownPprBaseline(applyKelosiPprData(state));
