@@ -26,8 +26,12 @@ export const applyBattleAutomations = (previous, next, actor) => {
         existing.completedAt = undefined;
         existing.completionNote = undefined;
         existing.updatedAt = now;
+        const previousDueDate = existing.dueDate;
         existing.dueDate = dueDate || tomorrow;
-        existing.rescheduleCount = Number(existing.rescheduleCount ?? 0) + 1;
+        existing.rescheduleCount = Number(existing.rescheduleCount ?? 0) + Number(previousDueDate !== existing.dueDate);
+        if (previousDueDate !== existing.dueDate) {
+          existing.planHistory = [...(existing.planHistory ?? []), { at: now, actor: 'ИКИОМА ОС', field: 'dueDate', before: previousDueDate, after: existing.dueDate, reason: 'Повторное открытие после нового события' }];
+        }
         existing.history = [
           ...(existing.history ?? []),
           {
@@ -55,6 +59,7 @@ export const applyBattleAutomations = (previous, next, actor) => {
       updatedAt: now,
       dueDate: dueDate || tomorrow,
       originalDueDate: dueDate || tomorrow,
+      baseline: { end: dueDate || tomorrow, source: 'initial', note: 'Исходный срок автоматически созданной задачи', recordedAt: now, recordedBy: 'ИКИОМА ОС' },
       rescheduleCount: 0,
       ...links,
       history: [{

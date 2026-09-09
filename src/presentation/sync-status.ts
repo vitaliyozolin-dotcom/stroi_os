@@ -15,6 +15,8 @@ export interface LocalCacheView {
 }
 
 export const syncErrorMessage = (error: unknown, cachePhase: LocalCacheView['phase']) => {
+  if (error instanceof Error && error.message.startsWith('invalid_stage_transition')) return `Сервер не сохранил изменение этапа. ${error.message.split(': ').slice(1).join(': ')} Исправьте запись или вернитесь к сохранённой версии.`;
+  if (error instanceof Error && error.message.startsWith('invalid_baseline_transition')) return `Сервер не сохранил изменение плана. ${error.message.split(': ').slice(1).join(': ')} Исправьте запись или вернитесь к сохранённой версии.`;
   if (error instanceof Error && error.message.startsWith('invalid_finance_transition')) return `Сервер не сохранил финансовую операцию. ${error.message.split(': ').slice(1).join(': ') || 'Проверьте утверждение, основание приёмки и суммы.'} Исправьте запись перед повторной синхронизацией.`;
   if (error instanceof Error && error.message === 'payload_too_large') return 'Данные слишком велики для сохранения. Проверьте вложения.';
   if (cachePhase === 'failed') return 'Сервер недоступен, локальная копия тоже не сохранена. Не закрывайте вкладку.';

@@ -1,3 +1,5 @@
+import { planDays, taskBaselineDelay, taskBaselineEnd } from '../../sites/lib/plan-baseline.js';
+import { planShiftLabel } from '../components/BaselinePanel';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
@@ -71,6 +73,10 @@ const emptyForm = (assigneeId = '') => ({
   assigneeId,
   reviewerId: '',
   dueDate: today(),
+  plannedStart: '',
+  baselineEnd: '',
+  baselineNote: '',
+  reason: '',
   stageId: '',
   counterpartyId: '',
   procurementItemId: '',
@@ -112,6 +118,8 @@ export function TasksPage({
   const [form, setForm] = useState(() => emptyForm(currentUser?.id));
   const [comment, setComment] = useState('');
   const [completionNote, setCompletionNote] = useState('');
+  const [formError, setFormError] = useState('');
+  useEffect(() => { setShowForm(false); setEditingId(null); setSelectedId(null); }, [state.project.id]);
 
   const todayKey = today();
   useEffect(() => {
@@ -153,10 +161,12 @@ export function TasksPage({
   }, [assigneeFilter, currentUser?.id, currentUser?.name, scope, search, state.stages, todayKey, visibleTasks]);
 
   const selected = visibleTasks.find((task) => task.id === selectedId) ?? null;
+  const editingTask = state.tasks.find((task) => task.id === editingId);
 
   const openCreate = () => {
     if (role !== 'management') return;
     setEditingId(null);
+    setFormError('');
     setForm(emptyForm(currentUser?.id ?? internalUsers[0]?.id));
     setShowForm(true);
   };
@@ -165,6 +175,7 @@ export function TasksPage({
     if (role !== 'management') return;
     setSelectedId(null);
     setEditingId(task.id);
+    setFormError('');
     setForm({
       title: task.title,
       description: task.description ?? '',
@@ -172,6 +183,10 @@ export function TasksPage({
       assigneeId: task.assigneeId,
       reviewerId: task.reviewerId ?? '',
       dueDate: task.dueDate,
+      plannedStart: task.plannedStart || '',
+      baselineEnd: taskBaselineEnd(task) || '',
+      baselineNote: task.baseline?.note || '',
+      reason: '',
       stageId: task.stageId ?? '',
       counterpartyId: task.counterpartyId ?? '',
       procurementItemId: task.procurementItemId ?? '',
@@ -203,7 +218,10 @@ export function TasksPage({
         createdAt: timestamp,
         updatedAt: timestamp,
         dueDate: form.dueDate,
+        plannedStart: form.plannedStart || undefined,
+        planChangeReason: form.reason.trim(),
         originalDueDate: form.dueDate,
+        baseline: { start: form.plannedStart || undefined, end: form.dueDate, source: 'initial', note: 'Первоначальный срок при постановке задачи', recordedAt: timestamp, recordedBy: actor },
         stageId: form.stageId || undefined,
         counterpartyId: form.counterpartyId || undefined,
         procurementItemId: form.procurementItemId || undefined,
@@ -215,12 +233,16 @@ export function TasksPage({
     } else {
       const previous = state.tasks.find((task) => task.id === editingId);
       if (!previous) return;
+      if ((previous.dueDate !== form.dueDate || (previous.plannedStart || '') !== form.plannedStart) && !form.reason.trim()) { setFormError('Укажите причину изменения срока.'); return; }
+      if (!taskBaselineEnd(previous) && form.baselineEnd && !form.baselineNote.trim()) { setFormError('Укажите источник первоначального срока.'); return; }
       const changes = [];
       if (previous.assigneeId !== assignee.id) changes.push({ id: uid('task-history'), timestamp, actor, kind: 'assignee' as const, text: `Ответственный изменён: ${previous.assigneeName} → ${assignee.name}` });
-      if (previous.dueDate !== form.dueDate) changes.push({ id: uid('task-history'), timestamp, actor, kind: 'due_date' as const, text: `Срок изменён: ${formatDate(previous.dueDate, true)} → ${formatDate(form.dueDate, true)}` });
+      if (previous.dueDate !== form.dueDate) changes.push({ id: uid('task-history'), timestamp, actor, kind: 'due_date' as const, text: `Срок изменён: ${formatDate(previous.dueDate, true)} → ${formatDate(form.dueDate, true)} · ${form.reason.trim()}` });
       if (previous.title !== form.title.trim() || previous.description !== (form.description.trim() || undefined) || previous.priority !== form.priority) changes.push({ id: uid('task-history'), timestamp, actor, kind: 'edited' as const, text: 'Обновлены содержание или приоритет задачи' });
       const task: ProjectTask = {
         ...previous,
+        originalDueDate: previous.originalDueDate || form.baselineEnd,
+        baseline: previous.baseline || (!previous.originalDueDate && form.baselineEnd ? { end: form.baselineEnd, source: 'document' as const, note: form.baselineNote.trim(), recordedAt: timestamp, recordedBy: actor } : undefined),
         title: form.title.trim(),
         description: form.description.trim() || undefined,
         priority: form.priority,
@@ -229,6 +251,8 @@ export function TasksPage({
         reviewerId: reviewer?.id,
         reviewerName: reviewer?.name,
         dueDate: form.dueDate,
+        plannedStart: form.plannedStart,
+        planChangeReason: form.reason.trim(),
         stageId: form.stageId || undefined,
         counterpartyId: form.counterpartyId || undefined,
         procurementItemId: form.procurementItemId || undefined,
@@ -352,7 +376,7 @@ export function TasksPage({
         )}
       </section>
 
-      {showForm && (
+      {showForm && (!editingId || editingTask) && (
         <Modal wide title={editingId ? 'Редактировать задачу' : 'Новая задача'} subtitle="Ответственный и срок обязательны. Остальные связи добавляйте только когда они действительно нужны." onClose={() => setShowForm(false)}>
           <form className="modal-form" onSubmit={saveTask}>
             <Field label="Задача"><input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Что должно быть сделано и проверено" /></Field>
@@ -360,18 +384,20 @@ export function TasksPage({
             <div className="form-grid">
               <Field label="Ответственный"><select required value={form.assigneeId} onChange={(event) => setForm({ ...form, assigneeId: event.target.value })}><option value="">Выберите</option>{internalUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></Field>
               <Field label="Проверяет"><select value={form.reviewerId} onChange={(event) => setForm({ ...form, reviewerId: event.target.value })}><option value="">Без отдельной проверки</option>{internalUsers.map((user) => <option value={user.id} key={user.id}>{user.name}</option>)}</select></Field>
-              <Field label="Срок"><input required type="date" value={form.dueDate} onChange={(event) => setForm({ ...form, dueDate: event.target.value })} /></Field>
+              <Field label="Плановое начало"><input type="date" max={form.dueDate} value={form.plannedStart} onChange={(event) => setForm({ ...form, plannedStart: event.target.value })} /></Field><Field label="Действующий срок"><input required type="date" value={form.dueDate} onChange={(event) => setForm({ ...form, dueDate: event.target.value })} /></Field>
               <Field label="Приоритет"><select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as TaskPriority })}><option value="low">Низкий</option><option value="normal">Обычный</option><option value="high">Высокий</option><option value="critical">Критичный</option></select></Field>
             </div>
             <div className="task-form-links">
               <strong><Link2 size={16} /> Связать с работой</strong>
               <div className="form-grid">
-                <Field label="Этап"><select value={form.stageId} onChange={(event) => setForm({ ...form, stageId: event.target.value, procurementItemId: '', checkpointId: '' })}><option value="">Без этапа</option>{state.stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.order}. {stage.name}</option>)}</select></Field>
+                {editingTask && <><Field label="План 0 · исходный срок"><input disabled={Boolean(taskBaselineEnd(editingTask))} type="date" value={form.baselineEnd} onChange={(event) => setForm({ ...form, baselineEnd: event.target.value })} /></Field>{!taskBaselineEnd(editingTask) && form.baselineEnd && <Field label="Источник первоначального срока"><input required value={form.baselineNote} onChange={(event) => setForm({ ...form, baselineNote: event.target.value })} /></Field>}<Field label="Причина изменения действующего плана"><input required={editingTask.dueDate !== form.dueDate || (editingTask.plannedStart || '') !== form.plannedStart} value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} /></Field></>}
+              <Field label="Этап"><select value={form.stageId} onChange={(event) => setForm({ ...form, stageId: event.target.value, procurementItemId: '', checkpointId: '' })}><option value="">Без этапа</option>{state.stages.map((stage) => <option value={stage.id} key={stage.id}>{stage.order}. {stage.name}</option>)}</select></Field>
                 <Field label="Контрагент"><select value={form.counterpartyId} onChange={(event) => setForm({ ...form, counterpartyId: event.target.value })}><option value="">Без контрагента</option>{state.counterparties.filter((item) => item.type !== 'client').map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field>
                 <Field label="Закупка"><select value={form.procurementItemId} onChange={(event) => setForm({ ...form, procurementItemId: event.target.value })}><option value="">Без закупки</option>{state.procurement.filter((item) => !form.stageId || item.stageId === form.stageId).map((item) => <option value={item.id} key={item.id}>{item.item}</option>)}</select></Field>
                 <Field label="Проверка качества"><select value={form.checkpointId} onChange={(event) => setForm({ ...form, checkpointId: event.target.value })}><option value="">Без проверки</option>{state.checkpoints.filter((item) => !form.stageId || item.stageId === form.stageId).map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></Field>
               </div>
             </div>
+            {formError && <p role="alert" className="danger-text">{formError}</p>}
             <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowForm(false)}>Отмена</button><button type="submit" className="button button--primary">{editingId ? 'Сохранить изменения' : 'Создать задачу'}</button></div>
           </form>
         </Modal>
@@ -384,6 +410,10 @@ export function TasksPage({
               <div><small>Статус</small><StatusBadge label={taskStatusLabel[selected.status]} tone={statusTone(selected.status)} /></div>
               <div><small>Ответственный</small><strong>{selected.assigneeName}</strong></div>
               <div><small>Срок</small><strong className={isTaskOverdue(selected, todayKey) ? 'danger-text' : ''}>{formatDate(selected.dueDate, true)}</strong></div>
+              <div><small>План 0 · исходный срок</small><strong>{taskBaselineEnd(selected) ? formatDate(taskBaselineEnd(selected)!, true) : 'Не сохранён'}</strong><small>{selected.baseline?.note || (selected.originalDueDate ? 'Сохранённый исходный срок' : 'Можно восстановить по документу')}</small></div>
+              <div><small>Перенос относительно Плана 0</small><strong>{planShiftLabel(planDays(selected.dueDate, taskBaselineEnd(selected)))}</strong></div>
+              <div><small>{selected.status === 'done' ? 'Факт к Плану 0' : 'После исходного срока'}</small><strong>{selected.status === 'canceled' ? 'Задача отменена' : selected.status === 'done' && !selected.completedAt ? 'Дата факта не сохранена' : taskBaselineDelay(selected) !== null ? `${taskBaselineDelay(selected)} дн.` : 'Нет оценки'}</strong></div>
+              <div><small>Плановое начало · План 0 / текущее</small><strong>{selected.baseline?.start ? formatDate(selected.baseline.start) : '—'} / {selected.plannedStart ? formatDate(selected.plannedStart) : '—'}</strong></div>
               <div><small>Переносы</small><strong>{selected.rescheduleCount}</strong></div>
             </div>
 
@@ -411,6 +441,7 @@ export function TasksPage({
 
             {selected.status === 'review' && (role === 'management' || !selected.reviewerId) && <div className="task-completion"><Field label="Подтверждённый результат" hint="Без результата задача не считается закрытой"><textarea rows={2} value={completionNote} onChange={(event) => setCompletionNote(event.target.value)} placeholder="Что сделано, принято и где лежит подтверждение" /></Field><button type="button" className="button button--primary" disabled={!completionNote.trim()} onClick={() => changeStatus(selected, 'done', 'Задача принята и выполнена', { completionNote: completionNote.trim() })}><Check size={16} /> Принять и закрыть</button></div>}
 
+            {selected.planHistory?.length ? <div className="baseline-history"><strong>Переносы плана</strong>{selected.planHistory.slice(-5).reverse().map((h, i) => <p key={i}>{h.before || '—'} → {h.after || '—'} · {h.reason}<small>{h.actor} · {formatDate(h.at.slice(0, 10))}</small></p>)}</div> : null}
             <div className="task-history-layout">
               <section>
                 <SectionHeader eyebrow="Аудит" title="История задачи" action={<History size={18} />} />

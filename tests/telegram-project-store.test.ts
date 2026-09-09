@@ -57,7 +57,7 @@ test('Telegram project mutation retries CAS and audits only the successful revis
     mutationNoop: noop,
   });
   const result = await store.mutate({ DB: db }, 'project-1', 'Actor', 'management', 'task_create', 'Создана задача', (state: { tasks: unknown[] }) => {
-    state.tasks.push({ id: 'task-1' });
+    state.tasks.push({ id: 'task-1', dueDate: '2026-09-10' });
   });
   assert.equal(updates, 2);
   assert.equal(audits, 1);

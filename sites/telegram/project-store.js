@@ -1,3 +1,6 @@
+import { validateBaselineChanges } from '../projects/baseline.js';
+import { validateStageControl } from '../projects/stage-control.js';
+
 const MAX_STATE_BYTES = 6_000_000;
 
 export const createTelegramProjectStore = ({ ensureSchema, readSnapshot, changes, mutationNoop }) => {
@@ -34,10 +37,14 @@ export const createTelegramProjectStore = ({ ensureSchema, readSnapshot, changes
         return { previous, state: previous, revision: snapshot.revision, updatedAt: snapshot.updatedAt, changed: false };
       }
       const state = resultState ?? next;
+      const now = new Date().toISOString();
+      const stageError = validateStageControl(previous, state, { role, name: actor }, now);
+      if (stageError) throw new Error(`invalid_stage_transition: ${stageError}`);
+      const baselineError = validateBaselineChanges(previous, state, { role, name: actor }, now);
+      if (baselineError) throw new Error(`invalid_baseline_transition: ${baselineError}`);
       const stateJson = JSON.stringify(state);
       const stateBytes = new TextEncoder().encode(stateJson).byteLength;
       if (stateBytes > MAX_STATE_BYTES) throw new Error('payload_too_large');
-      const now = new Date().toISOString();
       const nextRevision = snapshot.revision + 1;
       const result = await env.DB.prepare(`
         UPDATE project_state

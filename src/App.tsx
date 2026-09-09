@@ -239,12 +239,12 @@ function App() {
       case 'marketing': return <MarketingPage state={state} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'counterparties': return <CounterpartiesPage state={state} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'finance': return <FinancePage onOpenQuestions={() => setQuestionsOpen(true)} state={state} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />;
-      case 'schedule': return <SchedulePage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
+      case 'schedule': return <SchedulePage state={state} role={role} actor={session?.name ?? 'Пользователь'} userId={session?.id} focusId={focusEntityId} onChange={updateState} />;
       case 'procurement': return <ProcurementPage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'quality': return <QualityPage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
       case 'client': return <ClientPage state={state} onChange={updateState} />;
       case 'settings': return <SettingsPage state={state} actor={session?.name ?? 'Владелец'} canManageAccess={Boolean(session?.isOwner)} onChange={updateState} onServerSnapshot={applyServerSnapshot} />;
-      default: return <OverviewPage state={state} role={role} onNavigate={navigate} onOpenProjects={() => setCreateProjectOpen(true)} />;
+      default: return <OverviewPage state={state} role={role} actor={session?.name ?? 'Пользователь'} userId={session?.id} onChange={updateState} onNavigate={navigate} onOpenProjects={() => setCreateProjectOpen(true)} />;
     }
   })();
 

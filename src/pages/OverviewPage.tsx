@@ -1,3 +1,5 @@
+import { BaselinePanel } from '../components/BaselinePanel';
+import { StageRadar } from '../components/StageRadar';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -38,7 +40,7 @@ const weekLabel = (start: Date, end: Date) => {
   return `${formatter.format(start)}–${formatter.format(end)}`;
 };
 
-export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; onNavigate: (page: PageId) => void; onOpenProjects?: () => void }) {
+export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId) => void; onOpenProjects?: () => void }) {
   const finance = financeTotals(state);
   const progress = progressTotals(state);
   const currentStage = state.stages.find((stage) => ['in_progress', 'blocked', 'rework', 'awaiting_inspection'].includes(stage.status))
@@ -136,6 +138,9 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
         </div>
       </section>}
 
+      <BaselinePanel compact state={state} role={role} actor={actor} onChange={onChange} />
+      <StageRadar state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
+
       {(show('progress') || show('finance')) && <section className="metric-grid">
         {show('progress') &&
         <MetricCard
@@ -146,7 +151,7 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
           tone="dark"
           onClick={() => onNavigate('schedule')}
         />}
-        {role === 'foreman' ? (
+        {role === 'foreman' && currentStage ? (
           <>
             <MetricCard label="Текущий этап" value={`${currentStage.progress}%`} detail={<span>{currentStage.name} · до {formatDate(currentStage.forecastEnd)}</span>} icon={Clock3} onClick={() => onNavigate('schedule')} />
             <MetricCard label="Контроль качества" value={`${reviewCount + reworkCount} отчёта`} detail={<span>{reviewCount} на проверке · {reworkCount} требует доработки</span>} icon={ShieldCheck} tone={reworkCount ? 'warning' : 'positive'} onClick={() => onNavigate('quality')} />
@@ -181,7 +186,7 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
       </section>}
 
       {(show('progress') || show('decisions')) && <section className="dashboard-grid dashboard-grid--main">
-        {show('progress') && <article className="panel panel--progress">
+        {show('progress') && currentStage && <article className="panel panel--progress">
           <SectionHeader
             eyebrow="Производство"
             title="Ход строительства"
@@ -192,7 +197,7 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
             <div className="current-stage-card__body">
               <div className="current-stage-card__top">
                 <div>
-                  <span>Текущий этап</span>
+                  <span>Этап для подробного просмотра</span>
                   <h3>{currentStage.name}</h3>
                 </div>
                 <StatusBadge label={stageStatusLabel[currentStage.status]} tone={currentStage.status === 'rework' || currentStage.status === 'blocked' ? 'danger' : 'blue'} />
