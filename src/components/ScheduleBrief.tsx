@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { forecastSchedule, simulateSchedule, type ScheduleForecast } from '../../sites/lib/schedule-forecast.js';
@@ -12,7 +12,7 @@ import { Field, SectionHeader } from './Ui';
 
 export const scheduleDeltaLabel = (days: number | null) => days === null ? 'Нет полного исходного ППР для сравнения' : days > 0 ? `Позже Плана 0 на ${days} календ. дн.` : days < 0 ? `Раньше Плана 0 на ${Math.abs(days)} календ. дн.` : 'В срок по Плану 0';
 
-export function ScheduleBrief({ state, role, actor, userId, onChange, onNavigate }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (s: AppState) => void; onNavigate: (p: PageId) => void }) {
+export function ScheduleBrief({ state, role, actor, userId, onChange, onNavigate, children }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (s: AppState) => void; onNavigate: (p: PageId) => void; children?: ReactNode }) {
   const view = forecastSchedule(state), records = recordedScheduleStatus(state), manual = stageRadar(state);
   const [review, setReview] = useState<string | null>(null);
   const issueIds = [...new Set(view.issues.map((i) => i.stageId))];
@@ -53,6 +53,7 @@ export function ScheduleBrief({ state, role, actor, userId, onChange, onNavigate
         {issueIds.length > 0 && <button type="button" className="text-button" onClick={() => setReview(view.issues[0].stageId)}>{role === 'client' ? 'Что нужно для прогноза' : 'Уточнить прогноз'} · {issueIds.length} работ</button>}
       </div>
     </section>
+    {children}
     <details className="panel overview-schedule-details">
       <summary>Подробности сроков и сверка ППР</summary>
       <div className="page-stack">{details}</div>

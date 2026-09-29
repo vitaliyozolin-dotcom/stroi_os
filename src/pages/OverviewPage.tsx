@@ -1,3 +1,4 @@
+import { ConstructionNow } from '../components/ConstructionNow';
 import { ScheduleBrief } from '../components/ScheduleBrief';
 import { recordedScheduleStatus } from '../../sites/lib/stage-control.js';
 import { planToday } from '../../sites/lib/plan-baseline.js';
@@ -46,7 +47,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
   const progress = progressTotals(state);
   const currentStage = state.stages.find((stage) => ['in_progress', 'blocked', 'rework', 'awaiting_inspection'].includes(stage.status))
     ?? state.stages.find((stage) => stage.status === 'ready')
-    ?? state.stages[0];
+    ;
   const reviewCount = state.checkpoints.filter((item) => item.status === 'in_review').length;
   const reworkCount = state.checkpoints.filter((item) => item.status === 'rework').length;
   const riskySupply = state.procurement.filter((item) => item.risk);
@@ -158,7 +159,9 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
         />
       </section>}
 
-      <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
+      <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate}>
+        {show('progress') && <ConstructionNow state={state} role={role} onNavigate={onNavigate} />}
+      </ScheduleBrief>
 
       {(show('progress') || show('finance')) && <details className="panel overview-secondary-metrics" open={role === 'foreman'}>
         <summary>Дополнительные показатели проекта</summary>

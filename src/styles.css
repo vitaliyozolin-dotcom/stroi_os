@@ -9151,3 +9151,53 @@ button.project-quick-card:hover {
   .overview-dates__delay { grid-column: 1 / -1; padding-top: 16px !important; border-top: 1px solid #d9d8cf !important; }
   .overview-page .project-heading__meta { align-items: flex-start; }
 }
+
+/* Construction is the visual centre of the overview. */
+.overview-page .project-heading--overview { padding-bottom: 16px; }
+.overview-page .project-heading--overview h1 { margin-top: 10px; font-size: clamp(28px, 3vw, 40px); }
+.overview-money .metric-card { min-height: 128px; padding: 20px 24px; }
+.overview-money .metric-card > strong { margin: 10px 0; }
+.construction-now { min-width: 0; padding: 20px 0 8px; border-top: 1px solid #d9d8cf; }
+.construction-now__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.construction-now__head h2 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.035em; text-transform: uppercase; }
+.construction-now__head button { min-height: 44px; color: #111310; font-size: 12px; }
+.construction-now__body { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 28px; }
+.construction-now__photo { position: relative; display: block; width: 100%; min-height: 190px; padding: 0; overflow: hidden; border: 0; border-radius: 4px; background: #e8e6dd; color: #65675f; cursor: pointer; }
+.construction-now__photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.construction-now__empty-photo { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 190px; font-size: 12px; }
+.construction-now__caption { position: absolute; bottom: 0; left: 0; right: 0; padding: 22px 14px 12px; background: linear-gradient(transparent, rgba(0,0,0,.8)); color: #fff; text-align: left; font-size: 11px; }
+.construction-now__focus { min-width: 0; }
+.construction-now__eyebrow { color: #65675f; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.construction-now__focus h3 { margin: 8px 0 10px; font-size: 29px; font-weight: 550; line-height: 1.1; letter-spacing: -.04em; overflow-wrap: anywhere; }
+.construction-now__focus p { margin: 0 0 12px; color: #65675f; font-size: 12px; line-height: 1.5; }
+.construction-now__focus .construction-now__blocker { color: #a4402d; }
+.construction-now__action { display: flex; align-items: center; justify-content: space-between; gap: 15px; width: 100%; min-height: 80px; padding: 14px 16px; border: 0; border-radius: 4px; background: #e8e6dd; color: #111310; text-align: left; cursor: pointer; }
+.construction-now__action > span { display: grid; gap: 6px; }
+.construction-now__action small { color: #65675f; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+.construction-now__action strong { font-size: 14px; font-weight: 500; }
+.construction-now__action span span { color: #65675f; font-size: 11px; }
+.construction-now__stages { display: flex; margin: 24px 0 0; padding: 0; list-style: none; overflow-x: auto; scrollbar-width: thin; }
+.construction-now__stages li { flex: 1 0 64px; min-width: 0; }
+.construction-stage { position: relative; display: flex; flex-direction: column; align-items: center; gap: 9px; width: 100%; min-height: 78px; padding: 10px 4px; border: 0; background: transparent; color: #65675f; cursor: pointer; }
+.construction-stage__line { position: absolute; top: 23px; left: 0; right: 0; height: 2px; background: #d9d8cf; }
+.construction-now__stages li:first-child .construction-stage__line { left: 50%; }
+.construction-now__stages li:last-child .construction-stage__line { right: 50%; }
+.construction-stage__point { position: relative; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid #c9c9bf; border-radius: 50%; background: #f5f4ef; font-size: 9px; }
+.construction-stage__name { max-width: 100%; font-size: 10px; line-height: 1.3; overflow-wrap: anywhere; }
+.construction-stage--accepted .construction-stage__point { background: #1c221c; border-color: #1c221c; color: #d5ff48; }
+.construction-stage--in_progress .construction-stage__point, .construction-stage--awaiting_inspection .construction-stage__point { background: #d5ff48; border-color: #111310; color: #111310; }
+.construction-stage--blocked .construction-stage__point, .construction-stage--rework .construction-stage__point { background: #f5e5dc; border-color: #a4402d; color: #a4402d; }
+.construction-stage--in_progress .construction-stage__name, .construction-stage--awaiting_inspection .construction-stage__name { color: #111310; font-weight: 600; }
+.construction-now__legend { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; color: #65675f; font-size: 10px; }
+.construction-now button:focus-visible { outline: 2px solid #394d35; outline-offset: -2px; }
+@media (max-width: 720px) {
+  .overview-page .project-heading--overview h1 { font-size: 30px; }
+  .overview-money .metric-card { padding: 16px; }
+  .construction-now__body { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .construction-now__photo { height: 180px; min-height: 180px; }
+  .construction-now__focus h3 { font-size: 26px; }
+  .construction-now__legend { flex-wrap: wrap; }
+  .construction-now__legend > span:nth-child(2) { order: 3; flex-basis: 100%; text-align: center; }
+}
+.construction-now__head { flex-wrap: wrap; }
+.construction-now__head h2 { flex: 1 0 auto; white-space: nowrap; }

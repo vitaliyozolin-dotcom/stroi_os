@@ -175,9 +175,16 @@ export const createFileHandlers = ({ ensureSchema, readSnapshot }) => {
       const attachment = (report.attachments ?? []).find((item) => clean(item.key, 500) === key);
       const object = await env.BUCKET.get(key);
       if (!object || !attachment) return json({ ok: false, error: 'file_not_found' }, 404);
-      const headers = protectedFileHeaders(safeFileName(attachment.name), 'field-report');
+      let body = object.body;
+      let mimeType = '';
+      if (url.searchParams.get('preview') === '1' && body?.tee) {
+        const [probe, responseBody] = body.tee();
+        body = responseBody;
+        mimeType = detectRasterImageType(await readStreamPrefix(probe));
+      }
+      const headers = protectedFileHeaders(safeFileName(attachment.name), 'field-report', { inlineMime: mimeType });
       if (object.httpEtag) headers.set('ETag', object.httpEtag);
-      return new Response(object.body, { headers });
+      return new Response(body, { headers });
     } catch {
       return json({ ok: false, error: 'file_unavailable' }, 500);
     }
