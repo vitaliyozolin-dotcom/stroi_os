@@ -140,9 +140,29 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
         </div>
       </section>}
 
+      {role !== 'foreman' && show('finance') && <section className="metric-grid overview-money" aria-label="Деньги проекта">
+        <MetricCard
+          label="Потрачено"
+          value={shortMoney(finance.paid)}
+          detail={<span>Фактически выплачено по проекту</span>}
+          icon={Banknote}
+          onClick={() => onNavigate('finance')}
+        />
+        <MetricCard
+          label="Остаток денег"
+          value={shortMoney(finance.received - finance.paid)}
+          detail={<span>Получено {shortMoney(finance.received)} · за вычетом выплат</span>}
+          icon={CircleDollarSign}
+          tone={finance.received < finance.paid ? 'warning' : 'positive'}
+          onClick={() => onNavigate('finance')}
+        />
+      </section>}
+
       <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
 
-      {(show('progress') || show('finance')) && <section className="metric-grid">
+      {(show('progress') || show('finance')) && <details className="panel overview-secondary-metrics" open={role === 'foreman'}>
+        <summary>Дополнительные показатели проекта</summary>
+        {(show('progress') || show('finance')) && <section className="metric-grid">
         {show('progress') &&
         <MetricCard
           label="Выполнение по задачам"
@@ -185,6 +205,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
           </>
         ) : null}
       </section>}
+      </details>}
 
       {(show('progress') || show('decisions')) && <section className="dashboard-grid dashboard-grid--main">
         {show('progress') && currentStage && <details className="panel panel--progress"><summary>Подробности выполнения по задачам</summary>

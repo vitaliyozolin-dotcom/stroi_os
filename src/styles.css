@@ -9027,3 +9027,57 @@ button.project-quick-card:hover {
   .schedule-brief__details > .panel { padding:12px 0; border:0; }
   .schedule-review__choices { padding:12px; }
 }
+
+
+/* Overview: cash and dates first; schedule reconciliation stays in details. */
+.project-heading--overview {
+  min-height: 0;
+  align-items: center;
+  padding: 18px 22px;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.project-heading--overview::after { display: none; }
+.project-heading--overview h1 { margin-top: 8px; font-size: 30px; line-height: 1.15; }
+.project-heading--overview p,
+.project-heading--overview .project-heading__meta > span { color: #626f67; }
+.project-heading--overview .project-heading__meta { flex-wrap: wrap; }
+.project-heading--overview .project-heading__meta .status-badge { color: #365c48; background: #edf4eb; }
+.overview-money { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.overview-money .metric-card { min-height: 118px; }
+.overview-money .metric-card > strong { font-size: clamp(24px, 2.5vw, 32px); }
+.overview-money .metric-card--positive { background: #f2f7ef; border-color: #d7e2ce; }
+.overview-money .metric-card__detail { font-size: 13px; }
+.overview-dates { padding: 22px; }
+.overview-dates__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.overview-dates__grid > div { display: grid; align-content: start; gap: 7px; min-width: 0; }
+.overview-dates__grid small,
+.overview-dates__grid span { color: #626f67; font-size: 13px; line-height: 1.45; }
+.overview-dates__grid strong { font-size: clamp(21px, 2.2vw, 28px); line-height: 1.25; }
+.overview-dates__delay--late strong { color: var(--red); }
+.overview-dates__footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 13px; color: #626f67; }
+.overview-dates__footer strong { color: var(--ink); font-weight: 600; }
+.overview-dates button { min-height: 44px; }
+.overview-schedule-details,
+.overview-secondary-metrics { padding: 0 22px; }
+.overview-schedule-details > summary,
+.overview-secondary-metrics > summary { padding: 16px 0; cursor: pointer; font-size: 14px; font-weight: 600; }
+.overview-schedule-details[open],
+.overview-secondary-metrics[open] { padding-bottom: 22px; }
+.metric-card--dark.metric-card--clickable { color: #fff; }
+.dashboard-grid--main > .panel--progress:not([open]) { align-self: start; }
+@media (max-width: 720px) {
+  .project-heading--overview { min-height: 0; padding: 16px; }
+  .project-heading--overview h1 { font-size: 26px; }
+  .overview-money { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-money .metric-card { padding: 14px; }
+  .overview-money .metric-card > strong { font-size: 23px; }
+  .overview-money .metric-card__detail { font-size: 12px; }
+  .overview-dates { padding: 16px; }
+  .overview-dates__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 12px; }
+  .overview-dates__grid strong { font-size: 18px; }
+  .overview-dates__delay { grid-column: 1 / -1; padding-top: 14px; border-top: 1px solid var(--border); }
+  .overview-schedule-details,
+  .overview-secondary-metrics { padding-right: 16px; padding-left: 16px; }
+}
