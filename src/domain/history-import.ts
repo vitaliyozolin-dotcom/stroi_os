@@ -63,7 +63,7 @@ export function prepareHistoryImport(current: AppState, input: HistoryRegister, 
       counterparty = { id: `history-vendor-${fingerprint(record.vendorInn ?? record.vendor)}`, name: record.vendor, inn: record.vendorInn, type: 'supplier', status: 'active' };
       next.counterparties.push(counterparty);
     }
-    const line = next.budgetLines.find((item) => item.sourceRow === record.suggestedBudgetSourceRow);
+    const line = Number.isInteger(record.suggestedBudgetSourceRow) ? next.budgetLines.find((item) => item.sourceRow === record.suggestedBudgetSourceRow) : undefined;
     const date = record.documentDate ?? record.purchaseDate!;
     const stageId = record.suggestedStageId && next.stages.some((item) => item.id === record.suggestedStageId) ? record.suggestedStageId : line?.stageIds[0];
     doc.counterpartyId = counterparty.id;

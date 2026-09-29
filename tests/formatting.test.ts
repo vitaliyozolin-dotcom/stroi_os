@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { formatDate } from '../src/presentation/formatting.ts';
 
+test('a document without a date does not crash the project card', () => {
+  assert.equal(formatDate('', true), 'Дата не указана');
+  assert.equal(formatDate('invalid', true), 'Дата не указана');
+});
+
 test('document calendar dates do not move to the preceding day in western time zones', () => {
   const previous = process.env.TZ;
   try {
