@@ -42,6 +42,15 @@ test('repeat import is deduplicated and original recorded timestamp remains', ()
   assert.deepEqual(second.state, first.state);
 });
 
+test('an unassigned purchase stays unallocated when the existing budget has no source rows', () => {
+  const input = register();
+  delete input.paidInvoices[0].suggestedBudgetSourceRow;
+  const result = prepareHistoryImport(current(), input, identity.name, now, false);
+  const entry = result.state.financeEntries.find((item) => item.historicalPayment)!;
+  assert.equal(entry.budgetLineId, undefined);
+  assert.equal(entry.stageId, undefined);
+});
+
 test('missing, client-visible and foreign project documents cannot back an import', () => {
   for (const mode of ['missing', 'visible', 'foreign']) {
     const state = current();
