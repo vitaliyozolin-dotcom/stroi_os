@@ -1,6 +1,8 @@
 export type ExpenseStatus = 'committed' | 'accepted' | 'paid';
 
 export interface BudgetMeta {
+  importSourceSha256?: string;
+  importPreviousBudget?: { lines: BudgetLine[]; meta: BudgetMeta; targetCost: number; recordedAt: string };
   version: string;
   source: string;
   importedAt?: string;
@@ -10,6 +12,9 @@ export interface BudgetMeta {
 }
 
 export interface BudgetLine {
+  sourceRow?: number;
+  sourceFact?: number;
+  sourceParticipantAmounts?: Record<string, number | null>;
   id: string;
   stageIds: string[];
   name: string;
@@ -18,6 +23,7 @@ export interface BudgetLine {
 }
 
 export interface FinanceEntry {
+  historicalPayment?: { sourceDocumentId: string; sourceUniqueKey: string; sourceSha256: string; confirmation: string; sourceDate: string; recordedAt: string; recordedBy: string };
   id: string;
   kind: 'expense' | 'income';
   status: ExpenseStatus;
