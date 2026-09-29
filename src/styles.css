@@ -9250,3 +9250,41 @@ button.project-quick-card:hover {
   .app-shell .sidebar--open .project-switcher { justify-content: flex-start; padding-inline: 12px; }
   .app-shell .sidebar--open .sidebar__label { display: block; }
 }
+
+/* Shared project theme: presentation only, no state or form behaviour changes. */
+:root {
+  font-family: 'Onest', Arial, sans-serif;
+  color: #111310;
+  background: #f5f4ef;
+  --ink: #111310;
+  --muted: #65675f;
+  --soft-muted: #85877f;
+  --canvas: #f5f4ef;
+  --surface: #fbfaf6;
+  --surface-soft: #eeede6;
+  --border: #d9d8cf;
+  --border-strong: #c8c8bd;
+  --forest: #1c221c;
+  --forest-2: #283322;
+  --green: #394d35;
+  --green-light: #e7ecdc;
+  --lime: #d5ff48;
+  --shadow: none;
+}
+body { background: var(--canvas); }
+.app-shell { font-family: 'Onest', Arial, sans-serif; }
+.app-shell .topbar { background: rgba(245,244,239,.97); border-color: var(--border); }
+.app-shell .page-title-row h1, .app-shell .project-heading h1 { font-family: 'Onest', Arial, sans-serif; font-weight: 600; letter-spacing: -.04em; }
+.app-shell .page-title-row h1 { font-size: clamp(26px,3vw,36px); }
+.app-shell .section-header h2 { font-weight: 600; letter-spacing: -.02em; }
+.app-shell .eyebrow { color: #65675f; font-size: 10px; font-weight: 500; letter-spacing: .08em; }
+.app-shell .panel, .app-shell .metric-card { border-radius: 4px; box-shadow: none; }
+.app-shell .button { border-radius: 4px; font-weight: 500; box-shadow: none; }
+.app-shell .button--primary { color: #f5f4ef; background: #1c221c; }
+.app-shell .button--primary:hover:not(:disabled) { background: #303a29; }
+.app-shell .button--secondary { color: #283322; border-color: #d0d1c4; background: #eeede6; }
+.app-shell .button:hover:not(:disabled) { transform: none; }
+.app-shell input:not([type='checkbox']):not([type='radio']), .app-shell select, .app-shell textarea { border-radius: 4px; }
+.app-shell .metric-card > strong { font-weight: 600; letter-spacing: -.035em; }
+.app-shell .status-badge { font-weight: 500; }
+.app-shell .user-chip > span { border-radius: 4px; }
