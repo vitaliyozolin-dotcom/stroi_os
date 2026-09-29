@@ -1,3 +1,4 @@
+import { ConstructionNow } from '../components/ConstructionNow';
 import { ScheduleBrief } from '../components/ScheduleBrief';
 import { recordedScheduleStatus } from '../../sites/lib/stage-control.js';
 import { planToday } from '../../sites/lib/plan-baseline.js';
@@ -46,7 +47,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
   const progress = progressTotals(state);
   const currentStage = state.stages.find((stage) => ['in_progress', 'blocked', 'rework', 'awaiting_inspection'].includes(stage.status))
     ?? state.stages.find((stage) => stage.status === 'ready')
-    ?? state.stages[0];
+    ;
   const reviewCount = state.checkpoints.filter((item) => item.status === 'in_review').length;
   const reworkCount = state.checkpoints.filter((item) => item.status === 'rework').length;
   const riskySupply = state.procurement.filter((item) => item.risk);
@@ -128,7 +129,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
   }
 
   return (
-    <div className="page-stack">
+    <div className="page-stack overview-page">
       {show('project') && <section className="project-heading project-heading--overview">
         <div>
           <div className="project-heading__meta">
@@ -140,9 +141,31 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
         </div>
       </section>}
 
-      <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
+      {role !== 'foreman' && show('finance') && <section className="metric-grid overview-money" aria-label="Деньги проекта">
+        <MetricCard
+          label="Потрачено"
+          value={shortMoney(finance.paid)}
+          detail={<span>Фактически выплачено по проекту</span>}
+          icon={Banknote}
+          onClick={() => onNavigate('finance')}
+        />
+        <MetricCard
+          label="Остаток денег"
+          value={shortMoney(finance.received - finance.paid)}
+          detail={<span>Получено {shortMoney(finance.received)} · за вычетом выплат</span>}
+          icon={CircleDollarSign}
+          tone={finance.received < finance.paid ? 'warning' : 'positive'}
+          onClick={() => onNavigate('finance')}
+        />
+      </section>}
 
-      {(show('progress') || show('finance')) && <section className="metric-grid">
+      <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate}>
+        {show('progress') && <ConstructionNow state={state} role={role} onNavigate={onNavigate} />}
+      </ScheduleBrief>
+
+      {(show('progress') || show('finance')) && <details className="panel overview-secondary-metrics" open={role === 'foreman'}>
+        <summary>Дополнительные показатели проекта</summary>
+        {(show('progress') || show('finance')) && <section className="metric-grid">
         {show('progress') &&
         <MetricCard
           label="Выполнение по задачам"
@@ -185,6 +208,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
           </>
         ) : null}
       </section>}
+      </details>}
 
       {(show('progress') || show('decisions')) && <section className="dashboard-grid dashboard-grid--main">
         {show('progress') && currentStage && <details className="panel panel--progress"><summary>Подробности выполнения по задачам</summary>

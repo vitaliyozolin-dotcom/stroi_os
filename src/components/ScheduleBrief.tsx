@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { forecastSchedule, simulateSchedule, type ScheduleForecast } from '../../sites/lib/schedule-forecast.js';
@@ -12,17 +12,17 @@ import { Field, SectionHeader } from './Ui';
 
 export const scheduleDeltaLabel = (days: number | null) => days === null ? 'Нет полного исходного ППР для сравнения' : days > 0 ? `Позже Плана 0 на ${days} календ. дн.` : days < 0 ? `Раньше Плана 0 на ${Math.abs(days)} календ. дн.` : 'В срок по Плану 0';
 
-export function ScheduleBrief({ state, role, actor, userId, onChange, onNavigate }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (s: AppState) => void; onNavigate: (p: PageId) => void }) {
+export function ScheduleBrief({ state, role, actor, userId, onChange, onNavigate, children }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (s: AppState) => void; onNavigate: (p: PageId) => void; children?: ReactNode }) {
   const view = forecastSchedule(state), records = recordedScheduleStatus(state), manual = stageRadar(state);
   const [review, setReview] = useState<string | null>(null);
   const issueIds = [...new Set(view.issues.map((i) => i.stageId))];
   const cuts = view.rows.filter((row) => row.source === 'calculation').map((row) => state.stages.find((s) => s.id === row.id)!.siteUpdate!);
   const cutDates = cuts.map((u) => u.asOf).sort(), nextReview = cuts.map((u) => u.reviewOn).sort()[0];
   const focus = state.stages.filter((s) => s.schedule?.kind !== 'summary' && (s.blocker || view.criticalIds.includes(s.id) && !['accepted', 'awaiting_inspection'].includes(s.status)));
-  return <>
+  const details = <>
     <section className="panel schedule-brief">
       <SectionHeader eyebrow="Стройка сегодня" title={view.kind === 'actual' ? 'Работы выполнены' : 'Сроки и состояние работ'} action={<button className="text-button" type="button" onClick={() => onNavigate('schedule')}>Весь ППР</button>} />
-      <div className="schedule-brief__dates"><div><small>План 0 · окончание работ</small><strong>{view.baselineEnd ? formatDate(view.baselineEnd, true) : 'Исходный срок не подтверждён'}</strong></div><div><small>{view.kind === 'actual' ? 'Фактическое окончание работ' : 'Расчётное окончание работ'}</small><strong>{view.end ? formatDate(view.end, true) : 'Нужна сверка'}</strong><span className={view.baselineShift !== null && view.baselineShift > 0 ? 'danger-text' : ''}>{view.end ? scheduleDeltaLabel(view.baselineShift) : 'Отставание всего проекта пока неизвестно'}</span></div></div>
+      <div className="schedule-brief__dates"><div><small>План 0 · окончание работ</small><strong>{view.baselineEnd ? formatDate(view.baselineEnd, true) : 'Исходный срок не подтверждён'}</strong></div><div><small>{view.kind === 'actual' ? 'Фактическое окончание работ' : 'Расчётное окончание работ'}</small><strong>{view.end ? formatDate(view.end, true) : '—'}</strong><span className={view.baselineShift !== null && view.baselineShift > 0 ? 'danger-text' : ''}>{view.end ? scheduleDeltaLabel(view.baselineShift) : 'Отставание всего проекта пока неизвестно'}</span></div></div>
       <p className="schedule-brief__subline">Действующий ППР: {view.currentEnd ? formatDate(view.currentEnd) : 'не все даты указаны'}. Сдача клиенту: {state.project.targetDate ? formatDate(state.project.targetDate) : 'дата не указана'} — отдельное обязательство.</p>
       {view.end && cuts.length > 0 && <p className="schedule-brief__subline">Расчёт по сверкам на {formatDate(cutDates[0])}{cutDates.at(-1) !== cutDates[0] ? ` — ${formatDate(cutDates.at(-1)!)}` : ''}. Ближайшая проверка сведений: {formatDate(nextReview)}.</p>}
       {!view.end && manual.forecast && <p className="schedule-brief__subline">Оценка управления: {formatDate(manual.forecast)}{manual.stale ? ' · устарела' : ''}{manual.conflict ? ' · противоречит срокам этапов' : ''}. Это не расчёт по остаткам работ.</p>}
@@ -38,6 +38,26 @@ export function ScheduleBrief({ state, role, actor, userId, onChange, onNavigate
       <details className="schedule-brief__explain"><summary>Как читать отставание</summary><p>Сравниваем окончание всех работ с окончанием исходного ППР. Перенос утверждённого плана, просроченная запись и отставание всего проекта — разные показатели. Задержки параллельных работ не складываются.</p><p>Срок прошёл, но выполнение не подтверждено: {records.stages.overdue.length} строк ППР, {records.tasks.overdue.length} задач. Это повод уточнить факты, а не доказательство такого же переноса сдачи.</p><p>Расчёт использует подтверждённые остатки, связи, приёмку, рабочие календари и доступность бригад. Конфликт одной бригады на нескольких работах требует решения. Проверка сведений — не реже раза в 7 календарных дней.</p></details>
     </section>
     <details className="panel schedule-brief__details"><summary>Исходные сроки, история переносов и отдельные записи</summary><BaselinePanel compact state={state} role={role} actor={actor} onChange={onChange} /><StageRadar state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} /></details>
+  </>;
+  const delay = view.baselineShift;
+  return <>
+    <section className="panel overview-dates" aria-label="Сроки проекта">
+      <SectionHeader title="Сроки" action={<button className="text-button" type="button" onClick={() => onNavigate('schedule')}>График работ</button>} />
+      <div className="overview-dates__grid">
+        <div><small>Исходный срок работ</small><strong>{view.baselineEnd ? formatDate(view.baselineEnd, true) : 'Не указано'}</strong><span>По исходному ППР</span></div>
+        <div><small>{view.kind === 'actual' ? 'Работы выполнены' : 'Прогноз работ'}</small><strong>{view.end ? formatDate(view.end, true) : '—'}</strong><span>{view.end ? view.kind === 'actual' ? 'По подтверждённым фактам' : 'По подтверждённому остатку работ' : 'Нужна сверка'}</span></div>
+        <div className={delay !== null && delay > 0 ? 'overview-dates__delay overview-dates__delay--late' : 'overview-dates__delay'}><small>Отклонение от исходного ППР</small><strong>{delay === null ? '—' : delay > 0 ? `+${delay} дн.` : delay < 0 ? `−${Math.abs(delay)} дн.` : 'В срок'}</strong><span>{delay === null ? 'Отставание пока неизвестно' : delay > 0 ? 'Позже исходного срока' : delay < 0 ? 'Раньше исходного срока' : 'Срок работ не изменился'}</span></div>
+      </div>
+      <div className="overview-dates__footer">
+        <span>Сдача клиенту по договору: <strong>{state.project.targetDate ? formatDate(state.project.targetDate, true) : 'Не указана'}</strong></span>
+        {issueIds.length > 0 && <button type="button" className="text-button" onClick={() => setReview(view.issues[0].stageId)}>{role === 'client' ? 'Что нужно для прогноза' : 'Уточнить прогноз'} · {issueIds.length} работ</button>}
+      </div>
+    </section>
+    {children}
+    <details className="panel overview-schedule-details">
+      <summary>Подробности сроков и сверка ППР</summary>
+      <div className="page-stack">{details}</div>
+    </details>
     {review !== null && <ScheduleReconciliation key={state.project.id} state={state} role={role} actor={actor} userId={userId} initialId={review} onChange={onChange} onClose={() => setReview(null)} />}
   </>;
 }

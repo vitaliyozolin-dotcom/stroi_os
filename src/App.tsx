@@ -266,12 +266,12 @@ function App() {
   }
 
   return (
-    <div className={`app-shell ${sidebarCollapsed ? 'app-shell--collapsed' : ''}`}>
+    <div className={`app-shell ${page === 'overview' ? 'app-shell--overview' : ''} ${sidebarCollapsed ? 'app-shell--collapsed' : ''}`}>
       {mobileMenu && <button className="mobile-scrim" type="button" aria-label="Закрыть меню" onClick={() => setMobileMenu(false)} />}
       <aside className={`sidebar ${mobileMenu ? 'sidebar--open' : ''}`}>
         <div className="sidebar__brand">
           <span className="brand-mark"><Building2 size={22} /></span>
-          <span className="brand-copy"><strong>ИКИОМА <span>ОС</span></strong><small>операционная система</small></span>
+          <span className="brand-copy"><strong>ИКИОМА <span>ОС</span></strong></span>
           <button type="button" className="sidebar__mobile-close" onClick={() => setMobileMenu(false)} aria-label="Закрыть меню"><X size={19} /></button>
         </div>
 
@@ -282,12 +282,12 @@ function App() {
         </button>
 
         <nav className="sidebar__nav" aria-label="Основная навигация">
-          <small className="sidebar__label">{role === 'client' ? 'Мой дом' : 'Управление проектом'}</small>
+          <small className="sidebar__label">{role === 'client' ? 'Мой дом' : 'Проект'}</small>
           {navigation.map((item) => {
             const Icon = item.icon;
             return (
-              <button type="button" key={item.id} data-tour={`nav-${item.id}`} className={page === item.id ? 'active' : ''} onClick={() => navigate(item.id)} title={item.label}>
-                <Icon size={19} /><span>{item.label}</span>
+              <button type="button" key={item.id} data-tour={`nav-${item.id}`} className={page === item.id ? 'active' : ''} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)} title={item.label}>
+                <Icon size={19} strokeWidth={1.6} /><span>{item.label}</span>
                 {item.id === 'quality' && state.checkpoints.some((checkpoint) => checkpoint.status === 'rework') && <i className="nav-alert" />}
                 {item.id === 'tasks' && state.tasks.some((task) => isTaskOverdue(task, todayKey)) && <i className="nav-alert" />}
               </button>
@@ -295,15 +295,8 @@ function App() {
           })}
         </nav>
 
-        <div className="sidebar__spacer" />
-        {role !== 'client' && (
-          <div className="sidebar__standard">
-            <span><ClipboardCheck size={18} /></span>
-            <div><strong>Стандарт стройки v1.0</strong><small>13 этапов · 7 кадров</small></div>
-          </div>
-        )}
-        {role === 'management' && <div className="sidebar__footer"><button type="button" data-tour="nav-settings" title="Настройки" className={page === 'settings' ? 'active' : ''} onClick={() => navigate('settings')}><Settings2 size={18} /><span>Настройки</span></button></div>}
-        <button type="button" className="sidebar-collapse" onClick={() => setSidebarCollapsed((value) => !value)} aria-label="Свернуть боковую панель"><PanelLeftClose size={17} /></button>
+        {role === 'management' && <div className="sidebar__footer"><button type="button" data-tour="nav-settings" title="Настройки" className={page === 'settings' ? 'active' : ''} aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} /><span>Настройки</span></button></div>}
+        <button type="button" className="sidebar-toggle" onClick={() => setSidebarCollapsed((value) => !value)} aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'}><PanelLeftClose size={18} strokeWidth={1.6} /><span>Свернуть меню</span></button>
       </aside>
 
       <div className="app-main">

@@ -170,7 +170,9 @@ test('own-save acknowledgement adopts server confirmations but preserves a secon
   assert.equal(validateScheduleReview(saved, structuredClone(concurrent.state), owner, now), null);
 });
 
-test('a summary cannot be completed or accepted before its children; its own fact gates successors', () => {
+test('a summary cannot be completed or accepted before its children; its own fact gates successors', (t) => {
+  // Completion gates are evaluated on the fixture day, independently of the real clock.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(now) });
   const a = makeStage('a'), summary = makeStage('summary'); summary.schedule!.kind = 'summary'; summary.schedule!.summaryOf = ['a']; summary.siteUpdate = undefined;
   const base = confirm(fixture(a, summary)), completed = structuredClone(base);
   completed.stages[1].status = 'awaiting_inspection'; completed.stages[1].completedOn = today; completed.stages[1].completionNote = 'Осмотр'; completed.stages[1].statusNote = 'Осмотр';
