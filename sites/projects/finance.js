@@ -22,12 +22,36 @@ export const hasFinanceAcceptanceSource = (state, entry) => {
 export const validateFinanceChanges = (previous, state, identity, now) => {
   const oldEntries = new Map((previous?.financeEntries ?? []).map((entry) => [entry.id, entry]));
   const ids = new Set();
+  const sourceKeys = new Set();
   for (const entry of state.financeEntries ?? []) {
     if (!entry.id || ids.has(entry.id)) return 'В реестре расходов обнаружены повторяющиеся записи.';
     ids.add(entry.id);
+    if (entry.historicalPayment?.sourceUniqueKey) {
+      if (sourceKeys.has(entry.historicalPayment.sourceUniqueKey)) return 'Историческая оплата уже присутствует в реестре.';
+      sourceKeys.add(entry.historicalPayment.sourceUniqueKey);
+    }
     const old = oldEntries.get(entry.id);
     if (old && JSON.stringify(old) === JSON.stringify(entry)) continue;
     if (identity.role !== 'management') return 'Финансовые операции доступны только роли «Управление».';
+    if (entry.historicalPayment) {
+      if (old) return 'Историческую оплату нельзя переписывать. Сохраните исходную запись.';
+      const h = entry.historicalPayment;
+      const doc = (state.documents ?? []).find((item) => item.id === h.sourceDocumentId);
+      if (entry.kind !== 'expense' || entry.status !== 'paid' || !Number.isFinite(entry.amount) || entry.amount <= 0
+        || entry.paidAmount !== entry.amount || entry.acceptedAmount !== 0
+        || entry.acceptedAt || entry.acceptanceSource || entry.acceptanceDocument
+        || !validDate(entry.date) || entry.date !== h.sourceDate || entry.paidAt && !validDate(entry.paidAt)
+        || !text(entry.paymentDocument) || !text(h.confirmation) || !text(h.sourceUniqueKey) || h.sourceUniqueKey.length > 250
+        || !/^[a-f0-9]{64}$/.test(h.sourceSha256 ?? '')
+        || !doc?.fileKey?.startsWith(`${state.project.id}/`) || doc.clientVisible !== false) return 'Для исторической оплаты нужны исходный документ, подтверждение владельца и точная сумма; приёмка отдельно.';
+      entry.createdBy = identity.name;
+      h.recordedAt = now;
+      h.recordedBy = identity.name;
+      delete entry.paidBy;
+      delete entry.approvedAt;
+      delete entry.approvedBy;
+      continue;
+    }
     const acceptedAmount = accepted(entry);
     const paidAmount = paid(entry);
     if (!['expense', 'income'].includes(entry.kind) || !['committed', 'accepted', 'paid'].includes(entry.status)
