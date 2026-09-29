@@ -9201,3 +9201,52 @@ button.project-quick-card:hover {
 }
 .construction-now__head { flex-wrap: wrap; }
 .construction-now__head h2 { flex: 1 0 auto; white-space: nowrap; }
+
+/* The same navigation stays consistent across all project pages. */
+.app-shell .sidebar { font-family: 'Onest', Arial, sans-serif; background: #111310; }
+.app-shell .sidebar::after { display: none; }
+.app-shell .sidebar__brand { flex: 0 0 auto; gap: 10px; padding: 0 10px; }
+.app-shell .brand-mark { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-basis: 32px; border-radius: 4px; background: #d5ff48; box-shadow: none; }
+.app-shell .brand-mark svg { width: 20px; height: 20px; stroke: #111310; }
+.app-shell .brand-copy strong { font-size: 17px; font-weight: 600; letter-spacing: -.035em; }
+.app-shell .brand-copy strong span { color: #d5ff48; }
+.app-shell .project-switcher { display: flex; flex: 0 0 auto; height: 74px; gap: 12px; margin: 26px 0 28px; padding: 12px; border: 1px solid #30332d; border-radius: 4px; background: #1c1f1a; }
+.app-shell .project-switcher:hover { border-color: #59644a; background: #252a20; }
+.app-shell .project-switcher__icon { display: flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 34px; border-radius: 0; color: #c6cfb6; background: transparent; }
+.app-shell .project-switcher__icon svg { width: 20px; height: 20px; stroke: #c6cfb6; }
+.app-shell .project-switcher > span:nth-child(2) { flex: 1; gap: 5px; }
+.app-shell .project-switcher small { color: #989e90; font-size: 10px; font-weight: 400; letter-spacing: .05em; }
+.app-shell .project-switcher strong { margin: 0; color: #f5f4ef; font-size: 14px; font-weight: 500; }
+.app-shell .project-switcher > svg { flex: 0 0 14px; width: 14px; height: 14px; stroke: #989e90; }
+.app-shell .sidebar__nav { flex: 1; min-height: 0; gap: 4px; margin-bottom: 20px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #414637 transparent; }
+.app-shell .sidebar__label { display: block; flex: 0 0 auto; margin: 0 12px 10px; color: #858b7c; font-size: 10px; font-weight: 500; letter-spacing: .09em; }
+.app-shell .sidebar__nav button, .app-shell .sidebar__footer button { flex: 0 0 auto; height: 46px; gap: 12px; padding: 0 12px; border-radius: 4px; color: #bfc3b7; background: transparent; box-shadow: none; }
+.app-shell .sidebar__nav button span, .app-shell .sidebar__footer button span { min-width: 0; font-size: 13px; font-weight: 400; line-height: 1.3; white-space: normal; }
+.app-shell .sidebar__nav button svg, .app-shell .sidebar__footer button svg { flex: 0 0 19px; width: 19px; height: 19px; stroke: #939b86; }
+.app-shell .sidebar__nav button:hover, .app-shell .sidebar__footer button:hover { color: #f5f4ef; background: #20251b; }
+.app-shell .sidebar__nav button.active, .app-shell .sidebar__footer button.active { color: #d5ff48; background: #242b1c; box-shadow: none; }
+.app-shell .sidebar__nav button.active::before, .app-shell .sidebar__footer button.active::before { position: absolute; left: 0; top: 12px; bottom: 12px; width: 2px; content: ''; background: #d5ff48; border-radius: 1px; }
+.app-shell .sidebar__nav button.active svg, .app-shell .sidebar__footer button.active svg { stroke: #d5ff48; }
+.app-shell .sidebar__nav button.active span, .app-shell .sidebar__footer button.active span { font-weight: 500; }
+.app-shell .sidebar__footer { flex: 0 0 auto; padding-top: 12px; border-color: #2b3025; }
+.sidebar-toggle { display: flex; flex: 0 0 auto; align-items: center; gap: 12px; width: 100%; height: 42px; padding: 0 12px; border: 0; border-radius: 4px; background: transparent; color: #858d79; text-align: left; cursor: pointer; }
+.sidebar-toggle span { font-size: 12px; }
+.sidebar-toggle svg { flex: 0 0 19px; width: 19px; height: 19px; stroke: #858d79; }
+.sidebar-toggle:hover { color: #f5f4ef; background: #20251b; }
+.app-shell .sidebar button:focus-visible { outline: 2px solid #d5ff48; outline-offset: -2px; }
+.app-shell--collapsed .sidebar__brand { padding-inline: 0; justify-content: center; }
+.app-shell--collapsed .sidebar-toggle { justify-content: center; padding-inline: 8px; }
+.app-shell--collapsed .sidebar-toggle span { display: none; }
+.app-shell--collapsed .sidebar-toggle svg { transform: rotate(180deg); }
+.app-shell--collapsed .project-switcher { justify-content: center; padding-inline: 8px; }
+.app-shell--collapsed .sidebar__label { display: none; }
+@media (max-width: 1020px) {
+  .app-shell .sidebar__brand { padding-inline: 0; justify-content: center; }
+  .app-shell .project-switcher { justify-content: center; padding-inline: 8px; }
+  .app-shell .sidebar__label, .sidebar-toggle { display: none; }
+}
+@media (max-width: 780px) {
+  .app-shell .sidebar--open .sidebar__brand { justify-content: flex-start; padding-inline: 4px; }
+  .app-shell .sidebar--open .project-switcher { justify-content: flex-start; padding-inline: 12px; }
+  .app-shell .sidebar--open .sidebar__label { display: block; }
+}
