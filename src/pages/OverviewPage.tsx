@@ -128,7 +128,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
   }
 
   return (
-    <div className="page-stack">
+    <div className="page-stack overview-page">
       {show('project') && <section className="project-heading project-heading--overview">
         <div>
           <div className="project-heading__meta">

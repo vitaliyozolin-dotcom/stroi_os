@@ -266,7 +266,7 @@ function App() {
   }
 
   return (
-    <div className={`app-shell ${sidebarCollapsed ? 'app-shell--collapsed' : ''}`}>
+    <div className={`app-shell ${page === 'overview' ? 'app-shell--overview' : ''} ${sidebarCollapsed ? 'app-shell--collapsed' : ''}`}>
       {mobileMenu && <button className="mobile-scrim" type="button" aria-label="Закрыть меню" onClick={() => setMobileMenu(false)} />}
       <aside className={`sidebar ${mobileMenu ? 'sidebar--open' : ''}`}>
         <div className="sidebar__brand">
