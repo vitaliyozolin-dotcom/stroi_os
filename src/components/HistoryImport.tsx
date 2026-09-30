@@ -9,7 +9,7 @@ export function HistoryImport({ state, actor, onSave, onClose }: { state: AppSta
   const [error, setError] = useState('');
   const [includeBudget, setIncludeBudget] = useState(true);
   const [confirmed, setConfirmed] = useState(false);
-  const records = input ? [...input.paidInvoices, ...input.paidLemanaPurchases] : [];
+  const records = input ? [...input.paidInvoices, ...input.paidLemanaPurchases, ...(input.existingPaidExpenses ?? [])] : [];
   return <Modal wide title="Внести смету и прошлые оплаты" subtitle="Исходные документы предварительно загружаются в карточку проекта." onClose={onClose}>
     <form className="modal-form" onSubmit={(event) => {
       event.preventDefault();
@@ -24,7 +24,8 @@ export function HistoryImport({ state, actor, onSave, onClose }: { state: AppSta
       {input && <>
         <label><input type="checkbox" checked={includeBudget} onChange={(event) => setIncludeBudget(event.target.checked)} /> Внести статьи исходной сметы ({money(input.budgetReconciliation.sumOfPlanItems)})</label>
         <p>Итог исходного файла: {money(input.budgetReconciliation.sourceDisplayedPlan)}. Прежняя смета сохраняется в истории импорта.</p>
-        <div className="entity-related-list">{records.map((item) => <div className="entity-detail-card" key={item.dedupKey}><strong>{item.vendor} · {money(item.amount)}</strong><span>{item.description}</span><small>Дата документа: {item.documentDate ?? item.purchaseDate}. {item.paymentDate ? `Дата оплаты: ${item.paymentDate}` : 'Дата оплаты не указана.'}</small></div>)}</div>
+        {input.budgetApproval && includeBudget && <p>Смета принимается за план: {input.budgetApproval}</p>}
+        <div className="entity-related-list">{records.map((item) => <div className="entity-detail-card" key={item.dedupKey}><strong>{item.vendor} · {money(item.amount)}</strong><span>{item.description}</span><small>{item.existingOperation ? 'Существующая операция, без создания дубля. Дата записи: ' : 'Дата документа: '}{item.documentDate ?? item.purchaseDate}. {item.paymentDate ? `Дата оплаты: ${item.paymentDate}` : 'Дата оплаты не указана.'}</small></div>)}</div>
         <strong>Оплачено по этому набору: {money(records.reduce((sum, item) => sum + item.amount, 0))}</strong>
         <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> Подтверждаю, что перечисленные расходы уже оплачены. Приёмка работ и материалов этим не подтверждается.</label>
       </>}

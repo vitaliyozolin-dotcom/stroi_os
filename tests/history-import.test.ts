@@ -80,3 +80,52 @@ test('malformed or duplicate records fail before state mutation', () => {
   const duplicate = register(); duplicate.paidInvoices.push({ ...duplicate.paidInvoices[0] });
   assert.throws(() => parseHistoryRegister(duplicate));
 });
+
+test('owner confirmation marks an existing expense paid once while preserving its identity and links', () => {
+  const base = current();
+  base.financeEntries.push({ id: 'legacy-expense', kind: 'expense', status: 'committed', amount: 500, date: '2026-08-01', description: 'Подготовка', counterparty: 'Исполнитель', budgetLineId: base.budgetLines[0].id, createdBy: 'Прораб' });
+  const input = register();
+  input.budgetApproval = 'Владелец принимает смету за план';
+  input.existingPaidExpenses = [{ existingOperation: true, vendor: 'Исполнитель', description: 'Подготовка', amount: 500, documentDate: '2026-08-01', file: 'invoice.pdf', dedupKey: 'existing:1', paymentConfirmation: 'Владелец подтвердил все расходы' }];
+  const result = prepareHistoryImport(base, input, identity.name, now, true);
+  assert.equal(result.updated, 1);
+  const expense = result.state.financeEntries.find((item) => item.id === 'legacy-expense')!;
+  assert.equal(expense.createdBy, 'Прораб');
+  assert.equal(expense.budgetLineId, base.financeEntries[0].budgetLineId);
+  assert.equal(expense.status, 'paid'); assert.equal(expense.paidAmount, 500);
+  assert.equal(expense.acceptedAmount, 0); assert.equal(expense.paidAt, undefined);
+  assert.equal(result.state.budgetMeta.approvedBy, identity.name);
+  assert.equal(validateFinanceChanges(base, result.state, identity, now), '');
+  const again = prepareHistoryImport(result.state, input, identity.name, '2026-10-01T00:00:00Z', true);
+  assert.equal(again.updated, 0); assert.deepEqual(again.state, result.state);
+  const altered = structuredClone(result.state); altered.financeEntries[0].amount = 501;
+  assert.ok(validateFinanceChanges(base, altered, identity, now));
+  const absent = structuredClone(base); absent.financeEntries = [];
+  assert.throws(() => prepareHistoryImport(absent, input, identity.name, now, true));
+});
+
+test('confirmation cannot rewrite an existing expense or bypass the existing-operation boundary', () => {
+  const base = current();
+  base.financeEntries.push({ id: 'existing', kind: 'expense', status: 'committed', amount: 500, date: '2026-08-01', description: 'Подготовка', counterparty: 'Исполнитель', createdBy: 'Прораб', approvedAt: '2026-08-02T00:00:00Z', approvedBy: 'Управление' });
+  const input = register();
+  input.existingPaidExpenses = [{ existingOperation: true, vendor: 'Исполнитель', description: 'Подготовка', amount: 500, documentDate: '2026-08-01', file: 'invoice.pdf', dedupKey: 'existing:1', paymentConfirmation: 'Подтверждение владельца' }];
+  const candidate = prepareHistoryImport(base, input, identity.name, now, false).state;
+  assert.equal(validateFinanceChanges(base, candidate, identity, now), '');
+  assert.equal(candidate.financeEntries[0].approvedBy, 'Управление');
+  for (const key of ['amount', 'date', 'description', 'counterparty', 'createdBy', 'approvedBy', 'stageId'] as const) {
+    const bad = structuredClone(candidate);
+    Object.assign(bad.financeEntries[0], { [key]: key === 'amount' ? 501 : 'подмена' });
+    assert.ok(validateFinanceChanges(base, bad, identity, now), key);
+  }
+  const missing = structuredClone(base); missing.financeEntries = [];
+  assert.ok(validateFinanceChanges(missing, structuredClone(candidate), identity, now));
+});
+
+test('owner budget approval applies only when the source budget is included', () => {
+  const input = register(); input.budgetApproval = 'Смета принята владельцем за план';
+  const base = current();
+  delete base.budgetMeta.approvedAt; delete base.budgetMeta.approvedBy;
+  const result = prepareHistoryImport(base, input, identity.name, now, false);
+  assert.equal(result.state.budgetMeta.approvedAt, undefined);
+  assert.equal(result.state.project.targetCost, base.project.targetCost);
+});
