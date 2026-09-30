@@ -23,7 +23,7 @@ export interface BudgetLine {
 }
 
 export interface FinanceEntry {
-  historicalPayment?: { sourceDocumentId: string; sourceUniqueKey: string; sourceSha256: string; confirmation: string; sourceDate: string; recordedAt: string; recordedBy: string };
+  historicalPayment?: { existingOperation?: boolean; sourceDocumentId: string; sourceUniqueKey: string; sourceSha256: string; confirmation: string; sourceDate: string; recordedAt: string; recordedBy: string };
   id: string;
   kind: 'expense' | 'income';
   status: ExpenseStatus;

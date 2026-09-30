@@ -34,8 +34,10 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
     if (old && JSON.stringify(old) === JSON.stringify(entry)) continue;
     if (identity.role !== 'management') return 'Финансовые операции доступны только роли «Управление».';
     if (entry.historicalPayment) {
-      if (old) return 'Историческую оплату нельзя переписывать. Сохраните исходную запись.';
       const h = entry.historicalPayment;
+      if (old && (old.historicalPayment || !h.existingOperation || old.kind !== 'expense' || old.status !== 'committed' || accepted(old) !== 0 || paid(old) !== 0
+        || ['kind', 'amount', 'description', 'date', 'counterparty', 'counterpartyId', 'stageId', 'budgetLineId', 'procurementItemId', 'document', 'createdBy', 'approvedAt', 'approvedBy'].some((key) => entry[key] !== old[key]))) return 'Историческую оплату нельзя переписывать. Сохраните исходную запись.';
+      if (!old && h.existingOperation) return 'Существующий расход не найден.';
       const doc = (state.documents ?? []).find((item) => item.id === h.sourceDocumentId);
       if (entry.kind !== 'expense' || entry.status !== 'paid' || !Number.isFinite(entry.amount) || entry.amount <= 0
         || entry.paidAmount !== entry.amount || entry.acceptedAmount !== 0
@@ -44,12 +46,11 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
         || !text(entry.paymentDocument) || !text(h.confirmation) || !text(h.sourceUniqueKey) || h.sourceUniqueKey.length > 250
         || !/^[a-f0-9]{64}$/.test(h.sourceSha256 ?? '')
         || !doc?.fileKey?.startsWith(`${state.project.id}/`) || doc.clientVisible !== false) return 'Для исторической оплаты нужны исходный документ, подтверждение владельца и точная сумма; приёмка отдельно.';
-      entry.createdBy = identity.name;
+      if (!old) entry.createdBy = identity.name;
       h.recordedAt = now;
       h.recordedBy = identity.name;
       delete entry.paidBy;
-      delete entry.approvedAt;
-      delete entry.approvedBy;
+      if (!old) { delete entry.approvedAt; delete entry.approvedBy; }
       continue;
     }
     const acceptedAmount = accepted(entry);
