@@ -1,3 +1,5 @@
+import { FieldReportUpload } from '../components/FieldReportUpload';
+import { forecastSchedule } from '../../sites/lib/schedule-forecast.js';
 import { requestApi } from '../infrastructure/api-http';
 import { createProjectDocumentCommands } from '../application';
 import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
@@ -77,6 +79,8 @@ export function ProjectPage({
 }) {
   const saveChange = createProjectDocumentCommands(state, session.name, systemClock, runtimeIdGenerator, onChange);
   const [search, setSearch] = useState('');
+  const [showPhotoUpload, setShowPhotoUpload] = useState(false);
+  const schedule = forecastSchedule(state);
   const [category, setCategory] = useState<'all' | NonNullable<ProjectDocument['category']>>('all');
   const [showUpload, setShowUpload] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -208,7 +212,7 @@ export function ProjectPage({
           <div className="project-identity-card__facts">
             <span><small>Начало</small><strong>{formatDate(state.project.startDate, true)}</strong></span>
             <span><small>Плановая сдача</small><strong>{formatDate(state.project.targetDate, true)}</strong></span>
-            <span><small>Прогноз</small><strong>{formatDate(state.project.forecastDate, true)}</strong></span>
+            <span><small>{schedule.kind === 'actual' ? 'Факт готовности' : 'Ожидаемая готовность'}</small><strong>{schedule.end ? formatDate(schedule.end, true) : 'Нужна сверка этапов'}</strong></span>
             <span><small>Прораб</small><strong>{state.project.foreman || 'Не назначен'}</strong></span>
           </div>
         </article>
@@ -224,16 +228,17 @@ export function ProjectPage({
         </article>
       </section>
 
+      {showPhotoUpload && <FieldReportUpload state={state} actor={session.name} onChange={onChange} onClose={() => setShowPhotoUpload(false)} />}
       <section className="panel field-reports-panel">
         <SectionHeader
           eyebrow="С объекта"
           title="Полевой дневник"
-          action={<span className="count-badge">{fieldReports.length}</span>}
+          action={<button type="button" className="button button--secondary" onClick={() => setShowPhotoUpload(true)}>Добавить фото</button>}
         />
-        <p className="field-reports-panel__intro">Фото, голосовые заметки и короткие отчёты, подтверждённые командой через Telegram.</p>
+        <p className="field-reports-panel__intro">Фотографии и отчёты команды с датой и привязкой к этапу.</p>
         {fieldReports.length ? (
           <div className="field-report-grid">
-            {fieldReports.slice(0, 8).map((report) => {
+            {fieldReports.map((report) => {
               const stage = state.stages.find((item) => item.id === report.stageId);
               return (
                 <article className="field-report-card" key={report.id}>
@@ -246,7 +251,7 @@ export function ProjectPage({
                   <div className="field-report-card__files">
                     {report.attachments.map((attachment) => (
                       <button type="button" key={attachment.id} onClick={() => openFieldReportFile(attachment.key)}>
-                        {attachment.mimeType.startsWith('audio/') ? <Mic size={14} /> : <Image size={14} />}
+                        {attachment.mimeType.startsWith('image/') ? <img className="field-report-thumbnail" src={`/api/field-reports/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(attachment.key)}&preview=1`} alt={report.note} loading="lazy" /> : <Mic size={14} />}
                         <span>{attachment.name}</span>
                         <small>{readableSize(attachment.sizeBytes)}</small>
                       </button>
@@ -256,7 +261,7 @@ export function ProjectPage({
               );
             })}
           </div>
-        ) : <div className="task-empty"><Image size={28} /><strong>Полевой дневник пока пуст</strong><p>После подключения Telegram пришлите боту фото с подписью /report — запись появится здесь после подтверждения.</p></div>}
+        ) : <div className="task-empty"><Image size={28} /><strong>Полевой дневник пока пуст</strong><p>Добавьте фото здесь или отправьте боту фото с подписью /report и подтвердите запись.</p></div>}
       </section>
 
       <section className="panel project-documents-panel">

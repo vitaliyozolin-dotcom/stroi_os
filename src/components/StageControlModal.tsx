@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { applyStageControl, type StageAction } from '../application/stage-control';
+import { addScheduleDays } from '../../sites/lib/schedule-forecast.js';
 import { planToday } from '../../sites/lib/plan-baseline.js';
 import { stageCanStart, stageGaps } from '../../sites/lib/stage-control.js';
 import { Field, Modal } from './Ui';
@@ -16,15 +17,23 @@ function StageForm({ state, stageId, action, actor, role, userId, onChange, onCl
   const [date, setDate] = useState(action === 'delay' ? (stage.forecastEnd >= planToday() ? stage.forecastEnd : '') : action === 'complete' ? stage.completedOn || planToday() : planToday());
   const [note, setNote] = useState(action === 'accept' ? stage.completionNote || '' : '');
   const [tasks, setTasks] = useState<string[]>([]), [error, setError] = useState(''), [resolved, setResolved] = useState(false);
+  const [remaining, setRemaining] = useState('');
   const gaps = stageGaps(state, stageId);
   const expenses = state.financeEntries.filter((e) => e.stageId === stageId && e.kind === 'expense');
   const labels = { start: 'Работы начались', not_started: 'Работы ещё не начались', complete: 'Этап выполнен?', accept: 'Приёмка этапа', delay: 'Что задерживает этап?', rework: 'Вернуть на доработку' };
-  const submit = (event: FormEvent) => { event.preventDefault(); try { onChange(applyStageControl(state, stageId, action, { date, note, tasks, blockerResolved: resolved }, actor, role, userId)); onClose(); } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); } };
+  const submit = (event: FormEvent) => { event.preventDefault(); try { const next = applyStageControl(state, stageId, action, { date, note, tasks, blockerResolved: resolved }, actor, role, userId);
+    if (action === 'start' && stage.schedule && remaining) {
+      const days = Number(remaining);
+      if (!Number.isInteger(days) || days < 1 || days > 730) throw new Error('Укажите от 1 до 730 рабочих дней.');
+      next.stages.find(row => row.id === stageId)!.siteUpdate = { asOf: planToday(), reviewOn: addScheduleDays(planToday(), 7), remainingDays: days, readyOn: planToday(), acceptanceOn: '', note: note.trim(), nextAction: '', issueOwner: '', requestId: crypto.randomUUID() };
+    }
+    onChange(next); onClose(); } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); } };
   const open = (p: PageId) => { onClose(); onNavigate?.(p); };
   return <Modal title={labels[action]} subtitle={stage.name} onClose={onClose}><form className="modal-form stage-control-form" onSubmit={submit}>
     {action === 'start' && !stageCanStart(state, stage) && <p className="blocker-note">Готовность по зависимостям не подтверждена. Если работы уже фактически идут, укажите причину раннего начала; связи потребуется сверить.</p>}
     {action === 'not_started' && <p className="muted">Дата ниже — дата наблюдения, а не начало работ. Ожидаемый старт и остаток укажите в сверке. Факты выполнения и расходы не создаются.</p>}
     <Field label={action === 'delay' ? 'Ожидаемое окончание этапа' : action === 'accept' ? 'Дата приёмки' : action === 'start' ? 'Фактическое начало' : 'Дата факта'}><input required type="date" min={action === 'delay' ? planToday() : undefined} max={action !== 'delay' ? planToday() : undefined} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+    {action === 'start' && stage.schedule && <Field label="Осталось рабочих дней"><input aria-label="Осталось рабочих дней" required type="number" min={1} max={730} step={1} value={remaining} onChange={event => setRemaining(event.target.value)} /><small>Остаток на конец сегодня; прогноз обновится после сохранения.</small></Field>}
     <Field label={action === 'delay' ? 'Причина · кто решает · ближайшее действие' : 'Результат / основание'}><textarea required rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Что сделано или что мешает; акт, замер, ссылка на подтверждение" /></Field>
     {stage.blocker && ['start', 'complete', 'accept'].includes(action) && <label className="stage-check"><input type="checkbox" checked={resolved} onChange={(e) => setResolved(e.target.checked)} /><span>Препятствие устранено: {stage.blocker}</span></label>}
     {['complete', 'accept'].includes(action) && <>

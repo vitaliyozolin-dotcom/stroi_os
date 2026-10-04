@@ -181,10 +181,10 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
       </section>
 
       <section className="metric-grid">
-        <MetricCard label="План себестоимости" value={shortMoney(totals.plan)} detail={<span>утверждённая базовая смета</span>} icon={WalletCards} onClick={() => setSummaryOpen('plan')} />
+        <MetricCard label="План себестоимости" value={shortMoney(totals.plan)} detail={<span>{state.budgetMeta.approvedAt ? 'утверждённая базовая смета' : 'исходная смета · требуется сверка'}</span>} icon={WalletCards} onClick={() => setSummaryOpen('plan')} />
         <MetricCard label="Законтрактовано" value={shortMoney(totals.committed)} detail={<span>{totals.plan ? Math.round(totals.committed / totals.plan * 100) : 0}% бюджета имеет обязательства</span>} icon={FileCheck2} onClick={() => setSummaryOpen('committed')} />
         <MetricCard label="Принято работ" value={shortMoney(totals.accepted)} detail={<span>{shortMoney(totals.paid)} уже оплачено</span>} icon={CheckCircle2} tone="positive" onClick={() => setSummaryOpen('accepted')} />
-        <MetricCard label="Доступный баланс" value={shortMoney(balance)} detail={<span>получено {shortMoney(totals.received)} · маржа {shortMoney(state.project.contractValue - totals.forecast)}</span>} icon={Banknote} tone="dark" onClick={() => setSummaryOpen('balance')} />
+        <MetricCard label="Остаток по учёту" value={shortMoney(balance)} detail={<span>получено {shortMoney(totals.received)} · маржа {shortMoney(state.project.contractValue - totals.forecast)}</span>} icon={Banknote} tone="dark" onClick={() => setSummaryOpen('balance')} />
       </section>
 
       <section className="panel expense-guide" data-tour="expense-approval">

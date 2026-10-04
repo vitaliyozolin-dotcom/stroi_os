@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { planToday } from '../../sites/lib/plan-baseline.js';
 import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { forecastSchedule, simulateSchedule, type ScheduleForecast } from '../../sites/lib/schedule-forecast.js';
@@ -40,13 +41,14 @@ export function ScheduleBrief({ state, role, actor, userId, onChange, onNavigate
     <details className="panel schedule-brief__details"><summary>Исходные сроки, история переносов и отдельные записи</summary><BaselinePanel compact state={state} role={role} actor={actor} onChange={onChange} /><StageRadar state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} /></details>
   </>;
   const delay = view.baselineShift;
+  const elapsed = view.baselineEnd ? Math.max(0, Math.floor((Date.parse(planToday()) - Date.parse(view.baselineEnd)) / 86400000)) : 0;
   return <>
     <section className="panel overview-dates" aria-label="Сроки проекта">
       <SectionHeader title="Сроки" action={<button className="text-button" type="button" onClick={() => onNavigate('schedule')}>График работ</button>} />
       <div className="overview-dates__grid">
-        <div><small>Исходный срок работ</small><strong>{view.baselineEnd ? formatDate(view.baselineEnd, true) : 'Не указано'}</strong><span>По исходному ППР</span></div>
-        <div><small>{view.kind === 'actual' ? 'Работы выполнены' : 'Прогноз работ'}</small><strong>{view.end ? formatDate(view.end, true) : '—'}</strong><span>{view.end ? view.kind === 'actual' ? 'По подтверждённым фактам' : 'По подтверждённому остатку работ' : 'Нужна сверка'}</span></div>
-        <div className={delay !== null && delay > 0 ? 'overview-dates__delay overview-dates__delay--late' : 'overview-dates__delay'}><small>Отклонение от исходного ППР</small><strong>{delay === null ? '—' : delay > 0 ? `+${delay} дн.` : delay < 0 ? `−${Math.abs(delay)} дн.` : 'В срок'}</strong><span>{delay === null ? 'Отставание пока неизвестно' : delay > 0 ? 'Позже исходного срока' : delay < 0 ? 'Раньше исходного срока' : 'Срок работ не изменился'}</span></div>
+        <div><small>Готовность по плану</small><strong>{view.baselineEnd ? formatDate(view.baselineEnd, true) : 'Не указано'}</strong><span>По исходному ППР</span></div>
+        <div><small>{view.kind === 'actual' ? 'Работы выполнены' : 'Когда закончим'}</small><strong>{view.end ? formatDate(view.end, true) : '—'}</strong><span>{view.end ? view.kind === 'actual' ? 'По подтверждённым фактам' : 'По подтверждённому остатку работ' : 'Обновите состояние этапов'}</span></div>
+        <div className={delay !== null && delay > 0 ? 'overview-dates__delay overview-dates__delay--late' : 'overview-dates__delay'}><small>{delay === null ? elapsed ? 'Срок по плану прошёл' : 'Исходный срок'  : 'Отставание от плана'}</small><strong>{delay === null ? elapsed ? `${elapsed} дн. назад` : view.baselineEnd ? 'Ещё не наступил' : 'Не указан' : delay > 0 ? `+${delay} дн.` : delay < 0 ? `−${Math.abs(delay)} дн.` : 'В срок'}</strong><span>{delay === null ? 'Прогноз задержки ещё не подтверждён' : delay > 0 ? 'Позже исходного срока' : delay < 0 ? 'Раньше исходного срока' : 'Срок работ не изменился'}</span></div>
       </div>
       <div className="overview-dates__footer">
         <span>Сдача клиенту по договору: <strong>{state.project.targetDate ? formatDate(state.project.targetDate, true) : 'Не указана'}</strong></span>

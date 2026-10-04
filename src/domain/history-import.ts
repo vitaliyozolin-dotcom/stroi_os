@@ -38,7 +38,7 @@ export function prepareHistoryImport(current: AppState, input: HistoryRegister, 
     const doc = matchingDocument(source.fileName)!;
     const invoice = input.paidInvoices.find((item) => item.file === source.fileName);
     if (invoice) { doc.documentDate = invoice.documentDate; doc.number = invoice.number; doc.category = 'invoice'; }
-    else delete doc.documentDate;
+    // Preserve known document dates when importing payments; unknown dates stay unknown.
   }
   const sourceBudget = input.sources.find((source) => source.fileName.endsWith('.xlsx')) ?? input.sources[0];
   const budgetChanged = includeBudget && current.budgetMeta.importSourceSha256 !== sourceBudget?.sha256;

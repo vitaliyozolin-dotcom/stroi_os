@@ -1,3 +1,4 @@
+import '../dashboard-refinement.css';
 import { ConstructionNow } from '../components/ConstructionNow';
 import { ScheduleBrief } from '../components/ScheduleBrief';
 import { recordedScheduleStatus } from '../../sites/lib/stage-control.js';
@@ -143,24 +144,27 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
 
       {role !== 'foreman' && show('finance') && <section className="metric-grid overview-money" aria-label="Деньги проекта">
         <MetricCard
-          label="Потрачено"
+          label="Учтённые расходы"
           value={shortMoney(finance.paid)}
-          detail={<span>Фактически выплачено по проекту</span>}
+          detail={<span>Подтверждённые оплаты в реестре</span>}
           icon={Banknote}
           onClick={() => onNavigate('finance')}
         />
         <MetricCard
-          label="Остаток денег"
+          label="Остаток по учёту"
           value={shortMoney(finance.received - finance.paid)}
-          detail={<span>Получено {shortMoney(finance.received)} · за вычетом выплат</span>}
+          detail={<span>Поступления − выплаты · счета ещё не сверены</span>}
           icon={CircleDollarSign}
           tone={finance.received < finance.paid ? 'warning' : 'positive'}
           onClick={() => onNavigate('finance')}
         />
+        <MetricCard label="Смета / прогноз" value={shortMoney(finance.plan)} detail={<span>Прогноз {shortMoney(finance.forecast)} · {state.budgetMeta.approvedAt ? 'план утверждён' : 'план требует сверки'}</span>} icon={CircleDollarSign} onClick={() => onNavigate('finance')} />
+        <MetricCard label="Отклонение от сметы" value={finance.plan ? `${finance.forecast > finance.plan ? '+' : ''}${shortMoney(finance.forecast - finance.plan)}` : '—'} detail={<span>По текущему прогнозу, не итог стройки</span>} icon={TrendingUp} tone={finance.forecast > finance.plan ? 'warning' : undefined} onClick={() => onNavigate('finance')} />
+        <p className="overview-money__note">До полной оплаты по прогнозу: <strong>{shortMoney(Math.max(0, finance.forecast - finance.paid))}</strong>. Расчёт по внесённым данным; остаток на счетах и стоимость оставшихся работ требуют сверки.</p>
       </section>}
 
       <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate}>
-        {show('progress') && <ConstructionNow state={state} role={role} onNavigate={onNavigate} />}
+        {show('progress') && <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />}
       </ScheduleBrief>
 
       {(show('progress') || show('finance')) && <details className="panel overview-secondary-metrics" open={role === 'foreman'}>
