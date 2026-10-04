@@ -8,6 +8,8 @@ import { validateBaselineChanges } from '../sites/projects/baseline.js';
 import { createTelegramProjectStore } from '../sites/telegram/project-store.js';
 import { createProjectWriteHandler } from '../sites/projects/write.js';
 import { createSyncModel, reconcileSavedSnapshot } from '../src/application/project-sync.ts';
+import { confirmedSiteUpdate } from '../sites/lib/schedule-forecast.js';
+import { planToday } from '../sites/lib/plan-baseline.js';
 
 const now = '2026-09-09T12:00:00.000Z', owner = { role: 'management', name: 'Виталий' }, foreman = { role: 'foreman', name: 'Прораб' };
 const fixture = () => {
@@ -20,6 +22,21 @@ const fixture = () => {
   return s;
 };
 const input = { date: '2026-08-15', note: 'Проверено по результату осмотра', tasks: [] };
+
+test('quick progress saves a server-confirmed remaining duration while preserving baseline and money', () => {
+  const base = fixture(), today = planToday(), stamp = new Date().toISOString();
+  base.stages[0].schedule = { kind: 'work', phase: 'Подготовка', summaryOf: [], dependencies: [], calendar: 'daily', daysOff: [], crew: 'Бригада', reporterId: '', updatedAt: now, updatedBy: owner.name };
+  const snapshot = structuredClone(base);
+  const next = applyStageControl(base, 'a', 'start', { ...input, date: today, remainingDays: 3, readyOn: today }, owner.name, 'management');
+  assert.equal(validateStageControl(base, next, owner, stamp), null);
+  assert.equal(confirmedSiteUpdate(next.stages[0], today), true);
+  assert.equal(next.stages[0].siteUpdate?.remainingDays, 3);
+  assert.deepEqual(next.financeEntries, base.financeEntries);
+  assert.deepEqual(next.stages[0].baseline, base.stages[0].baseline);
+  assert.deepEqual(base, snapshot);
+  assert.throws(() => applyStageControl(base, 'a', 'start', { ...input, remainingDays: 0, readyOn: today }, owner.name, 'management'));
+  assert.throws(() => applyStageControl(base, 'a', 'delay', { ...input, date: today, remainingDays: 2, readyOn: today }, owner.name, 'management'));
+});
 
 test('completion, acceptance and payment remain separate; dependencies unlock without starting parallel work', () => {
   const before = fixture(), completed = applyStageControl(before, 'a', 'complete', input, owner.name, 'management');

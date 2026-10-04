@@ -28,16 +28,19 @@ test('does not identify an accepted or unstarted stage as current work', () => {
   assert.equal(constructionOverview(state, 'management').next?.id, 'done');
 });
 
-test('prefers a photo linked to active work and never exposes private reports to clients', () => {
+test('shows the latest site photo and never exposes private reports to clients', () => {
   const state = fixture();
   state.fieldReports = [
     { id: 'private', createdAt: '2026-09-27', clientVisible: false, stageId: 'roof', attachments: [{ key: 'roof.jpg', mimeType: 'image/jpeg' }] },
     { id: 'recent', createdAt: '2026-09-29', clientVisible: true, attachments: [{ key: 'object.jpg', mimeType: 'image/jpeg' }] },
     { id: 'audio', createdAt: '2026-09-30', clientVisible: true, attachments: [{ key: 'voice', mimeType: 'audio/ogg' }] },
   ] as AppState['fieldReports'];
-  assert.equal(constructionOverview(state, 'management').photo?.file.key, 'roof.jpg');
+  assert.equal(constructionOverview(state, 'management').photo?.file.key, 'object.jpg');
   assert.equal(constructionOverview(state, 'client').photo?.file.key, 'object.jpg');
   assert.equal(constructionOverview(state, 'client').photoStage, undefined);
+  state.fieldReports[0].createdAt = '2026-10-01';
+  assert.equal(constructionOverview(state, 'management').photo?.file.key, 'roof.jpg');
+  assert.equal(constructionOverview(state, 'client').photo?.file.key, 'object.jpg');
 });
 
 test('selects recorded next action or an open real task and hides internal actions from clients', () => {

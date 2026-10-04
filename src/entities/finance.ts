@@ -12,6 +12,8 @@ export interface BudgetMeta {
 }
 
 export interface BudgetLine {
+  sourcePlan?: number;
+  outsideSourceTotal?: boolean;
   sourceRow?: number;
   sourceFact?: number;
   sourceParticipantAmounts?: Record<string, number | null>;
@@ -23,6 +25,7 @@ export interface BudgetLine {
 }
 
 export interface FinanceEntry {
+  budgetAllocation?: { at: string; by: string; budgetLineId: string };
   historicalPayment?: { existingOperation?: boolean; sourceDocumentId: string; sourceUniqueKey: string; sourceSha256: string; confirmation: string; sourceDate: string; recordedAt: string; recordedBy: string };
   id: string;
   kind: 'expense' | 'income';

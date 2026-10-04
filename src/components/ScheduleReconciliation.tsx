@@ -35,8 +35,8 @@ function RowReview({ state, stage, role, actor, userId, onChange, onAction }: Pr
   const [structureBase, setStructureBase] = useState(() => JSON.stringify(schedulePayload(stage.schedule)));
   const [reviewBase, setReviewBase] = useState(() => reviewSource(stage));
   const [form, setForm] = useState<StageSiteUpdate>(() => ({
-    asOf: planToday(), reviewOn: '', remainingDays: null, readyOn: '', acceptanceOn: '', note: '', nextAction: '', issueOwner: '',
     ...sitePayload(stage.siteUpdate),
+    asOf: planToday(), reviewOn: addScheduleDays(planToday(), 7), remainingDays: stage.siteUpdate?.remainingDays ?? null, readyOn: stage.siteUpdate?.readyOn && stage.siteUpdate.readyOn > planToday() ? stage.siteUpdate.readyOn : planToday(), acceptanceOn: stage.siteUpdate?.acceptanceOn && stage.siteUpdate.acceptanceOn >= planToday() ? stage.siteUpdate.acceptanceOn : '', note: '', nextAction: stage.siteUpdate?.nextAction || '', issueOwner: stage.siteUpdate?.issueOwner || stage.responsible || '',
   }));
   const manager = role === 'management', allowed = manager || role === 'foreman' && Boolean(userId && userId === stage.schedule?.reporterId);
   const finished = ['accepted', 'awaiting_inspection'].includes(stage.status), summary = stage.schedule?.kind === 'summary';

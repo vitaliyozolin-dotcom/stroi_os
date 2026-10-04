@@ -1,9 +1,10 @@
 import type { AppState, UserRole } from '../entities/index';
 import { planToday, validPlanDate } from '../../sites/lib/plan-baseline.js';
 import { stageCanStart, stageGaps } from '../../sites/lib/stage-control.js';
+import { addScheduleDays } from '../../sites/lib/schedule-forecast.js';
 
 export type StageAction = 'start' | 'not_started' | 'complete' | 'accept' | 'delay' | 'rework';
-export function applyStageControl(state: AppState, id: string, action: StageAction, input: { date: string; note: string; tasks: string[]; blockerResolved?: boolean }, actor: string, role: UserRole, userId?: string): AppState {
+export function applyStageControl(state: AppState, id: string, action: StageAction, input: { date: string; note: string; tasks: string[]; blockerResolved?: boolean; remainingDays?: number; readyOn?: string; nextAction?: string; issueOwner?: string }, actor: string, role: UserRole, userId?: string): AppState {
   if (role === 'client') throw new Error('Нет прав на изменение этапа.');
   const next = structuredClone(state), stage = next.stages.find((s) => s.id === id);
   if (!stage || stage.status === 'accepted') throw new Error('Этап уже принят или не найден.');
@@ -47,6 +48,12 @@ export function applyStageControl(state: AppState, id: string, action: StageActi
       const tracking = next.tasks.find((t) => t.id === `auto-stage-${id}`);
       if (tracking) { tracking.status = 'done'; tracking.completedAt = now; tracking.completionNote = input.note.trim(); }
     } else stage.status = 'awaiting_inspection';
+  }
+  if (stage.schedule && input.remainingDays !== undefined && ['start', 'delay'].includes(action)) {
+    if (!Number.isInteger(input.remainingDays) || input.remainingDays < 1 || input.remainingDays > 730) throw new Error('Остаток — от 1 до 730 рабочих дней.');
+    if (!validPlanDate(input.readyOn)) throw new Error('Укажите дату доступности работ.');
+    if (action === 'delay' && (!input.nextAction?.trim() || !input.issueOwner?.trim())) throw new Error('Укажите ближайшее действие и ответственного за задержку.');
+    stage.siteUpdate = { asOf: today, reviewOn: addScheduleDays(today, 7), remainingDays: input.remainingDays, readyOn: input.readyOn!, acceptanceOn: '', note: input.note.trim(), nextAction: input.nextAction?.trim() || '', issueOwner: input.issueOwner?.trim() || '', requestId: crypto.randomUUID() };
   }
   for (const candidate of next.stages) if (!candidate.schedule && candidate.status === 'not_ready' && (candidate.dependencyId || candidate.dependency) && stageCanStart(next, candidate)) candidate.status = 'ready';
   next.activity.unshift({ id: crypto.randomUUID(), timestamp: now, actor, text: `Этап «${stage.name}»: ${input.note.trim()}`, tone: action === 'delay' || action === 'rework' ? 'warning' : 'positive' });

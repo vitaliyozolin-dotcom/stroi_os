@@ -4,7 +4,7 @@ export function constructionOverview(state: AppState, role: UserRole) {
   const stages = state.stages.filter((stage) => stage.schedule?.kind !== 'summary')
     .slice().sort((a, b) => a.order - b.order);
   const active = stages.filter((stage) => ['in_progress', 'blocked', 'rework', 'awaiting_inspection'].includes(stage.status));
-  const current = active[0];
+  const current = active.find(stage => stage.status !== 'awaiting_inspection') ?? active[0];
   const next = stages.find((stage) => stage.status !== 'accepted');
   const activeIds = new Set(active.map((stage) => stage.id));
   const photos = (state.fieldReports ?? [])
@@ -12,7 +12,7 @@ export function constructionOverview(state: AppState, role: UserRole) {
     .flatMap((report) => report.attachments.filter((file) => /^image\/(jpeg|png|webp|gif)$/.test(file.mimeType))
       .map((file) => ({ report, file })))
     .sort((a, b) => b.report.createdAt.localeCompare(a.report.createdAt));
-  const photo = photos.find(({ report }) => report.stageId && activeIds.has(report.stageId)) ?? photos[0];
+  const photo = photos[0];
   const photoStage = stages.find((stage) => stage.id === photo?.report.stageId);
   const task = role === 'client' ? undefined : state.tasks
     .filter((item) => !item.id.startsWith('auto-stage-') && !['done', 'canceled'].includes(item.status))
