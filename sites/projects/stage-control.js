@@ -8,6 +8,18 @@ export function validateStageControl(previous, next, identity, now = new Date().
   if (reviewError) return reviewError;
   if (!previous) return null;
   const manager = identity.role === 'management', today = planToday(new Date(now));
+  const oldProgress = previous.project.siteProgressHistory ?? [], progress = next.project.siteProgressHistory ?? [];
+  if (!Array.isArray(progress) || progress.length < oldProgress.length || progress.length > oldProgress.length + 1
+    || oldProgress.some((row, i) => !same(row, progress[i]))) return 'История состояния объекта сохраняется; добавьте новую запись.';
+  if (progress.length > oldProgress.length) {
+    const row = progress.at(-1);
+    if (!manager || !row || !text(row.id) || oldProgress.some(old => old.id === row.id)
+      || !validPlanDate(row.asOf) || row.asOf > today || oldProgress.at(-1)?.asOf > row.asOf
+      || !text(row.source) || row.source.length > 500
+      || ![row.completed, row.remaining].every(list => Array.isArray(list) && list.length <= 50 && list.every(item => text(item) && item.length <= 250))
+      || !row.completed.length && !row.remaining.length) return 'Управление записывает актуальное состояние с датой, источником и списком работ.';
+    row.recordedAt = now; row.recordedBy = identity.name;
+  }
   const oldStages = new Map((previous.stages ?? []).map((s) => [s.id, s]));
   const project = next.project, oldProject = previous.project;
   const newForecast = project.workForecastDate !== oldProject.workForecastDate || project.workForecastUpdatedAt !== oldProject.workForecastUpdatedAt;
@@ -19,6 +31,13 @@ export function validateStageControl(previous, next, identity, now = new Date().
     const before = oldStages.get(stage.id);
     if (!before) { if (!manager || stage.status === 'accepted') return 'Новый этап добавляет управление без подстановки приёмки.'; continue; }
     const statusChanged = stage.status !== before.status;
+    if (!same(stage.completionObservedOn, before.completionObservedOn)) {
+      if (stage.status === 'rework' && !stage.completionObservedOn && manager) { /* explicit reopening retains the earlier status history */ }
+      else if (!manager || before.completionObservedOn || before.completedOn || stage.completedOn || !statusChanged || stage.status !== 'awaiting_inspection'
+        || !validPlanDate(stage.completionObservedOn) || stage.completionObservedOn > today
+        || stage.actualStart && stage.completionObservedOn < stage.actualStart || !text(stage.completionNote)
+        || stage.schedule?.kind === 'summary') return 'Готовность без точной даты фиксирует управление с датой наблюдения и основанием; приёмка отдельно.';
+    }
     const recovering = manager && text(stage.factRecoveryNote) && ['accepted', 'awaiting_inspection'].includes(before.status) && !statusChanged;
     const fillingFact = (key) => recovering && ['completedOn', 'actualEnd', 'acceptedAt'].includes(key) && !before[key];
     if (stage.factRecoveryNote && (!recovering || typeof stage.factRecoveryNote !== 'string' || stage.factRecoveryNote.length > 2000)) return 'Неизвестные фактические даты выполненной работы уточняет управление с основанием до 2000 символов.';
@@ -36,6 +55,7 @@ export function validateStageControl(previous, next, identity, now = new Date().
     if (before.completedOn && stage.completedOn && stage.completedOn !== before.completedOn) return 'Дата выполнения уже зафиксирована. Повторную работу оформите через доработку.';
     if (recovering) {
       if (!validPlanDate(stage.completedOn) || stage.completedOn > today || stage.actualEnd && stage.actualEnd !== stage.completedOn) return 'Дата выполнения должна существовать, не быть в будущем и совпадать с уже известным фактом.';
+      if (stage.completionObservedOn && stage.completedOn > stage.completionObservedOn) return 'Работа уже была готова на дату наблюдения; точное завершение не может быть позже.';
       if (stage.acceptedAt) {
         const acceptedOn = Number.isFinite(Date.parse(stage.acceptedAt)) ? planToday(new Date(stage.acceptedAt)) : '';
         if (!validPlanDate(acceptedOn) || acceptedOn < stage.completedOn || acceptedOn > today) return 'Уточнённая дата приёмки — между выполнением и сегодняшним днём.';
@@ -53,7 +73,7 @@ export function validateStageControl(previous, next, identity, now = new Date().
     if (stage.actualStart && stage.completedOn && stage.completedOn < stage.actualStart) return 'Выполнение не может быть раньше начала.';
     if (statusChanged && !(stage.status === 'ready' && stageCanStart(next, stage)) && !text(stage.statusNote)) return 'Укажите результат или причину изменения этапа.';
     if (statusChanged && !['not_ready', 'ready', 'in_progress', 'blocked', 'awaiting_inspection', 'accepted', 'rework'].includes(stage.status)) return 'Неизвестный статус этапа.';
-    if (statusChanged && ['awaiting_inspection', 'accepted'].includes(stage.status) && (!validPlanDate(stage.completedOn) || !text(stage.completionNote))) return 'Для завершения нужны фактическая дата и подтверждённый результат.';
+    if (statusChanged && ['awaiting_inspection', 'accepted'].includes(stage.status) && (!(validPlanDate(stage.completedOn) || stage.status === 'awaiting_inspection' && manager && validPlanDate(stage.completionObservedOn)) || !text(stage.completionNote))) return 'Для завершения нужны фактическая дата или наблюдение управления и подтверждённый результат.';
     if ((statusChanged || recovering) && ['awaiting_inspection', 'accepted'].includes(stage.status) && stage.schedule?.kind === 'summary') {
       if (stage.schedule.summaryOf.some((id) => {
         const child = (next.stages ?? []).find((s) => s.id === id), end = child?.completedOn || child?.actualEnd;
@@ -74,7 +94,7 @@ export function validateStageControl(previous, next, identity, now = new Date().
       stage.acceptedBy = identity.name; stage.actualEnd = stage.completedOn;
     }
     const recordedChange = statusChanged || ['blocker', 'forecastEnd', 'actualStart', 'actualEnd', 'acceptedAt', 'completedOn', 'completionNote'].some((key) => !same(stage[key], before[key]));
-    stage.statusHistory = [...(before.statusHistory ?? []), ...(recordedChange ? [{ at: now, actor: identity.name, status: stage.status, note: text(stage.statusNote || stage.forecastReason || stage.planChangeReason) || (stage.status === 'ready' ? 'Готов к началу по зависимости' : 'Уточнение этапа'), completedOn: stage.completedOn || before.completedOn || null }] : [])];
+    stage.statusHistory = [...(before.statusHistory ?? []), ...(recordedChange ? [{ at: now, actor: identity.name, status: stage.status, note: text(stage.statusNote || stage.forecastReason || stage.planChangeReason) || (stage.status === 'ready' ? 'Готов к началу по зависимости' : 'Уточнение этапа'), completedOn: stage.completedOn || before.completedOn || null, ...(stage.completionObservedOn ? { completionObservedOn: stage.completionObservedOn } : {}) }] : [])];
     delete stage.statusNote;
     delete stage.factRecoveryNote;
   }

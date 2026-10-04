@@ -20,6 +20,18 @@ export const hasFinanceAcceptanceSource = (state, entry) => {
 // Validate changed facts only: old records remain readable and unrelated saves do
 // not rewrite historical amounts. Role filtering occurs before this boundary.
 export const validateFinanceChanges = (previous, state, identity, now) => {
+  const groups = ['construction', 'overhead', 'reserve', 'unallocated'];
+  for (const collection of ['budgetLines', 'financeEntries']) {
+    const oldRecords = new Map((previous?.[collection] ?? []).map(row => [row.id, row]));
+    for (const row of state[collection] ?? []) {
+      const old = oldRecords.get(row.id);
+      const changed = row.costGroup !== old?.costGroup;
+      if (changed && (identity.role !== 'management' || row.costGroup !== undefined && !groups.includes(row.costGroup)
+        || collection === 'financeEntries' && (row.kind !== 'expense' || row.costGroup === 'reserve'))) return 'Категорию расхода меняет управление; резерв не является расходом.';
+      row.costGroupHistory = [...(old?.costGroupHistory ?? []), ...(changed ? [{ group: row.costGroup ?? null, at: now, by: identity.name }] : [])];
+      if (!row.costGroupHistory.length) delete row.costGroupHistory;
+    }
+  }
   const oldEntries = new Map((previous?.financeEntries ?? []).map((entry) => [entry.id, entry]));
   const ids = new Set();
   const sourceKeys = new Set();
@@ -33,6 +45,9 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
     const old = oldEntries.get(entry.id);
     if (old && JSON.stringify(old) === JSON.stringify(entry)) continue;
     if (identity.role !== 'management') return 'Финансовые операции доступны только роли «Управление».';
+    // Classification may annotate a historical payment without rewriting its facts.
+    const withoutClassification = ({ costGroup, costGroupHistory, ...record }) => record;
+    if (old && JSON.stringify(withoutClassification(old)) === JSON.stringify(withoutClassification(entry))) continue;
     if (old?.historicalPayment && !old.budgetLineId && entry.budgetLineId) {
       const withoutAllocation = ({ budgetLineId, budgetAllocation, ...record }) => record;
       if (JSON.stringify(withoutAllocation(old)) === JSON.stringify(withoutAllocation(entry))

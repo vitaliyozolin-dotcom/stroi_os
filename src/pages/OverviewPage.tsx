@@ -1,4 +1,5 @@
 import { ConstructionNow } from '../components/ConstructionNow';
+import { CostGroups } from '../components/CostGroups';
 import { ScheduleBrief } from '../components/ScheduleBrief';
 import { recordedScheduleStatus } from '../../sites/lib/stage-control.js';
 import { planToday } from '../../sites/lib/plan-baseline.js';
@@ -164,6 +165,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
         <p className="overview-money__note">Осталось оплатить по прогнозу: <strong>{shortMoney(Math.max(0, finance.forecast - finance.paid))}</strong>. По внесённым данным; фактическую стоимость завершения нужно сверить.</p>
       </section>}
 
+      {role === 'management' && show('finance') && <CostGroups state={state} onChange={onChange} compact />}
       <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate}>
         {show('progress') && <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />}
       </ScheduleBrief>

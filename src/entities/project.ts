@@ -1,6 +1,7 @@
 import type { PlanBaseline, PlanChange } from './baseline';
 
 export interface HouseProject {
+  siteProgressHistory?: { id: string; asOf: string; completed: string[]; remaining: string[]; source: string; recordedAt?: string; recordedBy?: string }[];
   workForecastDate?: string;
   workForecastNote?: string;
   workForecastUpdatedAt?: string;

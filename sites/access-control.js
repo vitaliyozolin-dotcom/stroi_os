@@ -95,6 +95,7 @@ export const stateForRole = (state, identity) => {
   }
 
   safe.project.targetCost = 0;
+  delete safe.project.siteProgressHistory;
   safe.budgetMeta = { version: '', source: 'Клиентский контур' };
   safe.budgetLines = [];
   safe.financeEntries = (safe.financeEntries ?? []).filter((item) => item.kind === 'income').map((item) => ({

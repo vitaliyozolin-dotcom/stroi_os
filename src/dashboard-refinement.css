@@ -19,3 +19,31 @@
   .overview-dates__grid { gap: 14px; }
   .overview-dates__grid strong { font-size: 19px; }
 }
+
+/* Cost allocation and owner-confirmed site status. */
+.cost-groups { padding: 24px 0; border-top: 1px solid var(--line, #dedfd6); }
+.cost-groups.panel { padding: 24px; }
+.cost-groups__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+.cost-groups__head h2 { margin: 0; font-size: 22px; }
+.cost-groups__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; }
+.cost-groups__grid > div { display: grid; gap: 8px; }
+.cost-groups__grid strong { font-size: clamp(18px, 2.2vw, 26px); white-space: nowrap; }
+.cost-groups__grid small, .cost-classify-row small { display: block; color: #70756b; }
+.cost-classify-row { display: grid; grid-template-columns: minmax(0, 1fr) 185px; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid #e0e2d8; }
+.cost-classify-row span { overflow-wrap: anywhere; }
+.cost-classify-row select { width: 100%; padding: 10px; min-height: 44px; }
+.site-progress { padding: 24px 0; }
+.site-progress__columns { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+.site-progress__columns h3 { color: #666d60; font-size: 14px; margin: 0 0 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+.site-progress__columns ul { list-style: none; margin: 0; padding: 0; }
+.site-progress__columns li { padding: 6px 0; line-height: 1.45; }
+.site-progress__columns li::before { content: '✓'; margin-right: 10px; color: #536542; }
+.site-progress__columns > div + div li::before { content: '○'; }
+.site-progress > .muted { font-size: 12px; line-height: 1.5; margin-top: 18px; }
+@media (max-width: 640px) {
+  .cost-groups__grid { grid-template-columns: 1fr 1fr; gap: 22px 16px; }
+  .cost-groups__head { align-items: flex-start; }
+  .cost-groups__head h2 { font-size: 20px; }
+  .cost-classify-row { grid-template-columns: 1fr; gap: 8px; }
+  .site-progress__columns { gap: 20px; }
+}

@@ -1,5 +1,6 @@
 import { BaselinePanel, planShiftLabel } from '../components/BaselinePanel';
 import { StageControlModal } from '../components/StageControlModal';
+import { SiteProgress } from '../components/SiteProgress';
 import { ScheduleReconciliation } from '../components/ScheduleReconciliation';
 import { forecastSchedule } from '../../sites/lib/schedule-forecast.js';
 import type { StageAction } from '../application/stage-control';
@@ -174,6 +175,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
 
   return (
     <div className="page-stack">
+      <SiteProgress state={state} role={role} onChange={onChange} />
       {stageAction && <StageControlModal state={state} stageId={selected.id} action={stageAction} role={role} actor={actor} userId={userId} onChange={saveChange} onClose={() => setStageAction(null)} />}
       {reviewing && <ScheduleReconciliation state={state} role={role} actor={actor} userId={userId} initialId={selected.id} onChange={saveChange} onClose={() => setReviewing(false)} />}
       <section className="page-title-row">
