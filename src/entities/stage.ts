@@ -58,6 +58,7 @@ export interface Stage {
   actualEnd?: string;
   actualStart?: string;
   completedOn?: string;
+  completionObservedOn?: string;
   completionNote?: string;
   acceptedAt?: string;
   acceptedBy?: string;

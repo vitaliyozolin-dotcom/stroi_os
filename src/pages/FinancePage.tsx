@@ -21,6 +21,8 @@ import type { PageId } from '../presentation/navigation';
 import { Field, MetricCard, Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';
 import { HistoryImport } from '../components/HistoryImport';
+import { CostGroups } from '../components/CostGroups';
+import { costGroupLabels } from '../domain/cost-groups';
 
 const statusLabels: Record<ExpenseStatus, string> = {
   committed: 'Обязательство',
@@ -188,6 +190,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
         <MetricCard label="Остаток по учёту" value={shortMoney(balance)} detail={<span>получено {shortMoney(totals.received)} · маржа {shortMoney(state.project.contractValue - totals.forecast)}</span>} icon={Banknote} tone="dark" onClick={() => setSummaryOpen('balance')} />
       </section>
 
+      <CostGroups state={state} onChange={saveChange} />
       <section className="panel expense-guide" data-tour="expense-approval">
         <div><strong>Кто утверждает расходы</strong><p>Владелец и активные сотрудники с ролью «Управление» добавляют и утверждают расходы, фиксируют приёмку и оплату. Прораб ведёт работы и поставки.</p></div>
         <ol><li>Создайте обязательство: сумма, этап, статья, контрагент и основание.</li><li>Утвердите расход в его карточке. Утверждение не записывает оплату.</li><li>Примите работу или поставку, затем зафиксируйте принятую сумму и документ.</li><li>После реальной выплаты отдельно укажите сумму, дату и платёжный документ.</li></ol>
@@ -208,6 +211,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
               <button type="button" className="budget-table__row budget-table__row--clickable" role="row" key={line.id} onClick={() => setSelectedLineId(line.id)}>
                 <div className="budget-name">
                   <strong>{line.name}{line.outsideSourceTotal ? " · вне итога файла" : ""}</strong>
+                  <small>{costGroupLabels[line.costGroup ?? 'unallocated']}</small>
                   <ProgressBar value={line.plan ? values.committed / line.plan * 100 : 0} tone={deviation > 0 ? 'orange' : 'green'} />
                 </div>
                 <span data-label="План">{money(line.plan)}</span>

@@ -1,4 +1,9 @@
 export type ExpenseStatus = 'committed' | 'accepted' | 'paid';
+export type CostGroup = 'construction' | 'overhead' | 'reserve' | 'unallocated';
+export interface CostClassification {
+  costGroup?: CostGroup;
+  costGroupHistory?: { group: CostGroup | null; at: string; by: string }[];
+}
 
 export interface BudgetMeta {
   importSourceSha256?: string;
@@ -11,7 +16,7 @@ export interface BudgetMeta {
   note?: string;
 }
 
-export interface BudgetLine {
+export interface BudgetLine extends CostClassification {
   sourcePlan?: number;
   outsideSourceTotal?: boolean;
   sourceRow?: number;
@@ -24,7 +29,7 @@ export interface BudgetLine {
   forecast: number;
 }
 
-export interface FinanceEntry {
+export interface FinanceEntry extends CostClassification {
   budgetAllocation?: { at: string; by: string; budgetLineId: string };
   historicalPayment?: { existingOperation?: boolean; sourceDocumentId: string; sourceUniqueKey: string; sourceSha256: string; confirmation: string; sourceDate: string; recordedAt: string; recordedBy: string };
   id: string;

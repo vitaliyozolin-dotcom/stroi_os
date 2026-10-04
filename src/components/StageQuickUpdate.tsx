@@ -24,6 +24,7 @@ export function StageQuickUpdate({ state, stageId, role, actor, userId, onChange
     <div className="stage-quick">
       <p>План: <strong>{formatDate(stage.planEnd)}</strong>{confirmedSiteUpdate(stage) ? ' · проверено ' + formatDate(stage.siteUpdate!.asOf) : ' · нужно обновить состояние'}</p>
       {stage.blocker && <p className="blocker-note">{stage.blocker}</p>}
+      {stage.completionObservedOn && !stage.completedOn && <p>Готовность подтверждена на {formatDate(stage.completionObservedOn)}. Точная дата выполнения неизвестна; уточните её перед приёмкой.</p>}
       {allowed && !['accepted', 'awaiting_inspection'].includes(stage.status) && <div className="stage-quick__actions">
         <button className="button button--secondary" onClick={() => setAction('start')}>Начали / работаем</button>
         <button className="button button--primary" onClick={() => setAction('complete')}>Работа готова</button>
