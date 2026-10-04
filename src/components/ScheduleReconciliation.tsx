@@ -35,8 +35,8 @@ function RowReview({ state, stage, role, actor, userId, onChange, onAction }: Pr
   const [structureBase, setStructureBase] = useState(() => JSON.stringify(schedulePayload(stage.schedule)));
   const [reviewBase, setReviewBase] = useState(() => reviewSource(stage));
   const [form, setForm] = useState<StageSiteUpdate>(() => ({
-    asOf: planToday(), reviewOn: '', remainingDays: null, readyOn: '', acceptanceOn: '', note: '', nextAction: '', issueOwner: '',
     ...sitePayload(stage.siteUpdate),
+    asOf: planToday(), reviewOn: addScheduleDays(planToday(), 7), remainingDays: stage.siteUpdate?.remainingDays ?? null, readyOn: planToday(), acceptanceOn: '', note: '', nextAction: stage.siteUpdate?.nextAction || '', issueOwner: stage.siteUpdate?.issueOwner || stage.responsible || '',
   }));
   const manager = role === 'management', allowed = manager || role === 'foreman' && Boolean(userId && userId === stage.schedule?.reporterId);
   const finished = ['accepted', 'awaiting_inspection'].includes(stage.status), summary = stage.schedule?.kind === 'summary';
@@ -77,7 +77,7 @@ function RowReview({ state, stage, role, actor, userId, onChange, onAction }: Pr
   return <>
     {changedElsewhere && <div className="blocker-note"><p>Запись обновилась, пока форма была открыта. Незавершённый ввод сохранён на экране, но не перезапишет свежие сведения.</p><button type="button" className="button button--secondary" onClick={reload}>Загрузить свежую запись и заменить ввод</button></div>}
     <div className="schedule-review__status"><strong>{stageStatusLabel[stage.status]}</strong><span>План 0: {stage.baseline?.end ? formatDate(stage.baseline.end) : 'дата неизвестна'} · текущий план: {formatDate(stage.planEnd)}</span>{stage.completedOn && <span>Выполнено: {formatDate(stage.completedOn)}{stage.status === 'awaiting_inspection' ? ' · приёмка впереди' : ''}</span>}{stage.blocker && <p className="blocker-note">Мешает: {stage.blocker}</p>}</div>
-    <details open={!stage.schedule} className="schedule-review__section"><summary>1. Структура ППР · {stage.schedule?.updatedAt ? 'сверена управлением' : 'требует подтверждения'}</summary>
+    <details className="schedule-review__section"><summary>1. Структура ППР · {stage.schedule?.updatedAt ? 'сверена управлением' : 'требует подтверждения'}</summary>
       {manager ? <form className="modal-form" onSubmit={saveStructure}>
         <p className="muted">Названия и даты исходного ППР не меняются. Крупный этап объединяет работы и поставки, например «Фундамент». Сводная строка — уже имеющийся в ППР итог по вложенным строкам, без собственной длительности.</p>
         <div className="schedule-review__grid">
