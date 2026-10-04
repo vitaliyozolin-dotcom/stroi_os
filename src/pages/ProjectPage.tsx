@@ -1,6 +1,7 @@
 import { requestApi } from '../infrastructure/api-http';
 import { FieldReportUpload } from '../components/FieldReportUpload';
-import { forecastSchedule } from '../../sites/lib/schedule-forecast.js';
+import { automaticSchedule } from '../../sites/lib/automatic-schedule.js';
+import { useScheduleToday } from '../components/ProjectScheduleDates';
 import { createProjectDocumentCommands } from '../application';
 import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
@@ -80,7 +81,8 @@ export function ProjectPage({
   const saveChange = createProjectDocumentCommands(state, session.name, systemClock, runtimeIdGenerator, onChange);
   const [search, setSearch] = useState('');
   const [showPhotoUpload, setShowPhotoUpload] = useState(false);
-  const schedule = forecastSchedule(state);
+  const today = useScheduleToday();
+  const schedule = automaticSchedule(state, today);
   const [category, setCategory] = useState<'all' | NonNullable<ProjectDocument['category']>>('all');
   const [showUpload, setShowUpload] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -211,8 +213,8 @@ export function ProjectPage({
           </div>
           <div className="project-identity-card__facts">
             <span><small>Начало</small><strong>{formatDate(state.project.startDate, true)}</strong></span>
-            <span><small>Плановая сдача</small><strong>{formatDate(state.project.targetDate, true)}</strong></span>
-            <span><small>{schedule.kind === 'actual' ? 'Факт готовности' : 'Ожидаемая готовность'}</small><strong>{schedule.end ? formatDate(schedule.end, true) : 'Нужна сверка этапов'}</strong></span>
+            <span><small>Сдача по договору</small><strong>{formatDate(state.project.targetDate, true)}</strong></span>
+            <span><small>{schedule.kind === 'actual' ? 'Факт готовности по ППР' : schedule.kind === 'observed' ? 'Готовность подтверждена' : 'Готовность по ППР · расчёт'}</small><strong>{schedule.end ? formatDate(schedule.end, true) : 'Нужны сроки'}</strong>{schedule.unmappedWork.length > 0 && <small>Без сроков: {schedule.unmappedWork.join(', ')}</small>}</span>
             <span><small>Прораб</small><strong>{state.project.foreman || 'Не назначен'}</strong></span>
           </div>
         </article>

@@ -1,4 +1,15 @@
 /* Compact owner overview and stage updates */
+.automatic-schedule__scope { display: grid; gap: 5px; padding: 14px 16px; margin: 8px 0 12px; background: #eaece2; border-left: 2px solid #566344; font-size: 13px; line-height: 1.5; }
+.automatic-schedule__scope span { color: #65675f; }
+.automatic-schedule__details { margin-top: 12px; font-size: 13px; line-height: 1.5; }
+.automatic-schedule__details summary { cursor: pointer; min-height: 44px; padding: 12px 0; }
+.automatic-schedule__details p { color: #65675f; }
+.automatic-schedule__table { overflow-x: auto; }
+.automatic-schedule__table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.automatic-schedule__table th, .automatic-schedule__table td { padding: 12px 8px; text-align: left; border-bottom: 1px solid #d9d8cf; vertical-align: top; }
+.automatic-schedule__table th { font-weight: 500; }
+.automatic-schedule__table small { display: block; color: #65675f; font-size: 11px; }
+.automatic-schedule__table th:first-child { padding-left: 0; }
 .overview-money { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .overview-money .metric-card > strong { font-size: clamp(25px, 2.4vw, 38px); white-space: nowrap; }
 .overview-money__note { grid-column: 1 / -1; margin: 0; font-size: 12px; color: #65675f; line-height: 1.5; }
