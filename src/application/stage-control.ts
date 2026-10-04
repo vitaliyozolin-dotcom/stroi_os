@@ -3,11 +3,36 @@ import { planToday, validPlanDate } from '../../sites/lib/plan-baseline.js';
 import { stageCanStart, stageGaps } from '../../sites/lib/stage-control.js';
 import { addScheduleDays } from '../../sites/lib/schedule-forecast.js';
 
-export type StageAction = 'start' | 'not_started' | 'complete' | 'accept' | 'delay' | 'rework';
+export type StageAction = 'start' | 'not_started' | 'complete' | 'accept' | 'owner_accept' | 'delay' | 'rework';
 export function applyStageControl(state: AppState, id: string, action: StageAction, input: { date: string; note: string; tasks: string[]; completionDateUnknown?: boolean; blockerResolved?: boolean; remainingDays?: number; readyOn?: string; nextAction?: string; issueOwner?: string }, actor: string, role: UserRole, userId?: string): AppState {
   if (role === 'client') throw new Error('Нет прав на изменение этапа.');
   const next = structuredClone(state), stage = next.stages.find((s) => s.id === id);
   if (!stage || stage.status === 'accepted') throw new Error('Этап уже принят или не найден.');
+  if (action === 'owner_accept') {
+    if (role !== 'management' || userId !== 'owner') throw new Error('Подтверждение по факту доступно владельцу.');
+    if (stage.schedule?.kind === 'summary') throw new Error('Подтвердите вложенные работы по отдельности.');
+    const today = planToday(), now = new Date().toISOString();
+    if (!validPlanDate(input.date) || input.date > today) throw new Error('Укажите дату выполнения не позже сегодня.');
+    if (stage.actualStart && (input.completionDateUnknown ? today : input.date) < stage.actualStart) throw new Error('Выполнение не может быть раньше начала.');
+    if (input.completionDateUnknown && stage.completedOn) throw new Error('Известная дата выполнения сохраняется.');
+    if (!input.completionDateUnknown) {
+      if (stage.completedOn && stage.completedOn !== input.date) throw new Error('Известная дата выполнения сохраняется.');
+      if (stage.completionObservedOn && input.date > stage.completionObservedOn) throw new Error('Работа уже была готова на дату наблюдения.');
+      stage.completedOn = input.date;
+    } else stage.completionObservedOn ||= today;
+    const note = input.note.trim() || 'Лично подтверждаю: этап выполнен.';
+    if (note.length > 2000) throw new Error('Комментарий — до 2000 символов.');
+    stage.ownerAcceptance = { note };
+    stage.status = 'accepted'; stage.statusNote = `Подтверждение владельца: ${note}`;
+    stage.completionNote ||= note; stage.blocker = undefined;
+    stage.actualEnd = stage.completedOn; stage.acceptedAt = now; stage.acceptedBy = actor;
+    // Subtasks and quality evidence retain their own truthful status.
+    const tracking = next.tasks.find(t => t.id === `auto-stage-${id}`);
+    if (tracking) { tracking.status = 'done'; tracking.completedAt = now; tracking.completionNote = note; }
+    for (const candidate of next.stages) if (!candidate.schedule && candidate.status === 'not_ready' && (candidate.dependencyId || candidate.dependency) && stageCanStart(next, candidate)) candidate.status = 'ready';
+    next.activity.unshift({ id: crypto.randomUUID(), timestamp: now, actor, text: `Владелец подтвердил этап «${stage.name}»: ${note}`, tone: 'positive' });
+    return next;
+  }
   if (role !== 'management' && stage.schedule && (!userId || userId !== stage.schedule.reporterId)) throw new Error('Состояние этой работы подтверждает назначенный сотрудник или управление.');
   if (!input.note.trim()) throw new Error('Укажите результат или причину.');
   if (stage.blocker && ['start', 'complete', 'accept'].includes(action) && !input.blockerResolved) throw new Error('Подтвердите, что препятствие устранено.');

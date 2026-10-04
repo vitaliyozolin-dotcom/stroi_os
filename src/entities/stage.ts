@@ -62,6 +62,7 @@ export interface Stage {
   completionNote?: string;
   acceptedAt?: string;
   acceptedBy?: string;
+  ownerAcceptance?: { note: string; at?: string; by?: string; pendingTaskIds?: string[]; pendingCheckpointIds?: string[] };
   statusNote?: string;
   factRecoveryNote?: string;
   forecastReason?: string;

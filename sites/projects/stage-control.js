@@ -6,7 +6,7 @@ const text = (v) => typeof v === 'string' ? v.trim() : '';
 export function validateStageControl(previous, next, identity, now = new Date().toISOString()) {
   const reviewError = validateScheduleReview(previous, next, identity, now);
   if (reviewError) return reviewError;
-  if (!previous) return null;
+  if (!previous) return next.stages?.some(s => s.ownerAcceptance) ? 'Подтверждение владельца записывается в существующий этап.' : null;
   const manager = identity.role === 'management', today = planToday(new Date(now));
   const oldProgress = previous.project.siteProgressHistory ?? [], progress = next.project.siteProgressHistory ?? [];
   if (!Array.isArray(progress) || progress.length < oldProgress.length || progress.length > oldProgress.length + 1
@@ -29,14 +29,25 @@ export function validateStageControl(previous, next, identity, now = new Date().
   } else { project.workForecastUpdatedAt = oldProject.workForecastUpdatedAt; project.workForecastUpdatedBy = oldProject.workForecastUpdatedBy; }
   for (const stage of next.stages ?? []) {
     const before = oldStages.get(stage.id);
-    if (!before) { if (!manager || stage.status === 'accepted') return 'Новый этап добавляет управление без подстановки приёмки.'; continue; }
+    if (!before) { if (!manager || stage.status === 'accepted' || stage.ownerAcceptance) return 'Новый этап добавляет управление без подстановки приёмки.'; continue; }
     const statusChanged = stage.status !== before.status;
+    const ownerAccepts = Boolean(stage.ownerAcceptance && !before.ownerAcceptance);
+    if (before.ownerAcceptance && !same(stage.ownerAcceptance, before.ownerAcceptance)) return 'Сохранённое подтверждение владельца нельзя переписать.';
+    if (ownerAccepts) {
+      if (!manager || identity.isOwner !== true || !statusChanged || stage.status !== 'accepted' || stage.schedule?.kind === 'summary'
+        || !text(stage.ownerAcceptance.note) || stage.ownerAcceptance.note.length > 2000) return 'Владелец лично подтверждает выполнение отдельного этапа.';
+      const gaps = stageGaps(next, stage.id);
+      stage.ownerAcceptance = { note: text(stage.ownerAcceptance.note), at: now, by: identity.name,
+        pendingTaskIds: gaps.tasks.map(t => t.id), pendingCheckpointIds: gaps.checkpoints.map(p => p.id) };
+      stage.acceptedAt = now;
+      stage.statusNote = `Подтверждение владельца: ${stage.ownerAcceptance.note}`;
+    }
     if (!same(stage.completionObservedOn, before.completionObservedOn)) {
       if (stage.status === 'rework' && !stage.completionObservedOn && manager) { /* explicit reopening retains the earlier status history */ }
-      else if (!manager || before.completionObservedOn || before.completedOn || stage.completedOn || !statusChanged || stage.status !== 'awaiting_inspection'
+      else if (!manager || before.completionObservedOn || before.completedOn || stage.completedOn || !statusChanged || !(stage.status === 'awaiting_inspection' || ownerAccepts)
         || !validPlanDate(stage.completionObservedOn) || stage.completionObservedOn > today
         || stage.actualStart && stage.completionObservedOn < stage.actualStart || !text(stage.completionNote)
-        || stage.schedule?.kind === 'summary') return 'Готовность без точной даты фиксирует управление с датой наблюдения и основанием; приёмка отдельно.';
+        || stage.schedule?.kind === 'summary') return 'Для готовности без точной даты нужны дата наблюдения и подтверждение управления.';
     }
     const recovering = manager && text(stage.factRecoveryNote) && ['accepted', 'awaiting_inspection'].includes(before.status) && !statusChanged;
     const fillingFact = (key) => recovering && ['completedOn', 'actualEnd', 'acceptedAt'].includes(key) && !before[key];
@@ -53,6 +64,7 @@ export function validateStageControl(previous, next, identity, now = new Date().
     if (before.actualStart && stage.actualStart !== before.actualStart) return 'Зафиксированное начало нельзя удалить или переписать.';
     if (before.completedOn && !stage.completedOn && stage.status !== 'rework') return 'Дата выполнения сохраняется; для повторной работы верните этап на доработку.';
     if (before.completedOn && stage.completedOn && stage.completedOn !== before.completedOn) return 'Дата выполнения уже зафиксирована. Повторную работу оформите через доработку.';
+    if (ownerAccepts && stage.completionObservedOn && stage.completedOn && stage.completedOn > stage.completionObservedOn) return 'Работа уже была готова на дату наблюдения; точное завершение не может быть позже.';
     if (recovering) {
       if (!validPlanDate(stage.completedOn) || stage.completedOn > today || stage.actualEnd && stage.actualEnd !== stage.completedOn) return 'Дата выполнения должна существовать, не быть в будущем и совпадать с уже известным фактом.';
       if (stage.completionObservedOn && stage.completedOn > stage.completionObservedOn) return 'Работа уже была готова на дату наблюдения; точное завершение не может быть позже.';
@@ -73,7 +85,7 @@ export function validateStageControl(previous, next, identity, now = new Date().
     if (stage.actualStart && stage.completedOn && stage.completedOn < stage.actualStart) return 'Выполнение не может быть раньше начала.';
     if (statusChanged && !(stage.status === 'ready' && stageCanStart(next, stage)) && !text(stage.statusNote)) return 'Укажите результат или причину изменения этапа.';
     if (statusChanged && !['not_ready', 'ready', 'in_progress', 'blocked', 'awaiting_inspection', 'accepted', 'rework'].includes(stage.status)) return 'Неизвестный статус этапа.';
-    if (statusChanged && ['awaiting_inspection', 'accepted'].includes(stage.status) && (!(validPlanDate(stage.completedOn) || stage.status === 'awaiting_inspection' && manager && validPlanDate(stage.completionObservedOn)) || !text(stage.completionNote))) return 'Для завершения нужны фактическая дата или наблюдение управления и подтверждённый результат.';
+    if (statusChanged && ['awaiting_inspection', 'accepted'].includes(stage.status) && (!(validPlanDate(stage.completedOn) || (stage.status === 'awaiting_inspection' || ownerAccepts) && manager && validPlanDate(stage.completionObservedOn)) || !text(stage.completionNote))) return 'Для завершения нужны фактическая дата или наблюдение управления и подтверждённый результат.';
     if ((statusChanged || recovering) && ['awaiting_inspection', 'accepted'].includes(stage.status) && stage.schedule?.kind === 'summary') {
       if (stage.schedule.summaryOf.some((id) => {
         const child = (next.stages ?? []).find((s) => s.id === id), end = child?.completedOn || child?.actualEnd;
@@ -85,16 +97,16 @@ export function validateStageControl(previous, next, identity, now = new Date().
       stage.forecastUpdatedAt = now; stage.forecastUpdatedBy = identity.name;
     } else { stage.forecastUpdatedAt = before.forecastUpdatedAt; stage.forecastUpdatedBy = before.forecastUpdatedBy; }
     if (statusChanged && stage.status === 'accepted') {
-      if (!validPlanDate(before.completedOn || before.actualEnd)) return 'До приёмки должна быть отдельно подтверждена фактическая дата выполнения.';
+      if (!ownerAccepts && !validPlanDate(before.completedOn || before.actualEnd)) return 'До приёмки должна быть отдельно подтверждена фактическая дата выполнения.';
       const gaps = stageGaps(next, stage.id);
-      if (!manager || gaps.tasks.length || gaps.checkpoints.length || stage.blocker) return 'Принять этап можно после завершения задач и приёмки контрольных точек.';
+      if (!manager || !ownerAccepts && (gaps.tasks.length || gaps.checkpoints.length) || stage.blocker) return 'Принять этап можно после завершения задач и приёмки контрольных точек либо по личному подтверждению владельца.';
       for (const collection of ['tasks', 'checkpoints']) if ((previous[collection] ?? []).some((item) => item.stageId === stage.id && !(next[collection] ?? []).some((n) => n.id === item.id && n.stageId === stage.id))) return 'Нельзя убрать условия приёмки из этапа при его закрытии.';
-      const acceptedOn = text(stage.acceptedAt).slice(0, 10);
-      if (!validPlanDate(acceptedOn) || acceptedOn > today || acceptedOn < stage.completedOn) return 'Дата приёмки должна быть между выполнением и сегодняшним днём.';
+      const acceptedOn = Number.isFinite(Date.parse(stage.acceptedAt || '')) ? planToday(new Date(stage.acceptedAt)) : '';
+      if (!validPlanDate(acceptedOn) || acceptedOn > today || acceptedOn < (stage.completedOn || stage.completionObservedOn)) return 'Дата приёмки должна быть между выполнением и сегодняшним днём.';
       stage.acceptedBy = identity.name; stage.actualEnd = stage.completedOn;
     }
     const recordedChange = statusChanged || ['blocker', 'forecastEnd', 'actualStart', 'actualEnd', 'acceptedAt', 'completedOn', 'completionNote'].some((key) => !same(stage[key], before[key]));
-    stage.statusHistory = [...(before.statusHistory ?? []), ...(recordedChange ? [{ at: now, actor: identity.name, status: stage.status, note: text(stage.statusNote || stage.forecastReason || stage.planChangeReason) || (stage.status === 'ready' ? 'Готов к началу по зависимости' : 'Уточнение этапа'), completedOn: stage.completedOn || before.completedOn || null, ...(stage.completionObservedOn ? { completionObservedOn: stage.completionObservedOn } : {}) }] : [])];
+    stage.statusHistory = [...(before.statusHistory ?? []), ...(recordedChange ? [{ at: now, actor: identity.name, status: stage.status, note: text(stage.statusNote || stage.forecastReason || stage.planChangeReason) || (stage.status === 'ready' ? 'Готов к началу по зависимости' : 'Уточнение этапа'), completedOn: stage.completedOn || before.completedOn || null, ...(stage.completionObservedOn ? { completionObservedOn: stage.completionObservedOn } : {}), ...(ownerAccepts ? { ownerAcceptance: structuredClone(stage.ownerAcceptance) } : {}) }] : [])];
     delete stage.statusNote;
     delete stage.factRecoveryNote;
   }

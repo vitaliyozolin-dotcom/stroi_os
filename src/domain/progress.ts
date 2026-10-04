@@ -40,6 +40,7 @@ const tasksByStage = (tasks: ProjectTask[]) => {
 };
 
 const progressForStage = (stage: AppState['stages'][number], tasks: ProjectTask[]) => {
+  if (stage.status === 'accepted' && stage.ownerAcceptance) return { physical: 100, accepted: 100 };
   if (!tasks.length) {
     const accepted = stage.status === 'accepted' ? 100 : 0;
     return { physical: stage.completedOn && stage.status === 'awaiting_inspection' ? 100 : accepted, accepted };
