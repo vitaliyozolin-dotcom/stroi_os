@@ -7,13 +7,20 @@ import { Modal } from './Ui';
 export function CostGroups({ state, onChange, compact = false }: { state: AppState; onChange?: (state: AppState) => void; compact?: boolean }) {
   const [editing, setEditing] = useState(false);
   const totals = costGroupTotals(state);
+  const totalPlan = costGroups.reduce((sum, group) => sum + totals[group].plan, 0);
+  const totalPaid = costGroups.reduce((sum, group) => sum + totals[group].paid, 0);
   return <section className={`cost-groups ${compact ? 'cost-groups--compact' : 'panel'}`} aria-label="Строительные и накладные расходы">
-    <div className="cost-groups__head"><h2>На что идут деньги</h2>{onChange && <button type="button" className="text-button" onClick={() => setEditing(true)}>Распределить расходы</button>}</div>
-    <div className="cost-groups__grid">{costGroups.map(group => <div key={group}>
-      <span>{costGroupLabels[group]}</span><strong>{money(group === 'reserve' ? totals[group].plan : totals[group].paid)}</strong>
-      <small>{group === 'reserve' ? 'В бюджете · ещё не потрачено' : `Оплачено · план ${money(totals[group].plan)}`}</small>
-    </div>)}</div>
-    {!compact && <p className="muted">Материалы, монтаж и работы на объекте — строительство. Административные расходы — накладные. Смешанные статьи распределяются после расшифровки. Итог проекта сохраняется.</p>}
+    <div className="cost-groups__head"><h2>Бюджет и расходы</h2>{onChange && <button type="button" className="text-button" onClick={() => setEditing(true)}>Распределить</button>}</div>
+    <table className="cost-groups__table" aria-label="План и оплаты по категориям">
+      <thead><tr><th scope="col">Категория</th><th scope="col">План по смете</th><th scope="col">Оплачено</th></tr></thead>
+      <tbody>{costGroups.map(group => <tr key={group}>
+        <th scope="row">{costGroupLabels[group]}</th><td>{money(totals[group].plan)}</td>
+        <td>{group === 'reserve' ? <span aria-label="Резерв не является расходом">—</span> : money(totals[group].paid)}</td>
+      </tr>)}</tbody>
+      <tfoot><tr><th scope="row">Всего</th><td>{money(totalPlan)}</td><td>{money(totalPaid)}</td></tr></tfoot>
+    </table>
+    <p className="cost-groups__note">Резерв — часть плана. Смешанные статьи пока не распределены.</p>
+    {!compact && <p className="muted">Строительство — материалы, монтаж и работы на объекте. Накладные — административные расходы. План берётся из статей сметы, оплачено — из реестра платежей.</p>}
     {editing && onChange && <ClassificationEditor state={state} onChange={onChange} onClose={() => setEditing(false)} />}
   </section>;
 }
