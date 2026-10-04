@@ -1,4 +1,5 @@
 import type { AppState, Stage, ProjectTask } from '../../src/entities/index';
+export function stageControlFingerprint(stage: Stage): string;
 export interface RecordedScheduleGroup<T> {
   recordCount: number;
   overdue: { record: T; days: number; baselineDays: number | null }[];

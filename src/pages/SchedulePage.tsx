@@ -5,6 +5,7 @@ import { ScheduleReconciliation } from '../components/ScheduleReconciliation';
 import { forecastSchedule } from '../../sites/lib/schedule-forecast.js';
 import type { StageAction } from '../application/stage-control';
 import { planDays as baselineDays } from '../../sites/lib/plan-baseline.js';
+import { planToday } from '../../sites/lib/plan-baseline.js';
 import { createScheduleCommands } from '../application';
 import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
@@ -162,6 +163,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
 
   const renderActions = () => {
     if (role === 'client' || selected.status === 'accepted' || role !== 'management' && selected.schedule && selected.schedule.reporterId !== userId) return null;
+    if (role === 'management' && userId === 'owner' && selected.schedule?.kind !== 'summary') return <div className="action-pair"><button className="button button--secondary" type="button" onClick={() => setStageAction(selected.status === 'awaiting_inspection' ? 'rework' : 'start')}>{selected.status === 'awaiting_inspection' ? 'На доработку' : 'Начали / работаем'}</button><button className="button button--primary" type="button" onClick={() => setStageAction('owner_accept')}><Check size={17} /> Подтвердить выполнение</button></div>;
     if (selected.status === 'ready' || selected.status === 'not_ready') return <button className="button button--primary" type="button" onClick={() => setStageAction('start')}><Play size={17} /> Зафиксировать начало</button>;
     if (selected.status === 'in_progress' || selected.status === 'rework') return (
       <button className="button button--primary" type="button" onClick={() => setStageAction('complete')}><Send size={17} /> Зафиксировать выполнение</button>
@@ -273,7 +275,8 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
                 <div><strong>Есть препятствие</strong><p>{selected.blocker}</p>{role !== 'client' && <button type="button" className="text-button text-button--danger" onClick={clearBlocker}>Отметить устранённым</button>}</div>
               </div>
             )}
-            {(openStageTasks.length > 0 || unacceptedCheckpoints.length > 0) && selected.status !== 'not_ready' && selected.status !== 'ready' && <div className="blocker-note"><LockKeyhole size={19} /><div><strong>Этап ещё нельзя закрыть</strong><p>{[openStageTasks.length ? `${openStageTasks.length} задач не завершено` : '', unacceptedCheckpoints.length ? `${unacceptedCheckpoints.length} контрольных точек не принято` : ''].filter(Boolean).join(' · ')}</p></div></div>}
+            {selected.ownerAcceptance && <p className="muted">Принято владельцем: {selected.ownerAcceptance.by || selected.acceptedBy}{selected.ownerAcceptance.at ? ' · ' + formatDate(planToday(new Date(selected.ownerAcceptance.at))) : ''}.{!selected.completedOn && ' Точная дата выполнения неизвестна.'}</p>}
+            {(openStageTasks.length > 0 || unacceptedCheckpoints.length > 0) && !['not_ready', 'ready', 'accepted'].includes(selected.status) && !(role === 'management' && userId === 'owner' && selected.schedule?.kind !== 'summary') && <div className="blocker-note"><LockKeyhole size={19} /><div><strong>Этап ещё нельзя закрыть</strong><p>{[openStageTasks.length ? `${openStageTasks.length} задач не завершено` : '', unacceptedCheckpoints.length ? `${unacceptedCheckpoints.length} контрольных точек не принято` : ''].filter(Boolean).join(' · ')}</p></div></div>}
             <div className="stage-detail__actions">{renderActions()}</div>
             {role === 'management' && <button type="button" className="button button--secondary stage-date-edit" onClick={openDateEdit}><Pencil size={16} /> Изменить даты и зависимость</button>}
           </article>

@@ -3,13 +3,48 @@ import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { applyStageControl, type StageAction } from '../application/stage-control';
 import { planToday } from '../../sites/lib/plan-baseline.js';
-import { stageCanStart, stageGaps } from '../../sites/lib/stage-control.js';
+import { stageCanStart, stageGaps, stageControlFingerprint } from '../../sites/lib/stage-control.js';
 import { Field, Modal } from './Ui';
 import { money } from '../presentation/formatting';
 
 export function StageControlModal(props: { state: AppState; stageId: string; action: StageAction; actor: string; role: UserRole; userId?: string; onChange: (s: AppState) => void; onClose: () => void; onNavigate?: (p: PageId) => void }) {
   const stage = props.state.stages.find((s) => s.id === props.stageId);
+  if (stage && props.role === 'management' && props.userId === 'owner' && ['complete', 'accept', 'owner_accept'].includes(props.action) && stage.schedule?.kind !== 'summary') {
+    return <OwnerAcceptanceForm key={`${props.state.project.id}-${stage.id}`} {...props} />;
+  }
   return stage ? <StageForm key={`${props.state.project.id}-${stage.id}-${props.action}`} {...props} /> : null;
+}
+
+function OwnerAcceptanceForm({ state, stageId, actor, role, userId, onChange, onClose }: Parameters<typeof StageControlModal>[0]) {
+  const stage = state.stages.find(s => s.id === stageId)!;
+  const [exactDate, setExactDate] = useState(Boolean(stage.completedOn));
+  const [date, setDate] = useState(stage.completedOn || stage.completionObservedOn || planToday());
+  const [note, setNote] = useState('');
+  const [openedState, setOpenedState] = useState(() => stageControlFingerprint(stage));
+  const [error, setError] = useState('');
+  const changed = stageControlFingerprint(stage) !== openedState;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (changed) { setError('Сведения об этапе изменились. Проверьте обновление перед подтверждением.'); return; }
+    try {
+      onChange(applyStageControl(state, stageId, 'owner_accept', { date: exactDate ? date : planToday(), note, tasks: [], completionDateUnknown: !exactDate }, actor, role, userId));
+      onClose();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); }
+  };
+  if (stage.status === 'accepted') return <Modal title="Этап уже подтверждён" subtitle={stage.name} onClose={onClose}><p>Подтверждение сохранено. Повторно закрывать этап не нужно.</p><button className="button button--primary" type="button" onClick={onClose}>Готово</button></Modal>;
+  return <Modal title="Подтвердить выполнение" subtitle={stage.name} onClose={onClose}>
+    <form className="modal-form stage-control-form" onSubmit={submit}>
+      <p>Ты подтверждаешь, что этап выполнен. Запишем твоё решение и дату подтверждения.</p>
+      {!stage.completedOn && <label className="stage-check"><input type="checkbox" checked={exactDate} onChange={e => setExactDate(e.target.checked)} /><span>Знаю точную дату выполнения</span></label>}
+      {exactDate && <Field label="Дата выполнения"><input type="date" required value={date} min={stage.actualStart} max={stage.completionObservedOn || planToday()} readOnly={Boolean(stage.completedOn)} onChange={e => setDate(e.target.value)} /></Field>}
+      {!exactDate && <p className="muted">Точная дата выполнения останется неизвестной.</p>}
+      <Field label="Комментарий · необязательно"><textarea rows={2} maxLength={2000} value={note} onChange={e => setNote(e.target.value)} placeholder="Что проверил или что важно сохранить" /></Field>
+      <p className="muted">Фото и отчёт прораба не нужны для этого подтверждения. Задачи, контроль качества и оплаты сохраняют свои записи.</p>
+      {error && <p className="danger-text" role="alert">{error}</p>}
+      {changed && <div className="stage-control-list"><p>Текущий результат: {stage.completionNote || 'пока не указан'}{stage.blocker ? ` · ${stage.blocker}` : ''}</p><button className="text-button" type="button" onClick={() => { setOpenedState(stageControlFingerprint(stage)); setExactDate(Boolean(stage.completedOn)); setDate(stage.completedOn || stage.completionObservedOn || planToday()); setError(''); }}>Обновить сведения, сохранив комментарий</button></div>}
+      <div className="modal__actions"><button type="button" className="button button--ghost" onClick={onClose}>Отмена</button><button type="submit" className="button button--primary">Подтверждаю, этап выполнен</button></div>
+    </form>
+  </Modal>;
 }
 function StageForm({ state, stageId, action, actor, role, userId, onChange, onClose, onNavigate }: Parameters<typeof StageControlModal>[0]) {
   const stage = state.stages.find((s) => s.id === stageId)!;
@@ -21,13 +56,13 @@ function StageForm({ state, stageId, action, actor, role, userId, onChange, onCl
   const [readyOn, setReadyOn] = useState(planToday());
   const [nextAction, setNextAction] = useState('');
   const [issueOwner, setIssueOwner] = useState(stage.responsible || '');
-  const [openedState] = useState(() => JSON.stringify(stage));
+  const [openedState] = useState(() => stageControlFingerprint(stage));
   const hasRemaining = Boolean(stage.schedule && ['start', 'delay'].includes(action));
   const gaps = stageGaps(state, stageId);
   const expenses = state.financeEntries.filter((e) => e.stageId === stageId && e.kind === 'expense');
-  const labels = { start: 'Работы начались', not_started: 'Работы ещё не начались', complete: 'Этап выполнен?', accept: 'Приёмка этапа', delay: 'Что задерживает этап?', rework: 'Вернуть на доработку' };
+  const labels = { start: 'Работы начались', not_started: 'Работы ещё не начались', complete: 'Этап выполнен?', accept: 'Приёмка этапа', owner_accept: 'Подтвердить выполнение', delay: 'Что задерживает этап?', rework: 'Вернуть на доработку' };
   const submit = (event: FormEvent) => { event.preventDefault(); try {
-    if (JSON.stringify(stage) !== openedState) throw new Error('Этап обновился, пока форма была открыта. Откройте его заново перед сохранением.');
+    if (stageControlFingerprint(stage) !== openedState) throw new Error('Этап обновился, пока форма была открыта. Откройте его заново перед сохранением.');
     onChange(applyStageControl(state, stageId, action, { date, note, tasks: unknownDate ? [] : tasks, completionDateUnknown: unknownDate, blockerResolved: resolved, ...(hasRemaining ? { remainingDays: Number(remaining), readyOn, nextAction, issueOwner } : {}) }, actor, role, userId)); onClose();
   } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); } };
   const open = (p: PageId) => { onClose(); onNavigate?.(p); };

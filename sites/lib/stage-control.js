@@ -1,4 +1,17 @@
 import { planDays, planToday, taskBaselineEnd, validPlanDate } from './plan-baseline.js';
+import { schedulePayload, sitePayload } from './schedule-forecast.js';
+
+// Compare the facts shown by the form, not server stamps or derived progress.
+export const stageControlFingerprint = (stage) => JSON.stringify({
+  id: stage.id, name: stage.name, status: stage.status, actualStart: stage.actualStart,
+  completedOn: stage.completedOn, completionObservedOn: stage.completionObservedOn,
+  completionNote: stage.completionNote, acceptedAt: stage.acceptedAt, acceptedBy: stage.acceptedBy,
+  actualEnd: stage.actualEnd, blocker: stage.blocker, planStart: stage.planStart,
+  planEnd: stage.planEnd, forecastEnd: stage.forecastEnd, responsible: stage.responsible,
+  responsibleId: stage.responsibleId, dependencyId: stage.dependencyId, dependency: stage.dependency,
+  schedule: schedulePayload(stage.schedule), siteUpdate: sitePayload(stage.siteUpdate),
+  ownerAcceptance: stage.ownerAcceptance,
+});
 
 // Read-only record status. An unclosed record is not proof of a project delay.
 export function recordedScheduleStatus(state, today = planToday()) {

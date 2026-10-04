@@ -95,7 +95,7 @@ const acknowledgePlanFields = (sent: AppState, local: AppState, server: AppState
         if (!changed) item[field] = structuredClone(saved[field]);
       }
     }
-    for (const field of ['baseline', 'originalDueDate', 'planHistory', 'statusHistory', 'scheduleHistory', 'forecastUpdatedAt', 'forecastUpdatedBy', 'workForecastUpdatedAt', 'workForecastUpdatedBy', 'acceptedAt', 'acceptedBy']) {
+    for (const field of ['baseline', 'originalDueDate', 'planHistory', 'statusHistory', 'scheduleHistory', 'forecastUpdatedAt', 'forecastUpdatedBy', 'workForecastUpdatedAt', 'workForecastUpdatedBy', 'acceptedAt', 'acceptedBy', 'ownerAcceptance']) {
       if (saved[field] !== undefined) { before[field] = structuredClone(saved[field]); item[field] = structuredClone(saved[field]); }
       else if (field === 'planHistory') { delete before[field]; delete item[field]; }
     }
