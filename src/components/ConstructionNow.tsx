@@ -1,12 +1,14 @@
 import { ArrowUpRight, Check, Image as ImageIcon } from 'lucide-react';
 import { useState } from 'react';
+import { StageQuickUpdate } from './StageQuickUpdate';
 import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { constructionOverview } from '../domain/construction-overview';
 import { formatDate } from '../presentation/formatting';
 import { stageStatusLabel } from '../presentation/status-labels';
 
-export function ConstructionNow({ state, role, onNavigate }: { state: AppState; role: UserRole; onNavigate: (page: PageId) => void }) {
+export function ConstructionNow({ state, role, actor, userId, onChange, onNavigate }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId) => void }) {
+  const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const view = constructionOverview(state, role);
   const [failedPhoto, setFailedPhoto] = useState('');
   const photoUrl = view.photo ? `/api/field-reports/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(view.photo.file.key)}&preview=1` : '';
@@ -27,15 +29,17 @@ export function ConstructionNow({ state, role, onNavigate }: { state: AppState; 
         {role !== 'client' && <button type="button" className="construction-now__action" onClick={() => onNavigate(view.action?.page || 'schedule')}>
           <span><small>Ближайшее действие</small><strong>{view.action?.title || 'Следующий шаг не записан'}</strong><span>{view.action ? [view.action.owner, view.action.date ? `${view.action.dateLabel} ${formatDate(view.action.date)}` : 'Срок не указан'].filter(Boolean).join(' · ') : 'Уточнить в графике работ'}</span></span><ArrowUpRight size={19} />
         </button>}
+        {role !== 'client' && view.stages.length > 0 && <button className="button button--primary" type="button" onClick={() => setSelectedStage((view.current || view.next || view.stages[0]).id)}>Отметить ход работ</button>}
       </div>
     </div>
     {view.stages.length > 0 && <>
       <ol className="construction-now__stages" aria-label="Этапы от начала до завершения">
-        {view.stages.map((stage, index) => <li key={stage.id}><button type="button" className={`construction-stage construction-stage--${stage.status}`} onClick={() => onNavigate('schedule')} aria-label={`${stage.name}: ${stageStatusLabel[stage.status]}`} title={`${stage.name} · ${stageStatusLabel[stage.status]}`}>
+        {view.stages.map((stage, index) => <li key={stage.id}><button type="button" className={`construction-stage construction-stage--${stage.status}`} onClick={() => setSelectedStage(stage.id)} aria-label={`${stage.name}: ${stageStatusLabel[stage.status]}`} title={`${stage.name} · ${stageStatusLabel[stage.status]}`}>
           <span className="construction-stage__line" /><span className="construction-stage__point">{stage.status === 'accepted' ? <Check size={12} /> : String(index + 1).padStart(2, '0')}</span><span className="construction-stage__name">{stage.shortName || stage.name}</span>
         </button></li>)}
       </ol>
       <div className="construction-now__legend"><span>Начало</span><span>{view.accepted} из {view.stages.length} приняты · выделены активные</span><span>Завершение</span></div>
     </>}
+    {selectedStage && <StageQuickUpdate {...{state, role, actor, userId, onChange, onNavigate}} stageId={selectedStage} onClose={() => setSelectedStage(null)} />}
   </section>;
 }

@@ -1,6 +1,6 @@
 import type { AppState, BudgetLine, FinanceEntry } from '../entities/index';
 
-type SourceLine = { id: string; name: string; sourceRow: number; plan: number | null; sourceFact?: number | null; stageIds: string[]; participantAmounts?: Record<string, number | null> };
+type SourceLine = { id: string; name: string; sourceRow: number; plan: number | null; sourcePlan?: number; outsideSourceTotal?: boolean; sourceFact?: number | null; stageIds: string[]; participantAmounts?: Record<string, number | null> };
 type RecordInput = { existingOperation?: boolean; vendor: string; vendorInn?: string; number?: string; documentDate?: string; purchaseDate?: string; amount: number; description: string; file: string; dedupKey: string; suggestedBudgetSourceRow?: number | null; suggestedStageId?: string; paymentConfirmation: string; paymentDate?: string | null };
 export type HistoryRegister = { format: string; sources: { fileName: string; sha256: string }[]; budgetLines: SourceLine[]; budgetReconciliation: { sourceDisplayedPlan: number; sumOfPlanItems: number }; budgetApproval?: string; existingPaidExpenses?: RecordInput[]; paidInvoices: RecordInput[]; paidLemanaPurchases: RecordInput[] };
 const fingerprint = (value: string) => { let result = 2166136261; for (const letter of value) result = Math.imul(result ^ letter.charCodeAt(0), 16777619); return (result >>> 0).toString(16); };
@@ -18,6 +18,9 @@ export function parseHistoryRegister(value: unknown): HistoryRegister {
   for (const line of input.budgetLines) {
     if (!line.id || ids.has(line.id) || !line.name || !Number.isInteger(line.sourceRow) || !Array.isArray(line.stageIds) || line.plan !== null && (!Number.isFinite(line.plan) || line.plan < 0)) throw new Error('Некорректная статья сметы.');
     ids.add(line.id);
+    if (line.sourcePlan !== undefined && (!Number.isFinite(line.sourcePlan) || line.sourcePlan < 0)
+      || line.outsideSourceTotal !== undefined && typeof line.outsideSourceTotal !== 'boolean'
+      || line.outsideSourceTotal && (line.plan !== 0 || !Number.isFinite(line.sourcePlan))) throw new Error('Проверьте строки, не вошедшие в итог исходной сметы.');
   }
   const keys = new Set<string>();
   for (const item of [...input.paidInvoices, ...input.paidLemanaPurchases, ...(input.existingPaidExpenses ?? [])]) {
@@ -38,12 +41,12 @@ export function prepareHistoryImport(current: AppState, input: HistoryRegister, 
     const doc = matchingDocument(source.fileName)!;
     const invoice = input.paidInvoices.find((item) => item.file === source.fileName);
     if (invoice) { doc.documentDate = invoice.documentDate; doc.number = invoice.number; doc.category = 'invoice'; }
-    else delete doc.documentDate;
+    // Preserve an existing document date when this import has no new date for it.
   }
   const sourceBudget = input.sources.find((source) => source.fileName.endsWith('.xlsx')) ?? input.sources[0];
   const budgetChanged = includeBudget && current.budgetMeta.importSourceSha256 !== sourceBudget?.sha256;
   if (budgetChanged) {
-    const lines: BudgetLine[] = input.budgetLines.map((line) => ({ id: line.id, name: line.name, stageIds: line.stageIds.filter((id) => next.stages.some((stage) => stage.id === id)), plan: line.plan ?? 0, forecast: line.plan ?? 0, sourceRow: line.sourceRow, sourceFact: line.sourceFact ?? undefined, sourceParticipantAmounts: line.participantAmounts }));
+    const lines: BudgetLine[] = input.budgetLines.map((line) => ({ id: line.id, name: line.name, stageIds: line.stageIds.filter((id) => next.stages.some((stage) => stage.id === id)), plan: line.plan ?? 0, forecast: line.plan ?? 0, sourceRow: line.sourceRow, sourcePlan: line.sourcePlan, outsideSourceTotal: line.outsideSourceTotal, sourceFact: line.sourceFact ?? undefined, sourceParticipantAmounts: line.participantAmounts }));
     const total = Math.round(lines.reduce((sum, line) => sum + line.plan, 0) * 100) / 100;
     if (total !== input.budgetReconciliation?.sumOfPlanItems) throw new Error('Сумма статей не совпадает с реестром.');
     const referenced = new Set(next.financeEntries.map((entry) => entry.budgetLineId));
@@ -52,12 +55,19 @@ export function prepareHistoryImport(current: AppState, input: HistoryRegister, 
     next.budgetLines = [...lines, ...legacy];
     next.project.targetCost = total;
     next.budgetMeta = { version: 'Рабочая смета', source: sourceBudget?.fileName ?? 'Реестр импорта', importSourceSha256: sourceBudget?.sha256, importedAt: now, note: `Сумма статей: ${total.toLocaleString('ru-RU')} ₽. Итог в исходном файле: ${input.budgetReconciliation.sourceDisplayedPlan.toLocaleString('ru-RU')} ₽. Колонка «Факт» и суммы участников сохранены для сверки; они не являются отдельными оплатами. Даты оплат не заменяются датами счетов.`, importPreviousBudget: previous };
+    const outside = lines.filter(line => line.outsideSourceTotal);
+    if (outside.length) next.budgetMeta.note += ` Вне итога исходной формулы: ${outside.reduce((sum, line) => sum + (line.sourcePlan ?? 0), 0).toLocaleString('ru-RU')} ₽ (${outside.length} строки). Суммы сохранены в карточках статей и не добавлены к принятому плану.`;
   }
   const approvalChanged = includeBudget && Boolean(input.budgetApproval) && !next.budgetMeta.approvedAt;
   if (approvalChanged) next.budgetMeta = { ...next.budgetMeta, approvedBy: actor, approvedAt: now, note: `${next.budgetMeta.note ?? ''} Утверждение плана: ${input.budgetApproval}` };
   let added = 0, updated = 0, skipped = 0;
   for (const record of records) {
-    if (next.financeEntries.some((entry) => entry.historicalPayment?.sourceUniqueKey === record.dedupKey)) { skipped++; continue; }
+    const imported = next.financeEntries.find((entry) => entry.historicalPayment?.sourceUniqueKey === record.dedupKey);
+    if (imported) {
+      const line = next.budgetLines.find(item => item.sourceRow === record.suggestedBudgetSourceRow);
+      if (includeBudget && !imported.budgetLineId && line) { imported.budgetLineId = line.id; updated++; }
+      skipped++; continue;
+    }
     if (record.existingOperation) {
       const matches = next.financeEntries.filter((entry) => entry.kind === 'expense' && normalized(entry.counterparty) === normalized(record.vendor) && entry.description === record.description && entry.date === record.documentDate && Math.round(entry.amount * 100) === Math.round(record.amount * 100));
       const entry = matches[0];

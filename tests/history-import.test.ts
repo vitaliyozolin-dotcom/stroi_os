@@ -129,3 +129,34 @@ test('owner budget approval applies only when the source budget is included', ()
   assert.equal(result.state.budgetMeta.approvedAt, undefined);
   assert.equal(result.state.project.targetCost, base.project.targetCost);
 });
+
+test('a later budget import allocates unmatched historical payments without changing payment facts', () => {
+  const base = current();
+  const input = register();
+  const first = prepareHistoryImport(base, input, identity.name, now, false).state;
+  assert.equal(validateFinanceChanges(base, first, identity, now), '');
+  const old = structuredClone(first.financeEntries[0]);
+  const second = prepareHistoryImport(first, input, identity.name, now, true).state;
+  assert.equal(validateFinanceChanges(first, second, identity, now), '');
+  assert.equal(second.financeEntries[0].budgetLineId, 'source-1');
+  assert.deepEqual(second.financeEntries[0].historicalPayment, old.historicalPayment);
+  assert.equal(second.financeEntries[0].amount, old.amount);
+  assert.equal(second.financeEntries[0].budgetAllocation?.by, identity.name);
+  for (const change of [{ amount: 1 }, { budgetLineId: 'missing' }, { date: '2026-01-01' }]) {
+    const bad = structuredClone(second); Object.assign(bad.financeEntries[0], change);
+    assert.ok(validateFinanceChanges(first, bad, identity, now));
+  }
+  assert.ok(validateFinanceChanges(first, structuredClone(second), { role: 'foreman' }, now));
+});
+
+test('source rows outside its total are retained without increasing the accepted plan', () => {
+  const input = register();
+  input.budgetLines.push({ id: 'outside', name: 'Вне формулы', sourceRow: 2, stageIds: [], plan: 0, sourcePlan: 20000, sourceFact: 15000, outsideSourceTotal: true });
+  const result = prepareHistoryImport(current(), input, identity.name, now, true);
+  assert.equal(financeTotals(result.state).plan, 120000);
+  assert.equal(result.state.budgetLines[1].sourcePlan, 20000);
+  assert.equal(result.state.budgetLines[1].sourceFact, 15000);
+  assert.match(result.state.budgetMeta.note!, /20.*000/);
+  input.budgetLines[1].sourcePlan = -1;
+  assert.throws(() => parseHistoryRegister(input));
+});

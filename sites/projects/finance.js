@@ -33,6 +33,14 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
     const old = oldEntries.get(entry.id);
     if (old && JSON.stringify(old) === JSON.stringify(entry)) continue;
     if (identity.role !== 'management') return 'Финансовые операции доступны только роли «Управление».';
+    if (old?.historicalPayment && !old.budgetLineId && entry.budgetLineId) {
+      const withoutAllocation = ({ budgetLineId, budgetAllocation, ...record }) => record;
+      if (JSON.stringify(withoutAllocation(old)) === JSON.stringify(withoutAllocation(entry))
+        && (state.budgetLines ?? []).some(line => line.id === entry.budgetLineId)) {
+        entry.budgetAllocation = { at: now, by: identity.name, budgetLineId: entry.budgetLineId };
+        continue;
+      }
+    }
     if (entry.historicalPayment) {
       const h = entry.historicalPayment;
       if (old && (old.historicalPayment || !h.existingOperation || old.kind !== 'expense' || old.status !== 'committed' || accepted(old) !== 0 || paid(old) !== 0

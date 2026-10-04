@@ -145,22 +145,25 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
         <MetricCard
           label="Потрачено"
           value={shortMoney(finance.paid)}
-          detail={<span>Фактически выплачено по проекту</span>}
+          detail={<span>Подтверждённые оплаты в реестре</span>}
           icon={Banknote}
           onClick={() => onNavigate('finance')}
         />
         <MetricCard
-          label="Остаток денег"
+          label="Остаток по учёту"
           value={shortMoney(finance.received - finance.paid)}
-          detail={<span>Получено {shortMoney(finance.received)} · за вычетом выплат</span>}
+          detail={<span>Поступления − выплаты · счета не сверены</span>}
           icon={CircleDollarSign}
           tone={finance.received < finance.paid ? 'warning' : 'positive'}
           onClick={() => onNavigate('finance')}
         />
+        <MetricCard label="Смета" value={shortMoney(finance.plan)} detail={<span>{state.budgetMeta.approvedAt ? 'План принят' : 'Исходный план · нужна сверка'}</span>} icon={CircleDollarSign} onClick={() => onNavigate('finance')} />
+        <MetricCard label="Отклонение от сметы" value={finance.plan ? `${finance.forecast > finance.plan ? '+' : ''}${shortMoney(finance.forecast - finance.plan)}` : '—'} detail={<span>Прогноз {shortMoney(finance.forecast)}</span>} icon={TrendingUp} tone={finance.forecast > finance.plan ? 'warning' : 'default'} onClick={() => onNavigate('finance')} />
+        <p className="overview-money__note">Осталось оплатить по прогнозу: <strong>{shortMoney(Math.max(0, finance.forecast - finance.paid))}</strong>. По внесённым данным; фактическую стоимость завершения нужно сверить.</p>
       </section>}
 
       <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate}>
-        {show('progress') && <ConstructionNow state={state} role={role} onNavigate={onNavigate} />}
+        {show('progress') && <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />}
       </ScheduleBrief>
 
       {(show('progress') || show('finance')) && <details className="panel overview-secondary-metrics" open={role === 'foreman'}>
