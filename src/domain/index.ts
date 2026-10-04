@@ -1,6 +1,7 @@
 export {
   acceptedAmountFor,
   financeTotals,
+  sourceEstimateTotals,
   lineTotals,
   paidAmountFor,
   stageFinanceTotals,

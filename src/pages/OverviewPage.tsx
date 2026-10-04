@@ -18,8 +18,8 @@ import {
   Truck,
 } from 'lucide-react';
 import type { CSSProperties } from 'react';
-import { financeTotals, paidAmountFor, projectProgressTotals as progressTotals } from '../domain/index';
-import { formatDate, formatDateTime, shortMoney } from '../presentation/formatting';
+import { financeTotals, sourceEstimateTotals, paidAmountFor, projectProgressTotals as progressTotals } from '../domain/index';
+import { formatDate, formatDateTime, money, shortMoney } from '../presentation/formatting';
 import { stageStatusLabel, taskStatusLabel } from '../presentation/status-labels';
 import type { AppState, DashboardWidget, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
@@ -44,6 +44,7 @@ const weekLabel = (start: Date, end: Date) => {
 
 export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId) => void; onOpenProjects?: () => void }) {
   const finance = financeTotals(state);
+  const sourceEstimate = sourceEstimateTotals(state.budgetLines);
   const progress = progressTotals(state);
   const currentStage = state.stages.find((stage) => ['in_progress', 'blocked', 'rework', 'awaiting_inspection'].includes(stage.status))
     ?? state.stages.find((stage) => stage.status === 'ready')
@@ -157,8 +158,9 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
           tone={finance.received < finance.paid ? 'warning' : 'positive'}
           onClick={() => onNavigate('finance')}
         />
-        <MetricCard label="Смета" value={shortMoney(finance.plan)} detail={<span>{state.budgetMeta.approvedAt ? 'План принят' : 'Исходный план · нужна сверка'}</span>} icon={CircleDollarSign} onClick={() => onNavigate('finance')} />
-        <MetricCard label="Отклонение от сметы" value={finance.plan ? `${finance.forecast > finance.plan ? '+' : ''}${shortMoney(finance.forecast - finance.plan)}` : '—'} detail={<span>Прогноз {shortMoney(finance.forecast)}</span>} icon={TrendingUp} tone={finance.forecast > finance.plan ? 'warning' : 'default'} onClick={() => onNavigate('finance')} />
+        <MetricCard label="Смета · план" value={shortMoney(finance.plan)} detail={<span>{sourceEstimate ? `«Факт» в смете: ${money(sourceEstimate.fact)}` : state.budgetMeta.approvedAt ? 'План принят' : 'Исходный план · нужна сверка'}</span>} icon={CircleDollarSign} onClick={() => onNavigate('finance')} />
+        <MetricCard label={sourceEstimate ? 'Отклонение в смете' : 'Отклонение от сметы'} value={sourceEstimate ? `${sourceEstimate.deviation > 0 ? '+' : ''}${shortMoney(sourceEstimate.deviation)}` : finance.plan ? `${finance.forecast > finance.plan ? '+' : ''}${shortMoney(finance.forecast - finance.plan)}` : '—'} detail={<span>{sourceEstimate ? 'Колонка «Факт» − исходный план' : `Прогноз ${shortMoney(finance.forecast)}`}</span>} icon={TrendingUp} tone={(sourceEstimate?.deviation ?? finance.forecast - finance.plan) > 0 ? 'warning' : 'default'} onClick={() => onNavigate('finance')} />
+        {sourceEstimate && <p className="overview-money__note">«Факт» из таблицы включает резерв и расчётные статьи. Отдельные оплаты учитываются в карточке «Потрачено».</p>}
         <p className="overview-money__note">Осталось оплатить по прогнозу: <strong>{shortMoney(Math.max(0, finance.forecast - finance.paid))}</strong>. По внесённым данным; фактическую стоимость завершения нужно сверить.</p>
       </section>}
 
