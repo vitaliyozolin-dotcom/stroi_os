@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   WalletCards,
 } from 'lucide-react';
-import { acceptedAmountFor, financeTotals, lineTotals, paidAmountFor, financeMoney, needsExpenseApproval, expenseAcceptanceSources, financeActionError } from '../domain/index';
+import { acceptedAmountFor, financeTotals, sourceEstimateTotals, lineTotals, paidAmountFor, financeMoney, needsExpenseApproval, expenseAcceptanceSources, financeActionError } from '../domain/index';
 import { formatDate, money, shortMoney } from '../presentation/formatting';
 import type { AppState, ExpenseStatus, FinanceEntry, ProjectDocument } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
@@ -31,6 +31,7 @@ const statusLabels: Record<ExpenseStatus, string> = {
 export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpenQuestions }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenQuestions: () => void }) {
   const saveChange = createFinanceCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const totals = financeTotals(state);
+  const sourceEstimate = sourceEstimateTotals(state.budgetLines);
   const [showForm, setShowForm] = useState(false);
   const [showHistoryImport, setShowHistoryImport] = useState(false);
   const [formKind, setFormKind] = useState<'expense' | 'income'>('expense');
@@ -195,6 +196,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
       <section className="panel finance-summary" data-tour="budget-plan">
         <SectionHeader eyebrow={`Смета ${state.budgetMeta.version}`} title="Бюджет по пакетам работ" action={<div className="finance-summary__legend"><span>План</span><span>Прогноз</span><span>Оплачено</span></div>} />
         <div className="budget-source"><div><small>Откуда берётся план</small><strong>{state.budgetMeta.source}</strong><p>{state.budgetMeta.approvedBy ? `Утвердил: ${state.budgetMeta.approvedBy}` : 'Ещё не утверждена'}{state.budgetMeta.approvedAt ? ` · ${formatDate(state.budgetMeta.approvedAt, true)}` : ''}</p></div><div><small>Откуда берётся проект</small><strong>{state.project.source ?? 'Создан в ИКИОМА ОС'}</strong><p>{state.project.contractNumber ? `Договор ${state.project.contractNumber}` : state.project.model}</p></div><p>{state.budgetMeta.note}</p></div>
+        {sourceEstimate && <section className="finance-drilldown" aria-label="Итоги исходной сметы"><div><small>План в исходной смете</small><strong>{money(sourceEstimate.plan)}</strong></div><div><small>Колонка «Факт»</small><strong>{money(sourceEstimate.fact)}</strong></div><div><small>«Факт» минус план</small><strong>{money(sourceEstimate.deviation)}</strong></div><p>Разница пересчитана из итогов. Эти суммы не складываются с реестром оплат и не подтверждают расходование резерва.</p></section>}
         <div className="budget-table" role="table" aria-label="Бюджет проекта">
           <div className="budget-table__head" role="row">
             <span>Пакет работ</span><span>План</span><span>Обязательства</span><span>Принято</span><span>Оплачено</span><span>Прогноз</span><span>Отклонение</span>

@@ -6,6 +6,16 @@ export const acceptedAmountFor = (entry: AppState['financeEntries'][number]) =>
 export const paidAmountFor = (entry: AppState['financeEntries'][number]) =>
   entry.paidAmount ?? (entry.status === 'paid' ? entry.amount : 0);
 
+// Source-sheet facts include estimates and reserves. They never create payments.
+export const sourceEstimateTotals = (lines: BudgetLine[]) => {
+  const source = lines.filter(line => line.sourceRow && !line.outsideSourceTotal);
+  if (!source.length || source.some(line => (line.sourcePlan ?? line.plan) > 0 && !Number.isFinite(line.sourceFact))) return null;
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const plan = round(source.reduce((sum, line) => sum + (line.sourcePlan ?? line.plan), 0));
+  const fact = round(source.reduce((sum, line) => sum + (Number.isFinite(line.sourceFact) ? line.sourceFact! : 0), 0));
+  return { plan, fact, deviation: round(fact - plan) };
+};
+
 export const financeTotals = (state: AppState) => {
   const expenses = state.financeEntries.filter((entry) => entry.kind === 'expense');
   const income = state.financeEntries.filter((entry) => entry.kind === 'income');

@@ -1,5 +1,6 @@
 /* Compact owner overview and stage updates */
 .overview-money { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.overview-money .metric-card > strong { font-size: clamp(25px, 2.4vw, 38px); white-space: nowrap; }
 .overview-money__note { grid-column: 1 / -1; margin: 0; font-size: 12px; color: #65675f; line-height: 1.5; }
 .stage-quick { display: grid; gap: 16px; }
 .stage-quick__actions { display: flex; gap: 8px; flex-wrap: wrap; }

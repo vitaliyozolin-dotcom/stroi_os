@@ -15,6 +15,17 @@ const current = () => {
   return state;
 };
 
+test('a purchase without invoice number keeps its actual supplier label and deduplicates', () => {
+  const input = register();
+  delete input.paidInvoices[0].number;
+  input.paidInvoices[0].vendor = 'Петрович';
+  const first = prepareHistoryImport(current(), input, identity.name, now, false);
+  assert.equal(first.state.financeEntries[0].description, 'Петрович · Материалы');
+  const second = prepareHistoryImport(first.state, input, identity.name, now, false);
+  assert.equal(second.added, 0);
+  assert.deepEqual(second.state, first.state);
+});
+
 test('import preserves original state, source totals, prior budget and unknown actual payment date', () => {
   const before = current(), snapshot = structuredClone(before);
   before.financeEntries.push({ id: 'old', kind: 'income', status: 'paid', amount: 100, date: '2026-09-01', counterparty: 'Заказчик', description: 'Аванс' });
