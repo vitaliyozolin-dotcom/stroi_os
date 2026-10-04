@@ -2,7 +2,8 @@ import { BaselinePanel, planShiftLabel } from '../components/BaselinePanel';
 import { StageControlModal } from '../components/StageControlModal';
 import { SiteProgress } from '../components/SiteProgress';
 import { ScheduleReconciliation } from '../components/ScheduleReconciliation';
-import { forecastSchedule } from '../../sites/lib/schedule-forecast.js';
+import { automaticSchedule, plannedStageDays } from '../../sites/lib/automatic-schedule.js';
+import { ProjectScheduleDates, useScheduleToday } from '../components/ProjectScheduleDates';
 import type { StageAction } from '../application/stage-control';
 import { planDays as baselineDays } from '../../sites/lib/plan-baseline.js';
 import { planToday } from '../../sites/lib/plan-baseline.js';
@@ -68,7 +69,8 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
   const [dateError, setDateError] = useState('');
   const [dateForm, setDateForm] = useState({ planStart: '', planEnd: '', forecastEnd: '', dependencyId: '', responsibleId: '', reason: '' });
   const selected = state.stages.find((stage) => stage.id === selectedId) ?? defaultStage!;
-  const forecast = useMemo(() => forecastSchedule(state), [state]);
+  const todayKey = useScheduleToday();
+  const forecast = useMemo(() => automaticSchedule(state, todayKey), [state, todayKey]);
   const calculated = forecast.end ? forecast.rows.find((row) => row.id === selected.id) : undefined;
   useEffect(() => {
     if (focusId && state.stages.some((stage) => stage.id === focusId)) setSelectedId(focusId);
@@ -85,7 +87,6 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
   const stageDocuments = state.documents.filter((item) => item.stageId === selected.id);
   const stageFinancialTotals = stageFinanceTotals(state, selected.id);
   const selectedWeeks = stageWeekRange(state.project.startDate, selected.planStart, selected.planEnd);
-  const todayKey = new Date().toISOString().slice(0, 10);
   const currentWeek = projectWeekRange(state.project.startDate, todayKey);
   const projectStarted = todayKey >= state.project.startDate;
 
@@ -194,7 +195,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
       </section>
 
       <BaselinePanel state={state} role={role} actor={actor} onChange={saveChange} />
-      <section className="panel schedule-brief"><SectionHeader title={forecast.end ? `Окончание работ: ${formatDate(forecast.end)}` : 'Для расчёта окончания нужна сверка'} action={<button className="button button--primary" type="button" onClick={() => setReviewing(true)}>{role === 'client' ? 'Посмотреть сведения' : 'Сверить ППР и факты'}</button>} /><p>{forecast.end ? 'Ниже отдельно показаны исходный план, действующий план и расчёт/факт.' : 'Неподтверждённые прогнозные даты на диаграмме не показаны. Откройте сверку: структура, состояние и остатки работ.'}</p></section>
+      <ProjectScheduleDates state={state} onReview={() => setReviewing(true)} />
 
       <section className="panel gantt-panel">
         <SectionHeader eyebrow="Диаграмма Ганта · недели с понедельника" title="Начало, окончание и последовательность" action={<div className="gantt-legend"><span><i className="gantt-legend__baseline" /> План 0</span><span><i className="gantt-legend__plan" /> действующий план</span><span><i className="gantt-legend__forecast" /> расчёт / факт</span><span><i className="gantt-legend__today" /> сегодня</span></div>} />
@@ -214,11 +215,11 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
               const forecastDays = row ? Math.max(1, gantt.offset(row.end) - gantt.offset(row.start) + 1) : 0;
               return (
                 <button type="button" className={stage.id === selected.id ? 'gantt-row gantt-row--selected' : 'gantt-row'} key={stage.id} onClick={() => setSelectedId(stage.id)}>
-                  <span className="gantt-row__label"><i>{String(stage.order).padStart(2, '0')}</i><span><strong>{stage.shortName}</strong><small>{stage.schedule ? `${stage.schedule.phase} · связей: ${stage.schedule.dependencies.length}` : 'структура не сверена'}</small></span></span>
+                  <span className="gantt-row__label"><i>{String(stage.order).padStart(2, '0')}</i><span><strong>{stage.shortName}</strong><small>{stage.schedule ? `${stage.schedule.phase} · связей: ${stage.schedule.dependencies.length}` : `${plannedStageDays(stage) ?? '—'} календ. дн. по ППР`}</small></span></span>
                   <span className="gantt-row__timeline" style={{ width: `${gantt.width}px`, backgroundSize: `${gantt.dayWidth * 7}px 100%` }}>
                     {projectStarted && gantt.currentWeekOffset >= 0 && gantt.currentWeekOffset <= gantt.totalDays && <i aria-hidden="true" style={{ position: 'absolute', left: `${gantt.currentWeekOffset * gantt.dayWidth}px`, top: 0, bottom: 0, width: `${gantt.dayWidth * 7}px`, background: 'rgba(42, 113, 82, .045)', pointerEvents: 'none' }} />}
                     {gantt.todayOffset >= 0 && gantt.todayOffset <= gantt.totalDays && <i className="gantt-today-line" style={{ left: `${gantt.todayOffset * gantt.dayWidth}px` }} />}
-                    {row && <i className={`gantt-forecast-bar${row.source === 'fact' ? ' gantt-forecast-bar--fact' : ''}`} title={`${row.source === 'fact' ? 'Факт' : 'Расчёт'}: ${row.start} — ${row.end}`} style={{ left: `${gantt.offset(row.start) * gantt.dayWidth}px`, width: `${forecastDays * gantt.dayWidth}px` }} />}
+                    {row && <i className={`gantt-forecast-bar${row.source === 'fact' ? ' gantt-forecast-bar--fact' : ''}`} title={`${row.source === 'fact' ? 'Факт' : row.source === 'observation' ? 'Подтверждено к дате' : forecast.kind === 'estimated' ? 'Предварительный расчёт' : 'Расчёт'}: ${row.start} — ${row.end}`} style={{ left: `${gantt.offset(row.start) * gantt.dayWidth}px`, width: `${forecastDays * gantt.dayWidth}px` }} />}
                     {stage.baseline && <i className="gantt-baseline-bar" title={`План 0: ${stage.baseline.start || 'начало не указано'} — ${stage.baseline.end}`} style={{ left: `${gantt.offset(stage.baseline.start || stage.baseline.end) * gantt.dayWidth}px`, width: `${Math.max(1, (baselineDays(stage.baseline.end, stage.baseline.start || stage.baseline.end) || 0) + 1) * gantt.dayWidth}px` }} />}
                     <i className={`gantt-plan-bar gantt-plan-bar--${stage.status}`} style={{ left: `${left}px`, width: `${planDays * gantt.dayWidth}px` }}><span>{stage.progress}%</span></i>
                   </span>
@@ -264,7 +265,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
               <div><CalendarDays size={18} /><span><small>План 0 этапа</small><strong>{selected.baseline ? `${selected.baseline.start ? formatDate(selected.baseline.start) : '—'} — ${formatDate(selected.baseline.end)}` : 'Не зафиксирован'}</strong></span></div>
               <div><Clock3 size={18} /><span><small>Перенос окончания к Плану 0</small><strong>{planShiftLabel(baselineDays(selected.planEnd, selected.baseline?.end))}</strong></span></div>
               <div><CalendarDays size={18} /><span><small>Действующий план</small><strong>{formatDate(selected.planStart)} — {formatDate(selected.planEnd)}</strong></span></div>
-              <div><Clock3 size={18} /><span><small>{calculated?.source === 'fact' ? 'Факт окончания' : 'Расчётное окончание'}</small><strong>{calculated ? formatDate(calculated.end, true) : 'Нужна сверка'}</strong></span></div>
+              <div><Clock3 size={18} /><span><small>{calculated?.source === 'fact' ? 'Факт окончания' : calculated?.source === 'observation' ? 'Готово не позже' : 'Плановое окончание · расчёт'}</small><strong>{calculated ? formatDate(calculated.end, true) : 'Нужны сроки'}</strong></span></div>
               <div><UserRound size={18} /><span><small>Ответственный</small>{selectedCounterparty ? <button type="button" className="entity-link entity-link--compact" onClick={() => setCounterpartyId(selectedCounterparty.id)}>{selected.responsible}</button> : <strong>{selected.responsible}</strong>}</span></div>
               <div><CircleDot size={18} /><span><small>Вес в готовности</small><strong>{selected.weight}% проекта</strong></span></div>
             </div>
@@ -325,7 +326,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
 
           <article className="process-rule-card">
             <HardHat size={20} />
-            <div><strong>Этап — единая точка управления</strong><p>Сроки, задачи, снабжение, документы, контроль качества и деньги собираются по одному `stageId`. Закрыть этап с незавершёнными задачами или непринятыми контрольными точками нельзя.</p></div>
+            <div><strong>Этап — единая точка управления</strong><p>Сроки, задачи, снабжение, документы, контроль качества и деньги собираются в карточке этапа. Владелец может лично подтвердить готовый этап; задачи, контроль качества и оплаты сохраняют собственные записи.</p></div>
           </article>
         </aside>
       </section>

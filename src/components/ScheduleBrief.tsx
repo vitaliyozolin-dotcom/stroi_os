@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { planDays, planToday } from '../../sites/lib/plan-baseline.js';
+import { ProjectScheduleDates } from './ProjectScheduleDates';
 import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { forecastSchedule, simulateSchedule, type ScheduleForecast } from '../../sites/lib/schedule-forecast.js';
@@ -40,21 +40,8 @@ export function ScheduleBrief({ state, role, actor, userId, onChange, onNavigate
     </section>
     <details className="panel schedule-brief__details"><summary>Исходные сроки, история переносов и отдельные записи</summary><BaselinePanel compact state={state} role={role} actor={actor} onChange={onChange} /><StageRadar state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} /></details>
   </>;
-  const delay = view.baselineShift;
-  const elapsed = view.baselineEnd ? Math.max(0, planDays(planToday(), view.baselineEnd) ?? 0) : 0;
   return <>
-    <section className="panel overview-dates" aria-label="Сроки проекта">
-      <SectionHeader title="Сроки" action={<button className="text-button" type="button" onClick={() => onNavigate('schedule')}>График работ</button>} />
-      <div className="overview-dates__grid">
-        <div><small>Готовность по плану</small><strong>{view.baselineEnd ? formatDate(view.baselineEnd, true) : 'Не указана'}</strong><span>Исходный ППР</span></div>
-        <div><small>{view.kind === 'actual' ? 'Фактическая готовность' : 'Когда закончим'}</small><strong>{view.end ? formatDate(view.end, true) : 'Нужна сверка'}</strong><span>{view.end ? view.kind === 'actual' ? 'По фактам выполнения' : 'Прогноз по остаткам работ' : 'Обновите состояние этапов'}</span></div>
-        <div className={delay !== null && delay > 0 ? 'overview-dates__delay overview-dates__delay--late' : 'overview-dates__delay'}><small>{delay === null ? 'Срок по плану' : 'Отставание от плана'}</small><strong>{delay === null ? elapsed ? `Прошёл ${elapsed} дн. назад` : view.baselineEnd ? 'Ещё не наступил' : 'Не указан' : delay > 0 ? `+${delay} дн.` : delay < 0 ? `−${Math.abs(delay)} дн.` : 'В срок'}</strong><span>{delay === null ? 'Итоговое отставание ещё не рассчитано' : 'Календарных дней к исходному ППР'}</span></div>
-      </div>
-      <div className="overview-dates__footer">
-        <span>Сдача клиенту по договору: <strong>{state.project.targetDate ? formatDate(state.project.targetDate, true) : 'Не указана'}</strong></span>
-        {issueIds.length > 0 && <button type="button" className="text-button" onClick={() => setReview(view.issues[0].stageId)}>{role === 'client' ? 'Что нужно для прогноза' : 'Уточнить прогноз'} · {issueIds.length} работ</button>}
-      </div>
-    </section>
+    <ProjectScheduleDates state={state} action={<button className="text-button" type="button" onClick={() => onNavigate('schedule')}>График работ</button>} onReview={() => setReview(view.issues[0]?.stageId || state.stages[0]?.id || '')} />
     {children}
     <details className="panel overview-schedule-details">
       <summary>Подробности сроков и сверка ППР</summary>
