@@ -147,7 +147,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
         <MetricCard
           label="Потрачено"
           value={shortMoney(finance.paid)}
-          detail={<span>Подтверждённые оплаты в реестре</span>}
+          detail={<span>Учтённые оплаты · основания в реестре</span>}
           icon={Banknote}
           onClick={() => onNavigate('finance')}
         />
