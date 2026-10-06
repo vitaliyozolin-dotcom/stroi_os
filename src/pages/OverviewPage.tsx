@@ -100,11 +100,11 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
 
       {role === 'management' && show('finance') && <CostGroups state={state} onChange={onChange} compact />}
       <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate}>
-        {show('progress') && <section className="overview-ppr-progress" aria-label="Выполнение ППР" style={{ width: '100%', maxWidth: 420 }}>
-          <MetricCard label="Выполнение ППР" value={state.stages.length ? `${progress.physical}%` : '—'}
-            detail={<><ProgressBar value={progress.physical} /><span>{state.stages.length ? 'По внесённым этапам и задачам · не готовность всего дома' : 'Добавьте этапы в график работ'}</span></>}
-            icon={TrendingUp} tone="dark" onClick={() => onNavigate('schedule')} />
-        </section>}
+        {show('progress') && <button className="overview-ppr-progress" type="button" onClick={() => onNavigate('schedule')} aria-label="Выполнение ППР — открыть график работ">
+          <span className="overview-ppr-progress__heading"><span>Выполнение ППР</span><strong>{state.stages.length ? `${progress.physical}%` : '—'}</strong></span>
+          <ProgressBar value={progress.physical} />
+          <small>{state.stages.length ? 'По внесённым этапам и задачам · не готовность всего дома' : 'Добавьте этапы в график работ'}</small>
+        </button>}
       </ScheduleBrief>
       {show('progress') && <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />}
       <OverviewFocus state={state} role={role} show={show} onNavigate={onNavigate} />

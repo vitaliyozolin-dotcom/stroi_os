@@ -41,3 +41,15 @@
 .overview-focus__action--static { cursor: default; }
 .overview-focus__action--static:hover { background: transparent; }
 .overview-focus__section:only-child { grid-column: 1 / -1; }
+
+/* Progress belongs to the full-width schedule section, directly above its dates. */
+.overview-ppr-progress { display: grid; gap: 10px; width: 100%; min-width: 0; margin: 0 0 24px; padding: 18px 20px; border: 0; border-radius: 4px; background: #1c231c; color: #f5f5ef; text-align: left; font: inherit; cursor: pointer; }
+.overview-ppr-progress__heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.overview-ppr-progress__heading > span { font-size: 14px; font-weight: 550; }
+.overview-ppr-progress__heading strong { color: #ceff52; font-size: 26px; line-height: 1; }
+.overview-ppr-progress small { font-size: 12px; line-height: 1.5; color: #c1c8b8; }
+.overview-ppr-progress:focus-visible { outline: 2px solid #526644; outline-offset: 4px; }
+.overview-ppr-progress:hover { background: #273025; }
+@media (max-width: 600px) { .overview-ppr-progress { padding: 16px; } }
+.overview-ppr-progress .progress-wrap { background: rgba(255, 255, 255, .14); }
+.overview-ppr-progress .progress-bar { background: #ceff52; }

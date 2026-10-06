@@ -11,13 +11,14 @@ export function useScheduleToday() {
   return today;
 }
 
-export function ProjectScheduleDates({ state, action, onReview }: { state: AppState; action?: ReactNode; onReview?: () => void }) {
+export function ProjectScheduleDates({ state, action, onReview, children }: { state: AppState; action?: ReactNode; onReview?: () => void; children?: ReactNode }) {
   const today = useScheduleToday(), view = automaticSchedule(state, today);
   const observed = view.kind === 'observed', complete = observed || view.kind === 'actual';
   const delay = view.baselineShift;
   const remaining = state.stages.filter(stage => stage.schedule?.kind !== 'summary' && !['accepted', 'awaiting_inspection'].includes(stage.status));
   return <section className="panel overview-dates" aria-label="Сроки проекта">
     <SectionHeader title="Сроки" action={action} />
+    {children}
     <div className="overview-dates__grid">
       <div><small>Исходный план</small><strong>{view.baselineEnd ? formatDate(view.baselineEnd, true) : 'Не указан'}</strong><span>Окончание работ по ППР</span></div>
       <div><small>{view.kind === 'actual' ? 'Работы по ППР выполнены' : observed ? 'Готовность подтверждена' : 'Плановая готовность по ППР'}</small><strong>{view.end ? formatDate(view.end, true) : 'Нужны сроки'}</strong><span>{view.kind === 'estimated' ? 'Автоматический расчёт · предварительно' : view.kind === 'confirmed' ? 'Расчёт по уточнённым остаткам' : observed ? 'Точная дата выполнения неизвестна' : view.kind === 'actual' ? 'По датам выполнения' : view.issues[0]?.message || 'Добавьте этапы и длительности'}</span></div>
