@@ -2,6 +2,7 @@ import { Banknote } from 'lucide-react';
 import type { AppState } from '../entities/index';
 import { paidAmountFor, paymentMovements, undatedPayments } from '../domain/index';
 import { money } from '../presentation/formatting';
+import { financeCalendarToday } from '../domain/finance-calendar';
 const startOfWeek = (date: Date) => {
   const value = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12));
   value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
@@ -20,7 +21,7 @@ const weekLabel = (start: Date, end: Date) => {
 };
 
 export function CashflowPanel({ state }: { state: AppState }) {
- const today = new Date();
+ const today = new Date(`${financeCalendarToday()}T12:00:00Z`);
  const undated = undatedPayments(state);
   const currentWeek = startOfWeek(today);
   const cashflow = Array.from({ length: 6 }, (_, index) => {
