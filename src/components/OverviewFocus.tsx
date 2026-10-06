@@ -58,8 +58,12 @@ export function OverviewFocus({ state, role, show, onNavigate }: {
       <div className="overview-focus__expenses">{expenses.map(entry => {
         const movements = paymentMovements(entry).filter(movement => movement.amount > 0);
         const date = movements.length === 1 ? movements[0].date : null;
+        const prefix = `${entry.counterparty} · `;
+        const description = entry.description.startsWith(prefix) ? entry.description.slice(prefix.length) : entry.description;
+        const title = description.split('. ')[0] || entry.description;
+        const counterparty = entry.counterparty.startsWith('Не указан в смете') ? '' : entry.counterparty;
         return <button className="overview-focus__expense" type="button" key={entry.id} onClick={() => onNavigate('finance', entry.id)}>
-          <span><strong>{entry.description}</strong><small>{entry.counterparty || 'Контрагент не указан'} · {date ? `оплата ${formatDate(date)}` : movements.length > 1 ? 'Несколько оплат' : 'Дата оплаты не указана'}</small></span><b>{money(paidAmountFor(entry))}</b><ChevronRight size={16} />
+          <span><strong>{title}</strong><small>{counterparty && `${counterparty} · `}{date ? `оплата ${formatDate(date)}` : movements.length > 1 ? 'Несколько оплат' : 'Дата оплаты не указана'}</small></span><b>{money(paidAmountFor(entry))}</b><ChevronRight size={16} />
         </button>;
       })}</div>
       {!expenses.length && <p className="overview-focus__empty">Учтённых оплат пока нет.</p>}
