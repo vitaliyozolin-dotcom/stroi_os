@@ -1,10 +1,8 @@
+import { OverviewFocus } from '../components/OverviewFocus';
 import { ConstructionNow } from '../components/ConstructionNow';
 import { CostGroups } from '../components/CostGroups';
 import { ScheduleBrief } from '../components/ScheduleBrief';
-import { recordedScheduleStatus } from '../../sites/lib/stage-control.js';
-import { planToday } from '../../sites/lib/plan-baseline.js';
 import {
-  AlertTriangle,
   ArrowUpRight,
   Banknote,
   CalendarClock,
@@ -12,25 +10,16 @@ import {
   ChevronRight,
   CircleDollarSign,
   Clock3,
-  ListTodo,
-  PackageCheck,
   ShieldCheck,
   TrendingUp,
   Truck,
 } from 'lucide-react';
-import type { CSSProperties } from 'react';
-import { financeTotals, sourceEstimateTotals, paidAmountFor, paymentMovements, undatedPayments, projectProgressTotals as progressTotals } from '../domain/index';
-import { formatDate, formatDateTime, money, shortMoney } from '../presentation/formatting';
-import { stageStatusLabel, taskStatusLabel } from '../presentation/status-labels';
+import { financeTotals, sourceEstimateTotals, paidAmountFor, projectProgressTotals as progressTotals } from '../domain/index';
+import { formatDateTime, money, shortMoney } from '../presentation/formatting';
+import { stageStatusLabel } from '../presentation/status-labels';
 import type { AppState, DashboardWidget, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { MetricCard, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
-
-const startOfWeek = (date: Date) => {
-  const value = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12));
-  value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
-  return value;
-};
 
 const shiftDays = (date: Date, days: number) => {
   const value = new Date(date);
@@ -38,14 +27,8 @@ const shiftDays = (date: Date, days: number) => {
   return value;
 };
 
-const weekLabel = (start: Date, end: Date) => {
-  const formatter = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-  return `${formatter.format(start)}–${formatter.format(end)}`;
-};
-
-export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId) => void; onOpenProjects?: () => void }) {
+export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
   const finance = financeTotals(state);
-  const undated = undatedPayments(state);
   const sourceEstimate = sourceEstimateTotals(state.budgetLines);
   const progress = progressTotals(state);
   const currentStage = state.stages.find((stage) => ['in_progress', 'blocked', 'rework', 'awaiting_inspection'].includes(stage.status))
@@ -54,13 +37,6 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
   const reviewCount = state.checkpoints.filter((item) => item.status === 'in_review').length;
   const reworkCount = state.checkpoints.filter((item) => item.status === 'rework').length;
   const riskySupply = state.procurement.filter((item) => item.risk);
-  const todayKey = planToday();
-  const overdueTaskIds = new Set(recordedScheduleStatus(state, todayKey).tasks.overdue.map((row) => row.record.id));
-  const activeTasks = state.tasks
-    .filter((task) => !task.id.startsWith('auto-stage-') && !['done', 'canceled'].includes(task.status))
-    .sort((a, b) => Number(overdueTaskIds.has(b.id)) - Number(overdueTaskIds.has(a.id)) || a.dueDate.localeCompare(b.dueDate));
-  const overdueTaskCount = overdueTaskIds.size;
-  const nextDecision = state.decisions.find((item) => item.status === 'waiting');
   const margin = state.project.contractValue - finance.forecast;
   const marginPercent = state.project.contractValue > 0 ? Math.round(margin / state.project.contractValue * 100) : null;
   const today = new Date();
@@ -68,28 +44,6 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
   const cashNeed = state.financeEntries
     .filter((entry) => entry.kind === 'expense' && paidAmountFor(entry) < entry.amount && new Date(`${entry.date}T23:59:59Z`) <= cashCutoff)
     .reduce((sum, entry) => sum + Math.max(0, entry.amount - paidAmountFor(entry)), 0);
-  const currentWeek = startOfWeek(today);
-  const cashflow = Array.from({ length: 6 }, (_, index) => {
-    const start = shiftDays(currentWeek, (index - 5) * 7);
-    const end = shiftDays(start, 6);
-    return { start, end, label: weekLabel(start, end), expense: 0, income: 0 };
-  });
-  for (const entry of state.financeEntries) {
-    for (const movement of paymentMovements(entry)) {
-      const amount = movement.amount;
-      if (amount <= 0) continue;
-      const paidAt = movement.date;
-      if (!paidAt) continue;
-      const date = new Date(`${paidAt.slice(0, 10)}T12:00:00Z`);
-      const point = cashflow.find((item) => date >= item.start && date <= item.end);
-      if (!point) continue;
-      if (entry.kind === 'income') point.income += amount / 1000;
-      else point.expense += amount / 1000;
-    }
-  }
-  const maxCash = Math.max(1, ...cashflow.flatMap((point) => [point.expense, point.income]));
-  const hasCashflow = cashflow.some((point) => point.expense > 0 || point.income > 0);
-  const reworkCheckpoint = state.checkpoints.find((item) => item.status === 'rework');
   const lastUpdated = state.activity[0]?.timestamp ?? state.project.createdAt;
   const show = (widget: DashboardWidget) => role === 'foreman' || state.settings.dashboardWidgets.includes(widget);
 
@@ -169,9 +123,9 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
       </section>}
 
       {role === 'management' && show('finance') && <CostGroups state={state} onChange={onChange} compact />}
-      <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate}>
-        {show('progress') && <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />}
-      </ScheduleBrief>
+      <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
+      {show('progress') && <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />}
+      <OverviewFocus state={state} role={role} show={show} onNavigate={onNavigate} />
 
       {(show('progress') || show('finance')) && <details className="panel overview-secondary-metrics" open={role === 'foreman'}>
         <summary>Дополнительные показатели проекта</summary>
@@ -211,7 +165,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
             <MetricCard
               label="Нужно денег на 30 дней"
               value={shortMoney(cashNeed)}
-              detail={<span>{shortMoney(finance.received - finance.paid)} сейчас доступно по проекту</span>}
+              detail={<span>{shortMoney(finance.received - finance.paid)} — остаток по учёту</span>}
               icon={CalendarClock}
               onClick={() => onNavigate('finance')}
             />
@@ -220,144 +174,10 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
       </section>}
       </details>}
 
-      {(show('progress') || show('decisions')) && <section className="dashboard-grid dashboard-grid--main">
-        {show('progress') && currentStage && <details className="panel panel--progress"><summary>Подробности выполнения по задачам</summary>
-          <SectionHeader
-            eyebrow="Производство"
-            title="Ход строительства"
-            action={<button className="text-button" type="button" onClick={() => onNavigate('schedule')}>Все этапы <ChevronRight size={16} /></button>}
-          />
-          <div className="current-stage-card">
-            <div className="current-stage-card__number">{String(currentStage.order).padStart(2, '0')}</div>
-            <div className="current-stage-card__body">
-              <div className="current-stage-card__top">
-                <div>
-                  <span>Этап для подробного просмотра</span>
-                  <h3>{currentStage.name}</h3>
-                </div>
-                <StatusBadge label={stageStatusLabel[currentStage.status]} tone={currentStage.status === 'rework' || currentStage.status === 'blocked' ? 'danger' : 'blue'} />
-              </div>
-              <div className="current-stage-card__progress">
-                <ProgressBar value={currentStage.progress} />
-                <strong>{currentStage.progress}% по задачам</strong>
-              </div>
-              <div className="current-stage-card__meta">
-                <span><Clock3 size={15} /> текущий план до {formatDate(currentStage.planEnd)}</span>
-                <span>Ответственный: {currentStage.responsible}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="stage-strip" aria-label="Этапы проекта">
-            {state.stages.slice(0, 8).map((stage) => (
-              <button key={stage.id} type="button" className={`stage-strip__item stage-strip__item--${stage.status}`} onClick={() => onNavigate('schedule')}>
-                <span>{stage.order}</span>
-                <strong>{stage.shortName}</strong>
-                <small>{stage.status === 'accepted' ? '100%' : stage.progress ? `${stage.progress}%` : formatDate(stage.planStart)}</small>
-              </button>
-            ))}
-          </div>
-        </details>}
-
-        {show('decisions') && <article className="panel decision-panel">
-          <SectionHeader eyebrow="Контроль" title="Требует решения" action={<span className="count-badge">{reworkCount + riskySupply.length + (nextDecision ? 1 : 0)}</span>} />
-          <div className="decision-list">
-            {reworkCheckpoint && (
-              <button type="button" onClick={() => onNavigate('quality')} className="decision-item decision-item--danger">
-                <span className="decision-item__icon"><AlertTriangle size={18} /></span>
-                <span><strong>{reworkCheckpoint.title}</strong><small>{reworkCheckpoint.zone}{reworkCheckpoint.note ? ` · ${reworkCheckpoint.note}` : ' · требуется доработка'}</small></span>
-                <ChevronRight size={17} />
-              </button>
-            )}
-            {riskySupply.slice(0, 1).map((item) => (
-              <button key={item.id} type="button" onClick={() => onNavigate('procurement')} className="decision-item decision-item--warning">
-                <span className="decision-item__icon"><Truck size={18} /></span>
-                <span><strong>{item.item}</strong><small>{item.risk}</small></span>
-                <ChevronRight size={17} />
-              </button>
-            ))}
-            {nextDecision && (
-              <div className="decision-item decision-item--static">
-                <span className="decision-item__icon"><Clock3 size={18} /></span>
-                <span><strong>Ответ клиента</strong><small>{nextDecision.title} · до {formatDate(nextDecision.dueDate)}</small></span>
-                <StatusBadge label="Ожидаем" tone="neutral" />
-              </div>
-            )}
-            {!reworkCheckpoint && !riskySupply.length && !nextDecision && <div className="overview-task-empty"><CheckCircle2 size={20} /> Решений, требующих внимания, нет</div>}
-          </div>
-          <div className="decision-panel__footer">
-            <ShieldCheck size={18} />
-            <p><strong>{reviewCount} работа на проверке</strong><br />Оплата станет доступна только после приёмки.</p>
-          </div>
-        </article>}
-      </section>}
-
-      <section className={`dashboard-grid dashboard-grid--bottom ${role === 'foreman' ? 'dashboard-grid--operations' : ''}`}>
-        {role !== 'foreman' && show('cashflow') && <article className="panel cash-panel">
-          <SectionHeader eyebrow="6 недель" title="Денежный поток" action={<button className="text-button" type="button" onClick={() => onNavigate('finance')}>Финансы <ChevronRight size={16} /></button>} />
-          <div className="chart-legend"><span><i className="legend-dot legend-dot--income" /> Поступления</span><span><i className="legend-dot legend-dot--expense" /> Выплаты</span><small>тыс. ₽</small></div>
-          {hasCashflow ? <div className="cash-chart">
-            {cashflow.map((point) => (
-              <div className="cash-chart__column" key={point.label}>
-                <div className="cash-chart__bars">
-                  <span className="cash-chart__bar cash-chart__bar--income" style={{ height: `${Math.max(2, point.income / maxCash * 100)}%` }} title={`Поступления ${point.income} тыс. ₽`} />
-                  <span className="cash-chart__bar cash-chart__bar--expense" style={{ height: `${Math.max(2, point.expense / maxCash * 100)}%` }} title={`Выплаты ${point.expense} тыс. ₽`} />
-                </div>
-                <small>{point.label}</small>
-              </div>
-            ))}
-          </div> : <div className="task-empty"><Banknote size={28} /><strong>Нет датированных движений за эти недели</strong><p>Оплаты без установленной даты учитываются в общих итогах, но не распределяются по неделям.</p></div>}
-          {(undated.expense > 0 || undated.income > 0) && <p role="note">Дата не установлена: выплаты {money(undated.expense)}, поступления {money(undated.income)}. Эти суммы не включены в график.</p>}
-          {state.financeEntries.some(entry => !entry.payments?.length && paidAmountFor(entry) > 0) && <p role="note">Старые записи показаны по указанной в них дате оплаты. Их разбивка на отдельные платежи ещё не сверена.</p>}
-        </article>}
-
-        {show('quality') && <article className="panel compact-panel">
-          <SectionHeader eyebrow="Качество" title="Скрытые работы" />
-          <div className="quality-score">
-            <div className="quality-score__ring" style={{ '--score': `${progress.accepted * 3.6}deg` } as CSSProperties}><span>{progress.accepted}%</span></div>
-            <div><strong>{state.checkpoints.filter((item) => item.status === 'accepted').length} акта принято</strong><p>{reviewCount} на проверке · {reworkCount} на доработке</p></div>
-          </div>
-          <button className="button button--secondary button--full" type="button" onClick={() => onNavigate('quality')}><CheckCircle2 size={17} /> Открыть контроль качества</button>
-        </article>}
-
-        {show('supply') && <article className="panel compact-panel">
-          <SectionHeader eyebrow="Снабжение" title="Ближайшие поставки" />
-          <div className="delivery-list">
-            {state.procurement.filter((item) => ['ordered', 'in_transit', 'rfq'].includes(item.status)).slice(0, 3).map((item) => (
-              <button type="button" key={item.id} onClick={() => onNavigate('procurement')}>
-                <span className={item.risk ? 'delivery-list__icon delivery-list__icon--warning' : 'delivery-list__icon'}>{item.status === 'in_transit' ? <Truck size={17} /> : <PackageCheck size={17} />}</span>
-                <span><strong>{item.item}</strong><small>Нужно к {formatDate(item.neededBy)}</small></span>
-                <ChevronRight size={16} />
-              </button>
-            ))}
-            {!state.procurement.some((item) => ['ordered', 'in_transit', 'rfq'].includes(item.status)) && <div className="overview-task-empty"><PackageCheck size={20} /> Ближайших поставок пока нет</div>}
-          </div>
-        </article>}
-      </section>
-
-      {show('tasks') && <section className="panel overview-task-panel">
-        <SectionHeader
-          eyebrow="Команда"
-          title="Задачи и ответственность"
-          action={<button className="text-button" type="button" onClick={() => onNavigate('tasks')}>{overdueTaskCount ? `${overdueTaskCount} просрочено` : 'Все задачи'} <ChevronRight size={16} /></button>}
-        />
-        <div className="overview-task-list">
-          {activeTasks.slice(0, 3).map((task) => (
-            <button type="button" key={task.id} className={overdueTaskIds.has(task.id) ? 'overview-task overview-task--overdue' : 'overview-task'} onClick={() => onNavigate('tasks')}>
-              <span><ListTodo size={17} /></span>
-              <div><strong>{task.title}</strong><small>{task.assigneeName} · {taskStatusLabel[task.status]}</small></div>
-              <div><small>{task.status === 'review' ? 'На проверке' : overdueTaskIds.has(task.id) ? 'Просрочено' : 'Срок'}</small><strong>{formatDate(task.dueDate)}</strong></div>
-              <ChevronRight size={16} />
-            </button>
-          ))}
-          {!activeTasks.length && <div className="overview-task-empty"><CheckCircle2 size={20} /> Активных задач нет</div>}
-        </div>
-      </section>}
-
-      {show('activity') && <section className="panel activity-panel">
-        <SectionHeader eyebrow="Журнал проекта" title="Последние события" />
+      {show('activity') && <details className="overview-history"><summary>История проекта</summary>
+        <SectionHeader eyebrow="Журнал проекта" title="История изменений" />
         <div className="activity-row">
-          {state.activity.slice(0, 3).map((event) => (
+          {state.activity.map((event) => (
             <div className={`activity-card activity-card--${event.tone}`} key={event.id}>
               <span className="activity-card__dot" />
               <div><strong>{event.text}</strong><p>{event.actor} · {formatDateTime(event.timestamp)}</p></div>
@@ -365,7 +185,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
           ))}
           {!state.activity.length && <div className="overview-task-empty"><Clock3 size={20} /> Журнал начнётся с первого рабочего действия</div>}
         </div>
-      </section>}
+      </details>}
     </div>
   );
 }

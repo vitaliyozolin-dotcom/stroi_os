@@ -1,0 +1,43 @@
+/* Homepage: two quiet lists below the construction snapshot. */
+.overview-focus { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; margin: 16px 0 8px; }
+.overview-focus__section { min-width: 0; border-top: 1px solid #d6d9cf; padding-top: 24px; }
+.overview-focus__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.overview-focus__header h2 { margin: 0; font-size: clamp(20px, 2vw, 26px); font-weight: 600; letter-spacing: -.035em; }
+.overview-focus__count { font-size: 14px; color: #646c5e; }
+.overview-focus__action, .overview-focus__expense { display: grid; width: 100%; grid-template-columns: 30px minmax(0, 1fr) 20px; align-items: center; gap: 14px; padding: 20px 0; border: 0; border-bottom: 1px solid #e0e2d8; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.overview-focus__action:hover, .overview-focus__expense:hover { background: #edf0e5; }
+.overview-focus__action:focus-visible, .overview-focus__expense:focus-visible { outline: 2px solid #526644; outline-offset: 4px; }
+.overview-focus__action strong, .overview-focus__expense strong { display: block; font-size: 16px; line-height: 1.45; font-weight: 550; overflow-wrap: anywhere; }
+.overview-focus__action small, .overview-focus__expense small { display: block; margin-top: 5px; color: #6e7469; font-size: 13px; line-height: 1.5; }
+.overview-focus__number { color: #77816e; font-size: 13px; align-self: start; padding-top: 4px; }
+.overview-focus__expense { grid-template-columns: minmax(0, 1fr) auto 16px; }
+.overview-focus__expense strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.overview-focus__expense b { font-size: 16px; font-weight: 600; white-space: nowrap; }
+.overview-focus__hint { margin: 0; color: #6e7469; font-size: 12px; }
+.overview-focus__empty { display: flex; align-items: center; gap: 10px; color: #6e7469; font-size: 14px; padding: 12px 0; }
+.overview-focus__more { margin: 18px 20px 0 0; min-height: 44px; }
+.overview-focus__supplies { margin-top: 24px; }
+.overview-focus__supplies h3 { font-size: 14px; font-weight: 500; color: #6e7469; }
+.overview-focus__supplies button { display: flex; align-items: center; gap: 12px; width: 100%; background: none; border: 0; padding: 12px 0; text-align: left; color: inherit; }
+.overview-focus__supplies button span { flex: 1; }
+.overview-focus__supplies small { white-space: nowrap; }
+.overview-history { border-top: 1px solid #d6d9cf; padding: 18px 0; }
+.overview-history summary, .finance-cashflow summary { cursor: pointer; min-height: 32px; font-size: 14px; color: #61695b; }
+.overview-history .activity-row { display: grid; grid-template-columns: 1fr; max-height: 480px; overflow-y: auto; margin-top: 20px; }
+.finance-cashflow[open] { max-width: 960px; }
+.finance-cashflow > p { color: #6e7469; font-size: 13px; line-height: 1.5; }
+@media (max-width: 1000px) { .overview-focus { grid-template-columns: 1fr; gap: 32px; } }
+@media (max-width: 600px) {
+  .overview-focus { margin-top: 0; gap: 24px; }
+  .overview-focus__section { padding-top: 20px; }
+  .overview-focus__action { gap: 10px; grid-template-columns: 24px minmax(0, 1fr) 18px; }
+  .overview-focus__expense { gap: 10px; grid-template-columns: minmax(0, 1fr) auto; }
+  .overview-focus__expense > svg { display: none; }
+  .overview-focus__expense b { font-size: 14px; }
+  .overview-focus__action strong, .overview-focus__expense strong { font-size: 15px; }
+  .overview-focus__header h2 { font-size: 21px; }
+}
+
+.overview-focus__action--static { cursor: default; }
+.overview-focus__action--static:hover { background: transparent; }
+.overview-focus__section:only-child { grid-column: 1 / -1; }
