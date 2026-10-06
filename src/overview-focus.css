@@ -53,3 +53,4 @@
 @media (max-width: 600px) { .overview-ppr-progress { padding: 16px; } }
 .overview-ppr-progress .progress-wrap { background: rgba(255, 255, 255, .14); }
 .overview-ppr-progress .progress-bar { background: #ceff52; }
+.overview-dates .overview-ppr-progress { color: #f5f5ef; text-decoration: none; }
