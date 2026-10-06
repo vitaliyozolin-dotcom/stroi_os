@@ -30,6 +30,8 @@ export interface BudgetLine extends CostClassification {
 }
 
 export interface FinanceEntry extends CostClassification {
+  payments?: { id: string; amount: number; date: string; document: string; recordedAt: string; recordedBy: string }[];
+  legacyPayment?: { amount: number; lastRecordedDate?: string; document?: string };
   budgetAllocation?: { at: string; by: string; budgetLineId: string };
   historicalPayment?: { existingOperation?: boolean; sourceDocumentId: string; sourceUniqueKey: string; sourceSha256: string; confirmation: string; sourceDate: string; recordedAt: string; recordedBy: string };
   id: string;
