@@ -2,26 +2,21 @@ import { BaselinePanel, planShiftLabel } from '../components/BaselinePanel';
 import { StageControlModal } from '../components/StageControlModal';
 import { SiteProgress } from '../components/SiteProgress';
 import { ScheduleReconciliation } from '../components/ScheduleReconciliation';
-import { automaticSchedule, plannedStageDays } from '../../sites/lib/automatic-schedule.js';
-import { ProjectScheduleDates, useScheduleToday } from '../components/ProjectScheduleDates';
+import { automaticSchedule } from '../../sites/lib/automatic-schedule.js';
+import { useScheduleToday } from '../components/ProjectScheduleDates';
 import type { StageAction } from '../application/stage-control';
 import { planDays as baselineDays } from '../../sites/lib/plan-baseline.js';
 import { planToday } from '../../sites/lib/plan-baseline.js';
 import { createScheduleCommands } from '../application';
 import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   AlertTriangle,
-  ArrowRight,
   CalendarDays,
   Check,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   CircleDollarSign,
-  CircleDot,
   Clock3,
-  HardHat,
   Link2,
   ListTodo,
   LockKeyhole,
@@ -32,13 +27,16 @@ import {
   Send,
   ShieldCheck,
   UserRound,
+  X,
 } from 'lucide-react';
 import { paidAmountFor, projectProgressTotals as progressTotals, stageFinanceTotals } from '../domain/index';
 import { formatDate, money } from '../presentation/formatting';
 import { stageStatusLabel } from '../presentation/status-labels';
-import { addDaysKey, mondayOf, projectWeekNumber, projectWeekRange, stageWeekRange } from '../projectWeek';
+import { projectWeekRange } from '../projectWeek';
+import { ScheduleTimeline, scheduleStageTitle, scheduleDisplayRow } from '../components/ScheduleTimeline';
+import './schedule-page.css';
 import type { AppState, ProjectTask, StageStatus, UserRole } from '../entities/index';
-import { EmptyState, Field, Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
+import { EmptyState, Field, Modal, ProgressBar, StatusBadge } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';
 
 const statusTone = (status: StageStatus): 'neutral' | 'positive' | 'warning' | 'danger' | 'blue' => {
@@ -60,8 +58,9 @@ export function SchedulePage(props: SchedulePageProps) {
 
 function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: SchedulePageProps) {
   const saveChange = createScheduleCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
-  const defaultStage = state.stages.find((stage) => ['in_progress', 'rework', 'awaiting_inspection', 'blocked'].includes(stage.status)) ?? state.stages[0];
+  const defaultStage = state.stages.find((stage) => ['in_progress', 'rework', 'awaiting_inspection', 'blocked'].includes(stage.status)) ?? state.stages.find((stage) => stage.status !== 'accepted') ?? state.stages[0];
   const [selectedId, setSelectedId] = useState(defaultStage?.id ?? '');
+  const [detailOpen, setDetailOpen] = useState(false);
   const [counterpartyId, setCounterpartyId] = useState<string | null>(null);
   const [editingDates, setEditingDates] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -71,9 +70,11 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
   const selected = state.stages.find((stage) => stage.id === selectedId) ?? defaultStage!;
   const todayKey = useScheduleToday();
   const forecast = useMemo(() => automaticSchedule(state, todayKey), [state, todayKey]);
-  const calculated = forecast.end ? forecast.rows.find((row) => row.id === selected.id) : undefined;
+  const calculated = scheduleDisplayRow(selected, forecast);
+  const handledFocus = useRef<string | null>(null);
   useEffect(() => {
-    if (focusId && state.stages.some((stage) => stage.id === focusId)) setSelectedId(focusId);
+    if (!focusId) { handledFocus.current = null; return; }
+    if (handledFocus.current !== focusId && state.stages.some((stage) => stage.id === focusId)) { handledFocus.current = focusId; setSelectedId(focusId); setDetailOpen(true); }
   }, [focusId, state.stages]);
   const selectedCounterparty = state.counterparties.find((item) => item.id === selected.responsibleId)
     ?? state.counterparties.find((item) => item.name.trim().toLocaleLowerCase('ru') === selected.responsible.trim().toLocaleLowerCase('ru'));
@@ -86,42 +87,10 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
   const stageProcurement = state.procurement.filter((item) => item.stageId === selected.id);
   const stageDocuments = state.documents.filter((item) => item.stageId === selected.id);
   const stageFinancialTotals = stageFinanceTotals(state, selected.id);
-  const selectedWeeks = stageWeekRange(state.project.startDate, selected.planStart, selected.planEnd);
   const currentWeek = projectWeekRange(state.project.startDate, todayKey);
   const projectStarted = todayKey >= state.project.startDate;
 
-  const gantt = useMemo(() => {
-    const parse = (value: string) => new Date(`${value}T12:00:00Z`).getTime();
-    const dates = [...state.stages.flatMap((stage) => [stage.planStart, stage.planEnd, stage.baseline?.start || '', stage.baseline?.end || '']), ...(forecast.end ? forecast.rows.flatMap((row) => [row.start, row.end]) : [])].filter(Boolean).map(parse).filter(Number.isFinite);
-    const projectStart = parse(state.project.startDate);
-    const projectEnd = parse(state.project.targetDate);
-    const minTime = Math.min(...dates, projectStart);
-    const maxTime = Math.max(...dates, projectEnd);
-    const dayMs = 86_400_000;
-    const minKey = new Date(minTime).toISOString().slice(0, 10);
-    const maxKey = new Date(maxTime).toISOString().slice(0, 10);
-    const startKey = addDaysKey(mondayOf(minKey), -7);
-    const endKey = addDaysKey(mondayOf(maxKey), 13);
-    const startTime = parse(startKey);
-    const endTime = parse(endKey);
-    const totalDays = Math.max(28, Math.ceil((endTime - startTime) / dayMs) + 1);
-    const dayWidth = totalDays > 210 ? 7 : totalDays > 140 ? 10 : totalDays > 90 ? 14 : 22;
-    const offset = (value: string) => Math.max(0, Math.round((parse(value) - startTime) / dayMs));
-    const width = Math.max(1, totalDays * dayWidth);
-    const ticks = Array.from({ length: Math.ceil(totalDays / 7) }, (_, index) => {
-      const date = addDaysKey(startKey, index * 7);
-      const week = projectWeekNumber(state.project.startDate, date);
-      return {
-        left: index * 7 * dayWidth,
-        date,
-        week,
-        label: new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(new Date(`${date}T12:00:00Z`)),
-      };
-    });
-    const todayOffset = Math.round((parse(todayKey) - startTime) / dayMs);
-    const currentWeekOffset = Math.round((parse(currentWeek.start) - startTime) / dayMs);
-    return { dayMs, dayWidth, offset, totalDays, width, ticks, todayOffset, currentWeekOffset };
-  }, [currentWeek.start, state.project.startDate, state.project.targetDate, state.stages, todayKey, forecast]);
+  const openStage = (id: string) => { setSelectedId(id); setDetailOpen(true); };
 
   const openDateEdit = () => {
     const dependencyStage = state.stages.find((stage) => stage.id === selected.dependencyId)
@@ -164,7 +133,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
 
   const renderActions = () => {
     if (role === 'client' || selected.status === 'accepted' || role !== 'management' && selected.schedule && selected.schedule.reporterId !== userId) return null;
-    if (role === 'management' && userId === 'owner' && selected.schedule?.kind !== 'summary') return <div className="action-pair"><button className="button button--secondary" type="button" onClick={() => setStageAction(selected.status === 'awaiting_inspection' ? 'rework' : 'start')}>{selected.status === 'awaiting_inspection' ? 'На доработку' : 'Начали / работаем'}</button><button className="button button--primary" type="button" onClick={() => setStageAction('owner_accept')}><Check size={17} /> Подтвердить выполнение</button></div>;
+    if (role === 'management' && userId === 'owner' && selected.schedule?.kind !== 'summary') return <div className="action-pair"><button className="button button--secondary" type="button" onClick={() => setStageAction(selected.status === 'awaiting_inspection' ? 'rework' : 'start')}>{selected.status === 'awaiting_inspection' ? 'На доработку' : 'В работе'}</button><button className="button button--primary" type="button" onClick={() => setStageAction('owner_accept')}><Check size={17} /> Готово</button></div>;
     if (selected.status === 'ready' || selected.status === 'not_ready') return <button className="button button--primary" type="button" onClick={() => setStageAction('start')}><Play size={17} /> Зафиксировать начало</button>;
     if (selected.status === 'in_progress' || selected.status === 'rework') return (
       <button className="button button--primary" type="button" onClick={() => setStageAction('complete')}><Send size={17} /> Зафиксировать выполнение</button>
@@ -177,99 +146,42 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
   };
 
   return (
-    <div className="page-stack">
-      <SiteProgress state={state} role={role} onChange={onChange} />
+    <div className="page-stack schedule-workspace">
       {stageAction && <StageControlModal state={state} stageId={selected.id} action={stageAction} role={role} actor={actor} userId={userId} onChange={saveChange} onClose={() => setStageAction(null)} />}
       {reviewing && <ScheduleReconciliation state={state} role={role} actor={actor} userId={userId} initialId={selected.id} onChange={saveChange} onClose={() => setReviewing(false)} />}
-      <section className="page-title-row">
-        <div>
-          <span className="eyebrow">Производственный план · {state.stages.length} этапов</span>
-          <h1>График и готовность работ</h1>
-          <p>{projectStarted && currentWeek.number > 0 ? `Сейчас идёт ${currentWeek.number}-я неделя проекта · ${formatDate(currentWeek.start)} — ${formatDate(currentWeek.end)}` : `Проект ещё не начался · старт ${formatDate(state.project.startDate, true)}`}</p>
-        </div>
-        <div className="schedule-summary">
-          <span><strong>{progress.physical}%</strong> по задачам</span>
-          <ArrowRight size={18} />
-          <span><strong>{progress.accepted}%</strong> принято</span>
-        </div>
+      <section className="schedule-heading">
+        <div><span className="eyebrow">Производственный план</span><h1>Этапы и график</h1><p>{projectStarted && currentWeek.number > 0 ? `${currentWeek.number}-я неделя · ${formatDate(currentWeek.start)} — ${formatDate(currentWeek.end)}` : `Начало проекта · ${formatDate(state.project.startDate, true)}`}</p></div>
+        <div className="schedule-heading__progress"><strong>{progress.physical}%</strong><span>выполнение ППР</span></div>
       </section>
-
-      <BaselinePanel state={state} role={role} actor={actor} onChange={saveChange} />
-      <ProjectScheduleDates state={state} onReview={() => setReviewing(true)} />
-
-      <section className="panel gantt-panel">
-        <SectionHeader eyebrow="Диаграмма Ганта · недели с понедельника" title="Начало, окончание и последовательность" action={<div className="gantt-legend"><span><i className="gantt-legend__baseline" /> План 0</span><span><i className="gantt-legend__plan" /> действующий план</span><span><i className="gantt-legend__forecast" /> расчёт / факт</span><span><i className="gantt-legend__today" /> сегодня</span></div>} />
-        <div className="gantt-scroll">
-          <div className="gantt-chart" style={{ width: `${250 + gantt.width}px` }}>
-            <div className="gantt-header">
-              <div className="gantt-header__label">Этап / последовательность</div>
-              <div className="gantt-header__timeline" style={{ width: `${gantt.width}px`, backgroundSize: `${gantt.dayWidth * 7}px 100%` }}>
-                {projectStarted && gantt.currentWeekOffset >= 0 && gantt.currentWeekOffset <= gantt.totalDays && <i aria-hidden="true" style={{ position: 'absolute', left: `${gantt.currentWeekOffset * gantt.dayWidth}px`, top: 0, bottom: 0, width: `${gantt.dayWidth * 7}px`, background: 'rgba(42, 113, 82, .07)', pointerEvents: 'none' }} />}
-                {gantt.ticks.map((tick) => <span key={tick.left} style={{ left: `${tick.left}px`, fontWeight: tick.date === currentWeek.start ? 800 : undefined }}>{tick.week > 0 ? `Нед. ${tick.week} · ` : ''}{tick.label}</span>)}
-              </div>
-            </div>
-            {state.stages.map((stage) => {
-              const left = gantt.offset(stage.planStart) * gantt.dayWidth;
-              const planDays = Math.max(1, gantt.offset(stage.planEnd) - gantt.offset(stage.planStart) + 1);
-              const row = forecast.end ? forecast.rows.find((r) => r.id === stage.id) : undefined;
-              const forecastDays = row ? Math.max(1, gantt.offset(row.end) - gantt.offset(row.start) + 1) : 0;
-              return (
-                <button type="button" className={stage.id === selected.id ? 'gantt-row gantt-row--selected' : 'gantt-row'} key={stage.id} onClick={() => setSelectedId(stage.id)}>
-                  <span className="gantt-row__label"><i>{String(stage.order).padStart(2, '0')}</i><span><strong>{stage.shortName}</strong><small>{stage.schedule ? `${stage.schedule.phase} · связей: ${stage.schedule.dependencies.length}` : `${plannedStageDays(stage) ?? '—'} календ. дн. по ППР`}</small></span></span>
-                  <span className="gantt-row__timeline" style={{ width: `${gantt.width}px`, backgroundSize: `${gantt.dayWidth * 7}px 100%` }}>
-                    {projectStarted && gantt.currentWeekOffset >= 0 && gantt.currentWeekOffset <= gantt.totalDays && <i aria-hidden="true" style={{ position: 'absolute', left: `${gantt.currentWeekOffset * gantt.dayWidth}px`, top: 0, bottom: 0, width: `${gantt.dayWidth * 7}px`, background: 'rgba(42, 113, 82, .045)', pointerEvents: 'none' }} />}
-                    {gantt.todayOffset >= 0 && gantt.todayOffset <= gantt.totalDays && <i className="gantt-today-line" style={{ left: `${gantt.todayOffset * gantt.dayWidth}px` }} />}
-                    {row && <i className={`gantt-forecast-bar${row.source === 'fact' ? ' gantt-forecast-bar--fact' : ''}`} title={`${row.source === 'fact' ? 'Факт' : row.source === 'observation' ? 'Подтверждено к дате' : forecast.kind === 'estimated' ? 'Предварительный расчёт' : 'Расчёт'}: ${row.start} — ${row.end}`} style={{ left: `${gantt.offset(row.start) * gantt.dayWidth}px`, width: `${forecastDays * gantt.dayWidth}px` }} />}
-                    {stage.baseline && <i className="gantt-baseline-bar" title={`План 0: ${stage.baseline.start || 'начало не указано'} — ${stage.baseline.end}`} style={{ left: `${gantt.offset(stage.baseline.start || stage.baseline.end) * gantt.dayWidth}px`, width: `${Math.max(1, (baselineDays(stage.baseline.end, stage.baseline.start || stage.baseline.end) || 0) + 1) * gantt.dayWidth}px` }} />}
-                    <i className={`gantt-plan-bar gantt-plan-bar--${stage.status}`} style={{ left: `${left}px`, width: `${planDays * gantt.dayWidth}px` }}><span>{stage.progress}%</span></i>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <p className="gantt-hint">Каждая крупная отсечка — понедельник. Подсвечена текущая неделя проекта, отдельная линия показывает сегодняшний день.</p>
+      <section className="schedule-workspace-brief" aria-label="Основные сроки ППР">
+        <div><span>Исходный ППР</span><strong>{forecast.baselineEnd ? formatDate(forecast.baselineEnd, true) : 'Не указан'}</strong></div>
+        <div><span>{forecast.kind === 'actual' ? 'ППР выполнен' : forecast.kind === 'observed' ? 'Подтверждено к дате' : 'Прогноз по ППР'}</span><strong>{forecast.end ? formatDate(forecast.end, true) : 'Нужны сроки'}</strong><small>{forecast.kind === 'estimated' ? 'Предварительный' : forecast.kind === 'observed' ? 'Точная дата неизвестна' : forecast.kind === 'confirmed' ? 'По уточнённым остаткам' : ''}</small></div>
+        <div><span>{['actual', 'observed'].includes(forecast.kind) ? 'Отклонение от ППР' : 'Прогноз отклонения'}</span><strong>{forecast.kind === 'observed' || forecast.baselineShift === null ? '—' : `${forecast.baselineShift > 0 ? '+' : ''}${forecast.baselineShift} дн.`}</strong></div>
+        <div><span>Сдача по договору</span><strong>{state.project.targetDate ? formatDate(state.project.targetDate, true) : 'Не указана'}</strong></div>
       </section>
-
-      <section className="schedule-layout">
-        <article className="panel stage-list-panel">
-          <SectionHeader eyebrow="План / факт" title="Этапы дома" />
-          <div className="stage-list">
-            {state.stages.map((stage, index) => {
-              const weeks = stageWeekRange(state.project.startDate, stage.planStart, stage.planEnd);
-              return (
-              <button type="button" className={`stage-row ${stage.id === selected.id ? 'stage-row--selected' : ''}`} key={stage.id} onClick={() => setSelectedId(stage.id)}>
-                <span className={`stage-row__marker stage-row__marker--${stage.status}`}>{stage.status === 'accepted' ? <Check size={15} /> : stage.order}</span>
-                <span className="stage-row__line" aria-hidden="true" />
-                <span className="stage-row__body">
-                  <span className="stage-row__title"><strong>{stage.name}</strong><StatusBadge label={stageStatusLabel[stage.status]} tone={statusTone(stage.status)} /></span>
-                  <span className="stage-row__dates">{formatDate(stage.planStart)} — {formatDate(stage.planEnd)}<i>Нед. {weeks.start}{weeks.end !== weeks.start ? `–${weeks.end}` : ''} · действующий план</i></span>
-                  {(stage.progress > 0 || stage.status === 'accepted') && <ProgressBar value={stage.progress} tone={stage.status === 'rework' ? 'red' : 'green'} />}
-                </span>
-                <ChevronRight className="stage-row__chevron" size={17} />
-                {index === state.stages.length - 1 && <span className="stage-row__line-end" />}
-              </button>
-            );})}
-          </div>
-        </article>
-
-        <aside className="stage-detail-column">
+      {forecast.unmappedWork.length > 0 && <div className="schedule-scope" role="note"><AlertTriangle size={18} /><div><strong>Прогноз сдачи дома пока неполный</strong><p>В сроки ППР ещё не включены: {forecast.unmappedWork.join(', ').toLocaleLowerCase('ru')}.</p></div></div>}
+      {!forecast.end && forecast.issues.length > 0 && <div className="schedule-scope" role="note"><AlertTriangle size={18} /><div><strong>Для прогноза нужны уточнения</strong><p>{forecast.issues[0].message}</p></div></div>}
+      <ScheduleTimeline state={state} today={todayKey} onSelect={openStage} />
+      <details className="schedule-reference"><summary>Исходный план и настройки ППР</summary><div className="schedule-reference__body"><BaselinePanel state={state} role={role} actor={actor} onChange={saveChange} />{role !== 'client' && <button type="button" className="button button--secondary" onClick={() => setReviewing(true)}>Сверить состав работ и зависимости</button>}<details><summary>Как рассчитан прогноз</summary><p>Прогноз учитывает внесённые этапы, их длительность и зависимости. Без свежего остатка используется полная длительность этапа из ППР; дата может сдвигаться с наступлением нового дня.</p>{forecast.notes.map(note => <p key={note}>{note}</p>)}{forecast.issues.map((issue, index) => <p key={index}>{issue.message}</p>)}</details></div></details>
+      <details className="schedule-reference"><summary>Состояние объекта и история наблюдений</summary><div className="schedule-reference__body"><SiteProgress state={state} role={role} onChange={onChange} /></div></details>
+      {detailOpen && !stageAction && !reviewing && !editingDates && !counterpartyId && <StageDrawer title={scheduleStageTitle(selected)} onClose={() => setDetailOpen(false)}>
           <article className="panel stage-detail">
             <div className="stage-detail__head">
-              <span className="stage-detail__number">Этап {String(selected.order).padStart(2, '0')} · нед. {selectedWeeks.start}{selectedWeeks.end !== selectedWeeks.start ? `–${selectedWeeks.end}` : ''}</span>
+              <span className="stage-detail__number">Этап {selected.order}</span>
               <StatusBadge label={stageStatusLabel[selected.status]} tone={statusTone(selected.status)} />
             </div>
-            <h2>{selected.name}</h2>
             <div className="stage-detail__progress"><ProgressBar value={selected.progress} tone={selected.status === 'rework' ? 'red' : 'green'} /><strong>{selected.progress}%</strong></div>
             <div className="stage-facts">
+              <div><Clock3 size={18} /><span><small>{calculated.basis}</small><strong>{calculated.end ? formatDate(calculated.end, true) : '—'}</strong></span></div>
+              <div><UserRound size={18} /><span><small>Ответственный</small>{selectedCounterparty ? <button type="button" className="entity-link entity-link--compact" onClick={() => setCounterpartyId(selectedCounterparty.id)}>{selected.responsible}</button> : <strong>{selected.responsible}</strong>}</span></div>
+            </div>
+            <details className="stage-disclosure"><summary>Плановые даты и переносы</summary><div className="stage-facts">
               <div><CalendarDays size={18} /><span><small>План 0 этапа</small><strong>{selected.baseline ? `${selected.baseline.start ? formatDate(selected.baseline.start) : '—'} — ${formatDate(selected.baseline.end)}` : 'Не зафиксирован'}</strong></span></div>
               <div><Clock3 size={18} /><span><small>Перенос окончания к Плану 0</small><strong>{planShiftLabel(baselineDays(selected.planEnd, selected.baseline?.end))}</strong></span></div>
               <div><CalendarDays size={18} /><span><small>Действующий план</small><strong>{formatDate(selected.planStart)} — {formatDate(selected.planEnd)}</strong></span></div>
-              <div><Clock3 size={18} /><span><small>{calculated?.source === 'fact' ? 'Факт окончания' : calculated?.source === 'observation' ? 'Готово не позже' : 'Плановое окончание · расчёт'}</small><strong>{calculated ? formatDate(calculated.end, true) : 'Нужны сроки'}</strong></span></div>
-              <div><UserRound size={18} /><span><small>Ответственный</small>{selectedCounterparty ? <button type="button" className="entity-link entity-link--compact" onClick={() => setCounterpartyId(selectedCounterparty.id)}>{selected.responsible}</button> : <strong>{selected.responsible}</strong>}</span></div>
-              <div><CircleDot size={18} /><span><small>Вес в готовности</small><strong>{selected.weight}% проекта</strong></span></div>
-            </div>
-            {selected.dependency && <div className="dependency-note"><Link2 size={18} /><span><small>Зависимость</small><strong>{selected.dependency}</strong></span></div>}
+            </div></details>
+            {selected.schedule && selected.schedule.dependencies.length > 0 && <div className="dependency-note"><Link2 size={18} /><span><small>Начинается после</small><strong>{selected.schedule.dependencies.map(link => { const previous = state.stages.find(stage => stage.id === link.stageId); return `${previous ? scheduleStageTitle(previous) : 'Неизвестный этап'}${link.lagDays ? ` + ${link.lagDays} дн.` : ''}`; }).join(' · ')}</strong></span></div>}
+            {!selected.schedule && selected.dependency && <div className="dependency-note"><Link2 size={18} /><span><small>Зависимость</small><strong>{selected.dependency}</strong></span></div>}
             {selected.blocker && (
               <div className="blocker-note">
                 <AlertTriangle size={19} />
@@ -279,16 +191,15 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
             {selected.ownerAcceptance && <p className="muted">Принято владельцем: {selected.ownerAcceptance.by || selected.acceptedBy}{selected.ownerAcceptance.at ? ' · ' + formatDate(planToday(new Date(selected.ownerAcceptance.at))) : ''}.{!selected.completedOn && ' Точная дата выполнения неизвестна.'}</p>}
             {(openStageTasks.length > 0 || unacceptedCheckpoints.length > 0) && !['not_ready', 'ready', 'accepted'].includes(selected.status) && !(role === 'management' && userId === 'owner' && selected.schedule?.kind !== 'summary') && <div className="blocker-note"><LockKeyhole size={19} /><div><strong>Этап ещё нельзя закрыть</strong><p>{[openStageTasks.length ? `${openStageTasks.length} задач не завершено` : '', unacceptedCheckpoints.length ? `${unacceptedCheckpoints.length} контрольных точек не принято` : ''].filter(Boolean).join(' · ')}</p></div></div>}
             <div className="stage-detail__actions">{renderActions()}</div>
-            {role === 'management' && <button type="button" className="button button--secondary stage-date-edit" onClick={openDateEdit}><Pencil size={16} /> Изменить даты и зависимость</button>}
+            {selected.schedule && (role === 'management' || role === 'foreman' && Boolean(userId && selected.schedule.reporterId === userId)) && !['accepted', 'awaiting_inspection'].includes(selected.status) && <button type="button" className="button button--secondary stage-date-edit" onClick={() => setReviewing(true)}>Уточнить остаток и прогноз</button>}
+            {role === 'management' && <button type="button" className="button button--secondary stage-date-edit" onClick={openDateEdit}><Pencil size={16} /> Изменить план и оценку срока</button>}
           </article>
 
-          <article className="panel stage-gates">
-            <SectionHeader eyebrow="Работа этапа" title="Подэтапы и задачи" action={<span className="count-badge">{stageTasks.filter(taskDone).length}/{stageTasks.length}</span>} />
+          {(stageTasks.length > 0) && <details className="stage-disclosure"><summary>Задачи · {stageTasks.filter(taskDone).length}/{stageTasks.length}</summary><div className="stage-disclosure__body">
             {stageTasks.length ? <div className="gate-list">{stageTasks.map((task) => <div key={task.id}><span className={`gate-list__icon gate-list__icon--${taskDone(task) ? 'accepted' : task.status === 'waiting' ? 'rework' : 'pending'}`}>{taskDone(task) ? <CheckCircle2 size={17} /> : <ListTodo size={17} />}</span><span><strong>{task.title}</strong><small>{task.assigneeName} · срок {formatDate(task.dueDate, true)} · {taskDone(task) ? 'выполнено' : task.status === 'in_progress' ? 'в работе' : task.status === 'review' ? 'на проверке' : task.status === 'waiting' ? 'есть препятствие' : 'запланировано'}</small></span></div>)}</div> : <div className="locked-gate"><ListTodo size={22} /><p>Задачи связываются с этапом в разделе «Задачи». При старте сохраняются существующие контрольные точки.</p></div>}
-          </article>
+          </div></details>}
 
-          <article className="panel stage-gates">
-            <SectionHeader eyebrow="Экономика этапа" title="План, обязательства и факт" action={<CircleDollarSign size={19} />} />
+          {(stageFinance.length > 0 || stageFinancialTotals.plan > 0 || stageFinancialTotals.forecast > 0) && <details className="stage-disclosure"><summary>Расходы и бюджет</summary><div className="stage-disclosure__body">
             <div className="stage-facts">
               <div><CircleDollarSign size={18} /><span><small>План затрат</small><strong>{money(stageFinancialTotals.plan)}</strong></span></div>
               <div><Clock3 size={18} /><span><small>Прогноз затрат</small><strong>{money(stageFinancialTotals.forecast)}</strong></span></div>
@@ -297,19 +208,17 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
             </div>
             {(stageFinancialTotals.billed > 0 || stageFinancialTotals.received > 0) && <div className="dependency-note"><CircleDollarSign size={18} /><span><small>Доход по этапу</small><strong>{money(stageFinancialTotals.billed)} начислено · {money(stageFinancialTotals.received)} получено</strong></span></div>}
             {stageFinance.length ? <div className="gate-list">{stageFinance.slice(0, 5).map((item) => <div key={item.id}><span className={`gate-list__icon gate-list__icon--${item.status === 'paid' ? 'accepted' : 'pending'}`}><CircleDollarSign size={17} /></span><span><strong>{item.description}</strong><small>{item.kind === 'income' ? 'Доход' : 'Расход'} · {money(item.amount)} · оплачено {money(paidAmountFor(item))}</small></span></div>)}</div> : <div className="locked-gate"><CircleDollarSign size={22} /><p>Финансовые операции этапа появятся здесь после создания обязательств или платежей.</p></div>}
-          </article>
+          </div></details>}
 
-          <article className="panel stage-gates">
-            <SectionHeader eyebrow="Готовность ресурсов" title="Снабжение и документы" action={<span className="count-badge">{stageProcurement.length + stageDocuments.length}</span>} />
+          {(stageProcurement.length + stageDocuments.length > 0) && <details className="stage-disclosure"><summary>Снабжение и документы · {stageProcurement.length + stageDocuments.length}</summary><div className="stage-disclosure__body">
             <div className="gate-list">
               {stageProcurement.slice(0, 4).map((item) => <div key={item.id}><span className={`gate-list__icon gate-list__icon--${['accepted', 'issued'].includes(item.status) ? 'accepted' : item.risk ? 'rework' : 'pending'}`}><PackageSearch size={17} /></span><span><strong>{item.item}</strong><small>Нужно к {formatDate(item.neededBy, true)} · {item.risk ? `риск: ${item.risk}` : item.status}</small></span></div>)}
               {stageDocuments.slice(0, 4).map((item) => <div key={item.id}><span className={`gate-list__icon gate-list__icon--${item.status === 'signed' ? 'accepted' : 'pending'}`}><ShieldCheck size={17} /></span><span><strong>{item.name}</strong><small>{item.type} · {item.status === 'signed' ? 'подписан' : 'актуальный'}</small></span></div>)}
               {!stageProcurement.length && !stageDocuments.length && <div className="locked-gate"><PackageSearch size={22} /><p>Связанные закупки и документы появятся здесь автоматически по `stageId`.</p></div>}
             </div>
-          </article>
+          </div></details>}
 
-          <article className="panel stage-gates">
-            <SectionHeader eyebrow="Условия закрытия" title="Контрольные точки" action={<span className="count-badge">{checkpoints.length}</span>} />
+          {(checkpoints.length > 0) && <details className="stage-disclosure"><summary>Контроль качества · {checkpoints.length}</summary><div className="stage-disclosure__body">
             {checkpoints.length ? (
               <div className="gate-list">
                 {checkpoints.map((item) => (
@@ -322,14 +231,10 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
             ) : (
               <div className="locked-gate"><LockKeyhole size={22} /><p>Контрольные точки будут созданы из шаблона перед началом этапа.</p></div>
             )}
-          </article>
+          </div></details>}
 
-          <article className="process-rule-card">
-            <HardHat size={20} />
-            <div><strong>Этап — единая точка управления</strong><p>Сроки, задачи, снабжение, документы, контроль качества и деньги собираются в карточке этапа. Владелец может лично подтвердить готовый этап; задачи, контроль качества и оплаты сохраняют собственные записи.</p></div>
-          </article>
-        </aside>
-      </section>
+          <details className="stage-disclosure"><summary>Исходная запись и история</summary><div className="stage-disclosure__body"><p>{selected.name}</p>{selected.completionNote && <p>{selected.completionNote}</p>}{selected.planHistory?.slice().reverse().map((entry, index) => <p key={`plan-${index}`}>{entry.before || '—'} → {entry.after || '—'} · {entry.reason}<small>{entry.actor} · {formatDate(entry.at.slice(0, 10))}</small></p>)}{selected.scheduleHistory?.slice().reverse().map((entry, index) => <p key={`site-${index}`}>{entry.note}<small>{entry.actor} · {formatDate(entry.at.slice(0, 10))}</small></p>)}</div></details>
+      </StageDrawer>}
       {counterpartyId && <CounterpartyModal state={state} counterpartyId={counterpartyId} onClose={() => setCounterpartyId(null)} />}
       {editingDates && <Modal title={`График: ${selected.shortName}`} subtitle="Действующий план можно перенести с причиной. План 0 остаётся неизменным." onClose={() => setEditingDates(false)}><form className="modal-form" onSubmit={saveDates}>
         <div className="form-grid">
@@ -347,4 +252,20 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
       </form></Modal>}
     </div>
   );
+}
+
+function StageDrawer({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = ref.current;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const overflow = document.body.style.overflow;
+    dialog?.showModal();
+    document.body.style.overflow = 'hidden';
+    return () => { dialog?.close(); document.body.style.overflow = overflow; previous?.focus(); };
+  }, []);
+  return <dialog ref={ref} className="schedule-drawer" aria-label={title} onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose(); } }}>
+    <header className="schedule-drawer__header"><div><span className="eyebrow">Карточка этапа</span><h2>{title}</h2></div><button type="button" className="icon-button" aria-label="Закрыть карточку этапа" onClick={onClose}><X size={20} /></button></header>
+    <div className="schedule-drawer__body">{children}</div>
+  </dialog>;
 }
