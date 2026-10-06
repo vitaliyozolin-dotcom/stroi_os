@@ -6,6 +6,7 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Banknote,
+  CalendarClock,
   CheckCircle2,
   CircleDollarSign,
   FileCheck2,
@@ -37,6 +38,14 @@ const statusLabels: Record<ExpenseStatus, string> = {
 export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpenQuestions }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenQuestions: () => void }) {
   const saveChange = createFinanceCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const totals = financeTotals(state);
+  const margin = state.project.contractValue - totals.forecast;
+  const marginPercent = state.project.contractValue > 0 ? Math.round(margin / state.project.contractValue * 100) : null;
+  const cashCutoff = new Date();
+  cashCutoff.setUTCDate(cashCutoff.getUTCDate() + 30);
+  const cashNeed = state.financeEntries
+    .filter(entry => entry.kind === 'expense' && paidAmountFor(entry) < entry.amount && new Date(`${entry.date}T23:59:59Z`) <= cashCutoff)
+    .reduce((sum, entry) => sum + Math.max(0, entry.amount - paidAmountFor(entry)), 0);
+
   const unallocated = unallocatedExpenseTotals(state);
   const unallocatedEntries = unallocatedExpenses(state);
   const [showUnallocated, setShowUnallocated] = useState(false);
@@ -198,6 +207,14 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
         <MetricCard label="Остаток по учёту" value={shortMoney(balance)} detail={<span>получено {shortMoney(totals.received)} · маржа {shortMoney(state.project.contractValue - totals.forecast)}</span>} icon={Banknote} tone="dark" onClick={() => setSummaryOpen('balance')} />
       </section>
 
+      <details className="panel">
+        <summary>Прогноз и потребность в деньгах</summary>
+        <section className="metric-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', marginTop: 20 }}>
+          <MetricCard label="Прогноз себестоимости" value={shortMoney(totals.forecast)} detail={<span>{!totals.plan ? 'Смета ещё не загружена' : totals.forecast > totals.plan ? `+${shortMoney(totals.forecast - totals.plan)} к плану` : 'В пределах плана'}</span>} icon={CircleDollarSign} tone={totals.forecast > totals.plan ? 'warning' : 'positive'} />
+          <MetricCard label="Прогноз маржи" value={shortMoney(margin)} detail={<span>{marginPercent === null ? 'Стоимость договора не указана' : `${marginPercent}% от договора до налогов и финансирования`}</span>} icon={Banknote} />
+          <MetricCard label="Нужно денег на 30 дней" value={shortMoney(cashNeed)} detail={<span>Неоплаченные обязательства по датам записей</span>} icon={CalendarClock} />
+        </section>
+      </details>
       <CostGroups state={state} onChange={saveChange} />
       <section className="panel expense-guide" data-tour="expense-approval">
         <div><strong>Кто утверждает расходы</strong><p>Владелец и активные сотрудники с ролью «Управление» добавляют и утверждают расходы, фиксируют приёмку и оплату. Прораб ведёт работы и поставки.</p></div>
