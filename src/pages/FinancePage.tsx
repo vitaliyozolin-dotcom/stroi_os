@@ -1,63 +1,47 @@
 import { CashflowPanel } from '../components/CashflowPanel';
 import { createFinanceCommands } from '../application';
 import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
-  ArrowDownLeft,
   ArrowUpRight,
-  Banknote,
-  CalendarClock,
-  CheckCircle2,
   CircleDollarSign,
-  FileCheck2,
   LockKeyhole,
   Plus,
   ReceiptText,
-  ShieldCheck,
-  WalletCards,
 } from 'lucide-react';
-import { acceptedAmountFor, financeTotals, sourceEstimateTotals, lineTotals, lineForecast, unallocatedExpenses, unallocatedExpenseTotals, paidAmountFor, financeMoney, needsExpenseApproval, expenseAcceptanceSources, financeActionError } from '../domain/index';
+import { acceptedAmountFor, financeTotals, lineTotals, lineForecast, unallocatedExpenses, unallocatedExpenseTotals, paidAmountFor, financeMoney, needsExpenseApproval, expenseAcceptanceSources, financeActionError } from '../domain/index';
 import { formatDate, money, shortMoney } from '../presentation/formatting';
 import type { AppState, ExpenseStatus, FinanceEntry, ProjectDocument } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
-import { Field, MetricCard, Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
+import { Field, Modal } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';
 import { HistoryImport } from '../components/HistoryImport';
-import { CostGroups } from '../components/CostGroups';
 import { PaymentEvidence } from '../components/PaymentEvidence';
 import { PaymentHistory } from '../components/PaymentHistory';
 import { paymentEvidence } from '../domain/payment-evidence';
-import { costGroupLabels } from '../domain/cost-groups';
-
-const statusLabels: Record<ExpenseStatus, string> = {
-  committed: 'Обязательство',
-  accepted: 'Принято',
-  paid: 'Оплачено',
-};
+import { FinanceOperations } from '../components/FinanceOperations';
+import { FinanceBudgetPanel } from '../components/FinanceBudgetPanel';
+import { FinancePaymentCalendar } from '../components/FinancePaymentCalendar';
+import { FinanceDrawer } from '../components/FinanceDrawer';
+import { financeEntryTitle } from '../presentation/finance-view';
+import './finance-page.css';
 
 export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpenQuestions }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenQuestions: () => void }) {
   const saveChange = createFinanceCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const totals = financeTotals(state);
   const margin = state.project.contractValue - totals.forecast;
-  const marginPercent = state.project.contractValue > 0 ? Math.round(margin / state.project.contractValue * 100) : null;
-  const cashCutoff = new Date();
-  cashCutoff.setUTCDate(cashCutoff.getUTCDate() + 30);
-  const cashNeed = state.financeEntries
-    .filter(entry => entry.kind === 'expense' && paidAmountFor(entry) < entry.amount && new Date(`${entry.date}T23:59:59Z`) <= cashCutoff)
-    .reduce((sum, entry) => sum + Math.max(0, entry.amount - paidAmountFor(entry)), 0);
-
   const unallocated = unallocatedExpenseTotals(state);
   const unallocatedEntries = unallocatedExpenses(state);
   const [showUnallocated, setShowUnallocated] = useState(false);
-  const sourceEstimate = sourceEstimateTotals(state.budgetLines);
   const [showForm, setShowForm] = useState(false);
   const [showHistoryImport, setShowHistoryImport] = useState(false);
   const [formKind, setFormKind] = useState<'expense' | 'income'>('expense');
-  const [kindFilter, setKindFilter] = useState<'all' | 'expense' | 'income'>('all');
+  const [view, setView] = useState<'operations' | 'budget' | 'calendar'>('operations');
+  const [formError, setFormError] = useState('');
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
   const [counterpartyId, setCounterpartyId] = useState<string | null>(null);
-  const [summaryOpen, setSummaryOpen] = useState<'plan' | 'committed' | 'accepted' | 'balance' | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState<'paid' | 'received' | 'balance' | null>(null);
   const [actionEntryId, setActionEntryId] = useState<string | null>(null);
   const [actionKind, setActionKind] = useState<'accept' | 'pay' | 'receive'>('accept');
   const [actionForm, setActionForm] = useState({ amount: '', date: new Date().toISOString().slice(0, 10), document: '', source: '' });
@@ -73,29 +57,31 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
     description: '',
     date: new Date().toISOString().slice(0, 10),
   });
+  const handledFocus = useRef<string | null>(null);
   useEffect(() => {
-    if (focusId && state.financeEntries.some((entry) => entry.id === focusId)) setSelectedEntryId(focusId);
+    if (!focusId) { handledFocus.current = null; return; }
+    if (handledFocus.current !== focusId && state.financeEntries.some(entry => entry.id === focusId)) {
+      handledFocus.current = focusId;
+      setSelectedEntryId(focusId);
+    }
   }, [focusId, state.financeEntries]);
-
-  const entries = useMemo(() => state.financeEntries
-    .filter((entry) => kindFilter === 'all' || entry.kind === kindFilter)
-    .sort((a, b) => b.date.localeCompare(a.date)), [kindFilter, state.financeEntries]);
 
   const addOperation = (event: FormEvent) => {
     event.preventDefault();
     const amount = Number(form.amount);
     const counterparty = state.counterparties.find((item) => item.id === form.counterpartyId);
-    if (!Number.isFinite(amount) || amount <= 0 || !counterparty || !form.description.trim()) return;
+    if (!Number.isFinite(amount) || amount <= 0 || !counterparty || !form.description.trim()) { setFormError('Укажите сумму, контрагента и назначение.'); return; }
     const selectedLine = state.budgetLines.find((line) => line.id === form.budgetLineId) ?? firstLine;
-    if (formKind === 'expense' && (!selectedLine || !selectedLine.stageIds.includes(form.stageId))) return;
+    if (formKind === 'expense' && (!selectedLine || !selectedLine.stageIds.includes(form.stageId))) { setFormError('Для этой статьи пока не выбран этап. Уточните связь статьи в смете.'); return; }
     const currentCommitted = selectedLine ? lineTotals(state, selectedLine).committed : 0;
+    const entryId = uid('finance');
     const next: AppState = {
       ...state,
       budgetLines: formKind === 'expense' ? state.budgetLines.map((line) => line.id === selectedLine.id
         ? { ...line, forecast: Math.max(line.forecast, currentCommitted + amount) }
         : line) : state.budgetLines,
       financeEntries: [{
-        id: uid('finance'),
+        id: entryId,
         kind: formKind,
         status: 'committed',
         createdBy: actor,
@@ -117,15 +103,16 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
     };
     saveChange(next);
     setShowForm(false);
+    setSelectedEntryId(entryId);
     setForm({ ...form, amount: '', counterpartyId: '', description: '' });
   };
 
   const selectedEntry = state.financeEntries.find((entry) => entry.id === selectedEntryId) ?? null;
+  const selectedCounterparty = state.counterparties.find(item => item.id === selectedEntry?.counterpartyId);
   const selectedLine = state.budgetLines.find((line) => line.id === selectedLineId) ?? null;
   const balance = totals.received - totals.paid;
 
   const canAcceptEntry = (entry: FinanceEntry) => !needsExpenseApproval(entry) && expenseAcceptanceSources(state, entry).length > 0;
-  const approvalRequired = (entry: FinanceEntry) => needsExpenseApproval(entry) ? 'Сначала утвердите расход в его карточке.' : 'Сначала примите связанную работу в «Качестве», поставку в «Снабжении» или этап в «Графике».';
   const approveExpense = (entry: FinanceEntry) => {
     if (!needsExpenseApproval(entry)) return;
     const now = new Date().toISOString();
@@ -182,118 +169,41 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
     setEditingLineId(null);
   };
 
+  const tabs = [
+    { id: 'operations', label: 'Операции' },
+    { id: 'budget', label: 'Смета' },
+    { id: 'calendar', label: 'Платёжный календарь' },
+  ] as const;
+  const openNew = (kind: 'expense' | 'income') => { setFormKind(kind); setFormError(''); setShowForm(true); };
+
   return (
-    <div className="page-stack">
-      <CashflowPanel state={state} />
-      <section className="page-title-row">
-        <div>
-          <span className="eyebrow">Экономика дома · {state.project.code}</span>
-          <h1>Деньги и обязательства</h1>
-          <p>Один поток от бюджета до фактической оплаты. Никаких выплат без привязки к этапу и основанию.</p>
-        </div>
-        <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowHistoryImport(true)}>Внести смету и прошлые оплаты</button><button type="button" data-tour="finance-add" className="button button--primary" onClick={() => setShowForm(true)}><Plus size={18} /> Добавить операцию</button></div>
+    <div className="finance-page">
+      <header className="finance-page__heading">
+        <div><span className="finance-eyebrow">{state.project.name} · {state.project.code}</span><h1>Деньги</h1></div>
+        <div className="finance-page__actions"><button type="button" className="button button--secondary" onClick={() => openNew('income')}><Plus size={17} /> Поступление</button><button type="button" data-tour="finance-add" className="button button--primary" onClick={() => openNew('expense')}><Plus size={17} /> Расход</button></div>
+      </header>
+      <section className="finance-money" aria-label="Денежная сводка проекта">
+        <button type="button" onClick={() => setSummaryOpen('received')}><span>Поступило</span><strong>{shortMoney(totals.received)}</strong><small>Записанные поступления</small></button>
+        <button type="button" onClick={() => setSummaryOpen('paid')}><span>Оплачено</span><strong>{shortMoney(totals.paid)}</strong><small>По учёту проекта</small></button>
+        <button type="button" className="finance-money__available" onClick={() => setSummaryOpen('balance')}><span>Доступно на счетах</span><strong>—</strong><small>Нужна сверка остатков <ArrowUpRight size={15} /></small></button>
       </section>
-
-      <section className="rule-banner">
-        <span><ShieldCheck size={21} /></span>
-        <div><strong>Правило оплаты включено</strong><p>Расход можно оплатить только после приёмки материала или выполненной работы.</p></div>
-        <StatusBadge label="Контроль активен" tone="positive" />
-      </section>
-
-      <section className="metric-grid">
-        <MetricCard label="План себестоимости" value={shortMoney(totals.plan)} detail={<span>{state.budgetMeta.approvedAt ? 'план принят' : 'исходный план · нужна сверка'}</span>} icon={WalletCards} onClick={() => setSummaryOpen('plan')} />
-        <MetricCard label="Законтрактовано" value={shortMoney(totals.committed)} detail={<span>{totals.plan ? Math.round(totals.committed / totals.plan * 100) : 0}% бюджета имеет обязательства</span>} icon={FileCheck2} onClick={() => setSummaryOpen('committed')} />
-        <MetricCard label="Принято работ" value={shortMoney(totals.accepted)} detail={<span>{shortMoney(totals.paid)} уже оплачено</span>} icon={CheckCircle2} tone="positive" onClick={() => setSummaryOpen('accepted')} />
-        <MetricCard label="Остаток по учёту" value={shortMoney(balance)} detail={<span>получено {shortMoney(totals.received)} · маржа {shortMoney(state.project.contractValue - totals.forecast)}</span>} icon={Banknote} tone="dark" onClick={() => setSummaryOpen('balance')} />
-      </section>
-
-      <details className="panel">
-        <summary>Прогноз и потребность в деньгах</summary>
-        <section className="metric-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', marginTop: 20 }}>
-          <MetricCard label="Прогноз себестоимости" value={shortMoney(totals.forecast)} detail={<span>{!totals.plan ? 'Смета ещё не загружена' : totals.forecast > totals.plan ? `+${shortMoney(totals.forecast - totals.plan)} к плану` : 'В пределах плана'}</span>} icon={CircleDollarSign} tone={totals.forecast > totals.plan ? 'warning' : 'positive'} />
-          <MetricCard label="Прогноз маржи" value={shortMoney(margin)} detail={<span>{marginPercent === null ? 'Стоимость договора не указана' : `${marginPercent}% от договора до налогов и финансирования`}</span>} icon={Banknote} />
-          <MetricCard label="Нужно денег на 30 дней" value={shortMoney(cashNeed)} detail={<span>Неоплаченные обязательства по датам записей</span>} icon={CalendarClock} />
-        </section>
-      </details>
-      <CostGroups state={state} onChange={saveChange} />
-      <section className="panel expense-guide" data-tour="expense-approval">
-        <div><strong>Кто утверждает расходы</strong><p>Владелец и активные сотрудники с ролью «Управление» добавляют и утверждают расходы, фиксируют приёмку и оплату. Прораб ведёт работы и поставки.</p></div>
-        <ol><li>Создайте обязательство: сумма, этап, статья, контрагент и основание.</li><li>Утвердите расход в его карточке. Утверждение не записывает оплату.</li><li>Примите работу или поставку, затем зафиксируйте принятую сумму и документ.</li><li>После реальной выплаты отдельно укажите сумму, дату и платёжный документ.</li></ol>
-        <button type="button" className="text-button" onClick={onOpenQuestions}>Вопросы и подсказки</button>
-      </section>
-      <section className="panel finance-summary" data-tour="budget-plan">
-        <SectionHeader eyebrow={`Смета ${state.budgetMeta.version}`} title="Бюджет по пакетам работ" action={<div className="finance-summary__legend"><span>План</span><span>Прогноз</span><span>Оплачено</span></div>} />
-        <div className="budget-source"><div><small>Откуда берётся план</small><strong>{state.budgetMeta.source}</strong><p>{state.budgetMeta.approvedBy ? `Утвердил: ${state.budgetMeta.approvedBy}` : 'Ещё не утверждена'}{state.budgetMeta.approvedAt ? ` · ${formatDate(state.budgetMeta.approvedAt, true)}` : ''}</p></div><div><small>Откуда берётся проект</small><strong>{state.project.source ?? 'Создан в ИКИОМА ОС'}</strong><p>{state.project.contractNumber ? `Договор ${state.project.contractNumber}` : state.project.model}</p></div><p>{state.budgetMeta.note}</p></div>
-        {sourceEstimate && <section className="finance-drilldown" aria-label="Итоги исходной сметы"><div><small>План в исходной смете</small><strong>{money(sourceEstimate.plan)}</strong></div><div><small>Колонка «Факт»</small><strong>{money(sourceEstimate.fact)}</strong></div><div><small>«Факт» минус план</small><strong>{money(sourceEstimate.deviation)}</strong></div><p>Разница пересчитана из итогов. Эти суммы не складываются с реестром оплат и не подтверждают расходование резерва.</p></section>}
-        <div className="budget-table" role="table" aria-label="Бюджет проекта">
-          <div className="budget-table__head" role="row">
-            <span>Пакет работ</span><span>План</span><span>Обязательства</span><span>Принято</span><span>Оплачено</span><span>Прогноз</span><span>Отклонение</span>
-          </div>
-          {state.budgetLines.map((line) => {
-            const values = lineTotals(state, line);
-            const forecast = lineForecast(state, line);
-            const deviation = forecast - line.plan;
-            return (
-              <button type="button" className="budget-table__row budget-table__row--clickable" role="row" key={line.id} onClick={() => setSelectedLineId(line.id)}>
-                <div className="budget-name">
-                  <strong>{line.name}{line.outsideSourceTotal ? " · вне итога файла" : ""}</strong>
-                  <small>{costGroupLabels[line.costGroup ?? 'unallocated']}</small>
-                  <ProgressBar value={line.plan ? values.committed / line.plan * 100 : 0} tone={deviation > 0 ? 'orange' : 'green'} />
-                </div>
-                <span data-label="План">{money(line.plan)}</span>
-                <span data-label="Обязательства">{money(values.committed)}</span>
-                <span data-label="Принято">{money(values.accepted)}</span>
-                <span data-label="Оплачено">{money(values.paid)}</span>
-                <strong data-label="Прогноз">{money(forecast)}</strong>
-                <span data-label="Отклонение" className={deviation > 0 ? 'budget-deviation budget-deviation--negative' : 'budget-deviation budget-deviation--positive'}>{deviation === 0 ? '—' : `${deviation > 0 ? '+' : '−'}${money(Math.abs(deviation))}`}</span>
-              </button>
-            );
-          })}
-          {unallocatedEntries.length > 0 && <button type="button" className="budget-table__row budget-table__row--clickable" role="row" onClick={() => setShowUnallocated(true)}>
-            <div className="budget-name"><strong>Расходы без статьи бюджета</strong><small>{unallocatedEntries.length} операций · требуется распределение</small></div>
-            <span data-label="План">{money(0)}</span><span data-label="Обязательства">{money(unallocated.committed)}</span><span data-label="Принято">{money(unallocated.accepted)}</span><span data-label="Оплачено">{money(unallocated.paid)}</span><strong data-label="Прогноз">{money(unallocated.forecast)}</strong><span data-label="Отклонение" className="negative-text">+{money(unallocated.forecast)}</span>
-          </button>}
-          <div className="budget-table__total">
-            <strong>Итого по дому</strong><span>{money(totals.plan)}</span><span>{money(totals.committed)}</span><span>{money(totals.accepted)}</span><span>{money(totals.paid)}</span><strong>{money(totals.forecast)}</strong><span className={totals.forecast > totals.plan ? 'negative-text' : 'positive-text'}>{totals.forecast > totals.plan ? '+' : ''}{money(totals.forecast - totals.plan)}</span>
-          </div>
-        </div>
-        <p role="note">Расчётный прогноз — не ниже зарегистрированных обязательств и затрат по каждой статье; расходы без статьи учтены отдельно. Это нижняя граница, а не подтверждённая стоимость достройки. Исходная смета не изменена.{totals.forecast > totals.storedForecast ? ` Поправка к сохранённому прогнозу: +${money(totals.forecast - totals.storedForecast)}.` : ''}</p>
-      </section>
-
-      {showUnallocated && <Modal title="Расходы без статьи бюджета" subtitle="Включены в общий итог. Распределение требует сверки, суммы не изменены." onClose={() => setShowUnallocated(false)}><div className="entity-related-list">{unallocatedEntries.map(entry => <button type="button" key={entry.id} onClick={() => { setShowUnallocated(false); setSelectedEntryId(entry.id); }}><span><strong>{entry.description}</strong><small>{entry.counterparty}</small></span><strong>{money(entry.amount)}</strong></button>)}</div></Modal>}
-
-      <section className="panel transaction-panel" data-tour="finance-flow">
-        <SectionHeader
-          eyebrow="Реестр"
-          title="Операции проекта"
-          action={<div className="segmented-control"><button className={kindFilter === 'all' ? 'active' : ''} onClick={() => setKindFilter('all')}>Все</button><button className={kindFilter === 'expense' ? 'active' : ''} onClick={() => setKindFilter('expense')}>Расходы</button><button className={kindFilter === 'income' ? 'active' : ''} onClick={() => setKindFilter('income')}>Поступления</button></div>}
-        />
-        <div className="transaction-list">
-          {entries.map((entry) => {
-            const stage = state.stages.find((item) => item.id === entry.stageId);
-            return (
-              <div className="transaction-row transaction-row--clickable" role="button" tabIndex={0} key={entry.id} onClick={() => setSelectedEntryId(entry.id)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedEntryId(entry.id); }}>
-                <span className={`transaction-row__icon transaction-row__icon--${entry.kind}`}>{entry.kind === 'income' ? <ArrowDownLeft size={18} /> : <ArrowUpRight size={18} />}</span>
-                <div className="transaction-row__main"><strong>{entry.description}</strong><span><button type="button" className="entity-link entity-link--inline" onClick={(event) => { event.stopPropagation(); setCounterpartyId(entry.counterpartyId ?? null); }}>{entry.counterparty}</button>{stage ? ` · ${stage.shortName}` : ''}{entry.document ? ` · ${entry.document}` : ''}</span></div>
-                <span className="transaction-row__date" title={entry.historicalPayment ? "Дата исходного документа; дата оплаты указана отдельно" : undefined}>{entry.historicalPayment && <small>Документ · </small>}{formatDate(entry.date, true)}</span>
-                <div className="transaction-status-cell">
-                  {entry.kind === 'expense' && paidAmountFor(entry) > 0 && <small title="Источник отметки об оплате; не подтверждение чеком или выпиской">{paymentEvidence(entry, state.documents).sourceLabel}</small>}
-                  <StatusBadge label={needsExpenseApproval(entry) ? 'К утверждению' : entry.kind === 'income' && entry.status === 'paid' ? 'Получено' : statusLabels[entry.status]} tone={entry.status === 'paid' ? 'positive' : entry.status === 'accepted' ? 'blue' : 'neutral'} />
-                  {entry.kind === 'expense' && !entry.historicalPayment && acceptedAmountFor(entry) < entry.amount && <button type="button" disabled={!canAcceptEntry(entry)} onClick={(event) => { event.stopPropagation(); openAction(entry, 'accept'); }} title={!canAcceptEntry(entry) ? approvalRequired(entry) : 'Зафиксировать фактически принятый объём'}>Принять</button>}
-                  {entry.kind === 'expense' && paidAmountFor(entry) < acceptedAmountFor(entry) && <button type="button" onClick={(event) => { event.stopPropagation(); openAction(entry, 'pay'); }}>Записать оплату</button>}
-                  {entry.kind === 'income' && paidAmountFor(entry) < entry.amount && <button type="button" onClick={(event) => { event.stopPropagation(); openAction(entry, 'receive'); }}>Получить</button>}
-                </div>
-                <strong className={entry.kind === 'income' ? 'positive-text' : ''}>{entry.kind === 'income' ? '+' : '−'}{money(entry.amount)}</strong>
-              </div>
-            );
-          })}
-          {!entries.length && <div className="task-empty"><WalletCards size={28} /><strong>Операций пока нет</strong><p>Сначала добавьте контрагента, затем создайте обязательство или ожидаемое поступление.</p></div>}
-        </div>
-      </section>
+      {unallocatedEntries.length > 0 && <button type="button" className="finance-attention" onClick={() => setShowUnallocated(true)}><span><strong>{unallocatedEntries.length} расходов без статьи</strong><span> · {money(unallocated.paid)} оплачено</span></span><span>Посмотреть <ArrowUpRight size={16} /></span></button>}
+      <nav className="finance-tabs" role="tablist" aria-label="Разделы финансов" onKeyDown={event => {
+        const current = tabs.findIndex(tab => tab.id === view);
+        const next = event.key === 'ArrowRight' ? (current + 1) % tabs.length : event.key === 'ArrowLeft' ? (current + tabs.length - 1) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+        if (next < 0) return;
+        event.preventDefault(); setView(tabs[next].id);
+        event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+      }}>{tabs.map(tab => <button key={tab.id} type="button" id={`finance-tab-${tab.id}`} role="tab" aria-selected={view === tab.id} tabIndex={view === tab.id ? 0 : -1} aria-controls={`finance-view-${tab.id}`} onClick={() => setView(tab.id)}>{tab.label}</button>)}</nav>
+      <div id="finance-view-operations" role="tabpanel" aria-labelledby="finance-tab-operations" hidden={view !== 'operations'}><FinanceOperations state={state} onOpenEntry={setSelectedEntryId} /></div>
+      <div id="finance-view-budget" role="tabpanel" aria-labelledby="finance-tab-budget" hidden={view !== 'budget'}><FinanceBudgetPanel state={state} onChange={saveChange} onOpenLine={setSelectedLineId} onOpenUnallocated={() => setShowUnallocated(true)} onImport={() => setShowHistoryImport(true)} /></div>
+      <div id="finance-view-calendar" role="tabpanel" aria-labelledby="finance-tab-calendar" hidden={view !== 'calendar'}><FinancePaymentCalendar state={state} actor={actor} onChange={saveChange} onOpenEntry={setSelectedEntryId} /><CashflowPanel state={state} /></div>
+      <footer className="finance-page__footer"><button type="button" onClick={onOpenQuestions}>Как вести учёт</button><button type="button" onClick={() => setShowHistoryImport(true)}>Импорт прошлых оплат</button></footer>
+      {showUnallocated && <FinanceDrawer title="Расходы без статьи" subtitle="Уже включены в общие суммы" onClose={() => setShowUnallocated(false)}><p className="finance-muted">Откройте расход, чтобы посмотреть его источник и связи со сметой.</p><div className="finance-linked-list">{unallocatedEntries.map(entry => <button type="button" key={entry.id} onClick={() => { setShowUnallocated(false); setSelectedEntryId(entry.id); }}><span><strong>{financeEntryTitle(entry)}</strong><small>{entry.counterparty}</small></span><strong>{money(paidAmountFor(entry))}<small>оплачено</small></strong></button>)}</div></FinanceDrawer>}
 
       {showForm && (
-        <Modal title="Новая операция" subtitle="Расход привязывается к смете и этапу, поступление — к плательщику и основанию." onClose={() => setShowForm(false)}>
-          <form className="modal-form" onSubmit={addOperation}>
+        <Modal title="Новая операция" subtitle="Сначала запишите договорённость. Фактическую оплату можно внести в её карточке." onClose={() => setShowForm(false)}>
+          <form className="modal-form" onSubmit={addOperation}>{formError && <p role="alert" className="form-warning">{formError}</p>}
             {!state.counterparties.length && <div className="form-warning"><ReceiptText size={18} /><span>Сначала добавьте подрядчика, поставщика или заказчика в справочник.</span><button type="button" className="text-button" onClick={() => { setShowForm(false); onNavigate('counterparties'); }}>Открыть справочник</button></div>}
             <div className="segmented-control segmented-control--wide"><button type="button" className={formKind === 'expense' ? 'active' : ''} onClick={() => setFormKind('expense')}>Расход</button><button type="button" className={formKind === 'income' ? 'active' : ''} onClick={() => setFormKind('income')}>Поступление</button></div>
             {formKind === 'expense' && <>
@@ -316,32 +226,35 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
             </div>
             </>}
             {formKind === 'income' && <div className="form-grid"><Field label="Сумма, ₽"><input required min="0.01" step="0.01" inputMode="decimal" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="1400000" /></Field><Field label="Статус"><div className="locked-field"><LockKeyhole size={15} /> Запланировано</div></Field></div>}
-            <Field label="Основание операции" hint="Счёт, договор, акт, платёж или конкретная поставка"><textarea required rows={3} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="За что платим или какое поступление ожидаем" /></Field>
+            <Field label="За что" hint="Короткое название покупки или поступления"><textarea required rows={3} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="За что платим или какое поступление ожидаем" /></Field>
             <div className="form-grid"><Field label={formKind === 'expense' ? 'Контрагент' : 'Плательщик'} hint="Выбор из единого справочника"><select required value={form.counterpartyId} onChange={(event) => setForm({ ...form, counterpartyId: event.target.value })}><option value="">Выберите контрагента</option>{state.counterparties.filter((item) => item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}{item.specialty ? ` · ${item.specialty}` : ''}</option>)}</select></Field><Field label="Дата"><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></Field></div>
-            {formKind === 'expense' && <div className="form-warning"><ReceiptText size={18} /><span>Сначала создаётся обязательство. Управление утверждает расход в карточке. После приёмки связанной работы или поставки фиксируются принятая сумма и отдельно фактическая оплата.</span></div>}
-            <div className="modal__actions"><button className="button button--ghost" type="button" onClick={() => setShowForm(false)}>Отмена</button><button className="button button--primary" type="submit" disabled={!state.counterparties.length}><CircleDollarSign size={18} /> Добавить в поток</button></div>
+            {formKind === 'expense' && <div className="form-warning"><ReceiptText size={18} /><span>После сохранения откройте расход: там доступны утверждение, приёмка и запись оплаты.</span></div>}
+            <div className="modal__actions"><button className="button button--ghost" type="button" onClick={() => setShowForm(false)}>Отмена</button><button className="button button--primary" type="submit" disabled={!state.counterparties.length}><CircleDollarSign size={18} /> Сохранить договорённость</button></div>
           </form>
         </Modal>
       )}
       {showHistoryImport && <HistoryImport state={state} actor={actor} onSave={saveChange} onClose={() => setShowHistoryImport(false)} />}
 
-      {summaryOpen && <Modal wide title={summaryOpen === 'plan' ? 'План себестоимости' : summaryOpen === 'committed' ? 'Законтрактованные расходы' : summaryOpen === 'accepted' ? 'Принятые работы и материалы' : 'Баланс проекта'} subtitle={summaryOpen === 'plan' ? `${state.budgetMeta.source} · ${state.budgetMeta.version}` : 'Каждая цифра раскрывается до операции, контрагента и документа.'} onClose={() => setSummaryOpen(null)}><div className="finance-drilldown"><div><small>План</small><strong>{money(totals.plan)}</strong></div><div><small>Прогноз</small><strong>{money(totals.forecast)}</strong></div><div><small>Обязательства</small><strong>{money(totals.committed)}</strong></div><div><small>Принято</small><strong>{money(totals.accepted)}</strong></div><div><small>Оплачено</small><strong>{money(totals.paid)}</strong></div><div><small>Получено</small><strong>{money(totals.received)}</strong></div><div className="finance-drilldown__accent"><small>Остаток по учёту · счета не сверены</small><strong>{money(balance)}</strong></div><div className="finance-drilldown__accent"><small>Прогноз маржи</small><strong>{money(state.project.contractValue - totals.forecast)}</strong></div></div><div className="entity-related-list">{summaryOpen === 'plan' ? state.budgetLines.map((line) => <button type="button" key={line.id} onClick={() => { setSummaryOpen(null); setSelectedLineId(line.id); }}><span><strong>{line.name}{line.outsideSourceTotal ? " · вне итога файла" : ""}</strong><small>{line.stageIds.length} этапа · прогноз {money(lineForecast(state, line))}</small></span><strong>{money(line.plan)}</strong></button>) : state.financeEntries.filter((entry) => summaryOpen === 'committed' ? entry.kind === 'expense' : summaryOpen === 'accepted' ? entry.kind === 'expense' && acceptedAmountFor(entry) > 0 : entry.kind === 'income' || paidAmountFor(entry) > 0).map((entry) => <button type="button" key={entry.id} onClick={() => { setSummaryOpen(null); setSelectedEntryId(entry.id); }}><span><strong>{entry.description}</strong><small>{entry.counterparty} · {entry.kind === 'income' ? 'поступление' : `принято ${money(acceptedAmountFor(entry))} · оплачено ${money(paidAmountFor(entry))}`}</small></span><strong>{money(entry.amount)}</strong></button>)}</div></Modal>}
+      {summaryOpen && <FinanceDrawer title={summaryOpen === 'paid' ? 'Оплачено по проекту' : summaryOpen === 'received' ? 'Поступило в проект' : 'Доступные деньги'} subtitle="По записанным операциям" onClose={() => setSummaryOpen(null)}>
+        {summaryOpen === 'balance' ? <><div className="finance-drawer__total"><span>Остаток на счетах</span><strong>Пока не установлен</strong></div><p className="finance-muted">Для доступного остатка нужно сверить счета, кассу и оплаты участников из своих средств.</p><dl className="finance-definition-list"><div><dt>Записано поступлений</dt><dd>{money(totals.received)}</dd></div><div><dt>Записано выплат</dt><dd>{money(totals.paid)}</dd></div><div><dt>Разность по учёту</dt><dd>{money(balance)}</dd></div></dl><p className="finance-inline-note">Эта разность не является подтверждённым остатком банка или долгом участнику.</p><details className="finance-disclosure"><summary>Прогноз экономики</summary><dl className="finance-definition-list"><div><dt>План затрат</dt><dd>{money(totals.plan)}</dd></div><div><dt>Расчётный прогноз</dt><dd>{money(totals.forecast)}</dd></div><div><dt>Цена договора − прогноз затрат</dt><dd>{money(margin)}</dd></div></dl><p className="finance-muted">Прогноз предварительный. Полнота стоимости достройки ещё не подтверждена.</p></details></> : <><div className="finance-drawer__total"><span>{summaryOpen === 'paid' ? 'Оплачено' : 'Получено'}</span><strong>{money(summaryOpen === 'paid' ? totals.paid : totals.received)}</strong></div><div className="finance-linked-list">{state.financeEntries.filter(entry => entry.kind === (summaryOpen === 'paid' ? 'expense' : 'income') && paidAmountFor(entry) > 0).map(entry => <button type="button" key={entry.id} onClick={() => { setSummaryOpen(null); setSelectedEntryId(entry.id); }}><span><strong>{financeEntryTitle(entry)}</strong><small>{entry.counterparty}</small></span><strong>{money(paidAmountFor(entry))}</strong></button>)}</div>{!(summaryOpen === 'paid' ? totals.paid : totals.received) && <p className="finance-muted">Записей пока нет.</p>}</>}
+      </FinanceDrawer>}
 
-      {selectedEntry && <Modal title={selectedEntry.description} subtitle={`${selectedEntry.kind === 'expense' ? 'Расход' : 'Поступление'} · ${formatDate(selectedEntry.date, true)}`} onClose={() => setSelectedEntryId(null)}><div className="entity-detail-grid"><section className="entity-detail-card"><small>Обязательство</small><strong>{money(selectedEntry.amount)}</strong><span>{selectedEntry.kind === 'income' ? 'ожидаемое поступление' : statusLabels[selectedEntry.status]}</span></section><section className="entity-detail-card"><small>{selectedEntry.kind === 'income' ? 'Получено' : 'Принято'}</small><strong>{money(selectedEntry.kind === 'income' ? paidAmountFor(selectedEntry) : acceptedAmountFor(selectedEntry))}</strong><span>{selectedEntry.kind === 'income' ? selectedEntry.paymentDocument ?? 'Без платёжного документа' : selectedEntry.acceptanceDocument ?? 'Акт не указан'}</span></section>{selectedEntry.kind === 'expense' && <section className="entity-detail-card"><small>Оплачено</small><strong>{money(paidAmountFor(selectedEntry))}</strong><span>{selectedEntry.paymentDocument ?? 'Платёжный документ не указан'}</span></section>}<section className="entity-detail-card"><small>Контрагент</small><button type="button" className="entity-link" onClick={() => { setSelectedEntryId(null); setCounterpartyId(selectedEntry.counterpartyId ?? null); }}>{selectedEntry.counterparty} <ArrowUpRight size={15} /></button><span>{selectedEntry.document ?? 'Основание не приложено'}</span></section><section className="entity-detail-card"><small>Связь</small><strong>{state.stages.find((item) => item.id === selectedEntry.stageId)?.name ?? 'Без этапа'}</strong><span>{state.budgetLines.find((item) => item.id === selectedEntry.budgetLineId)?.name ?? 'Без статьи бюджета'}</span></section></div>{selectedEntry.kind === 'expense' && !selectedEntry.historicalPayment && <section className="expense-guide" aria-label="Порядок проведения расхода">
-        <strong>{needsExpenseApproval(selectedEntry) ? 'Следующий шаг: утвердить расход' : acceptedAmountFor(selectedEntry) < selectedEntry.amount ? 'Следующий шаг: приёмка работ или материалов' : paidAmountFor(selectedEntry) < selectedEntry.amount ? 'Следующий шаг: записать фактическую оплату' : 'Расход полностью принят и оплачен'}</strong>
-        <p>{selectedEntry.approvedAt ? `Утвердил: ${selectedEntry.approvedBy ?? 'Управление'} · ${formatDate(selectedEntry.approvedAt, true)}` : acceptedAmountFor(selectedEntry) > 0 ? 'Ранее принятый расход: отдельное утверждение в старой записи не фиксировалось.' : 'Утверждает владелец или сотрудник с ролью «Управление». У вас эта роль: кнопка утверждения доступна ниже.'}</p>
-        {selectedEntry.createdBy && <p>Добавил: {selectedEntry.createdBy}</p>}
-        {selectedEntry.acceptedBy && <p>Приёмку записал: {selectedEntry.acceptedBy}</p>}
-        {selectedEntry.paidBy && <p>Оплату записал: {selectedEntry.paidBy}</p>}
-        {!needsExpenseApproval(selectedEntry) && acceptedAmountFor(selectedEntry) < selectedEntry.amount && !canAcceptEntry(selectedEntry) && <><p role="status">{approvalRequired(selectedEntry)} Ответственный за этап: {state.stages.find((item) => item.id === selectedEntry.stageId)?.responsible || 'не назначен'}. После приёмки вернитесь в эту карточку.</p><div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => onNavigate(selectedEntry.procurementItemId ? 'procurement' : 'quality', selectedEntry.procurementItemId ?? state.checkpoints.find((item) => item.stageId === selectedEntry.stageId && item.status !== 'accepted')?.id)}>{selectedEntry.procurementItemId ? 'Открыть снабжение' : 'Открыть качество'}</button>{!selectedEntry.procurementItemId && <button type="button" className="button button--ghost" onClick={() => onNavigate('schedule', selectedEntry.stageId)}>Открыть этапы</button>}</div></>}
-        <p>Обязательство — договорённость о расходе. Утверждение — разрешение расхода. Приёмка — подтверждённый результат. Оплата — уже выплаченные деньги. Система не переводит деньги в банк.</p>
-        <button type="button" className="text-button" onClick={() => { setSelectedEntryId(null); onOpenQuestions(); }}>Вопросы по расходам</button>
-      </section>}
-      {selectedEntry.kind === 'expense' && <PaymentEvidence entry={selectedEntry} documents={state.documents} />}
-<PaymentHistory entry={selectedEntry} />
-      <div className="modal__actions">{selectedEntry.historicalPayment && <section className="entity-detail-card"><strong>Историческая оплата</strong><p>{selectedEntry.historicalPayment.confirmation}</p><p>Дата документа: {formatDate(selectedEntry.date, true)}. Дата оплаты: {selectedEntry.paidAt ? formatDate(selectedEntry.paidAt, true) : "не указана"}. Приёмка не подтверждена.</p><button type="button" className="text-button" onClick={() => { setSelectedEntryId(null); onNavigate("project", selectedEntry.historicalPayment!.sourceDocumentId); }}>Открыть исходный документ</button></section>}{needsExpenseApproval(selectedEntry) && <button type="button" className="button button--primary" onClick={() => approveExpense(selectedEntry)}>Утвердить расход</button>}{selectedEntry.kind === 'expense' && !selectedEntry.historicalPayment && acceptedAmountFor(selectedEntry) < selectedEntry.amount && <button type="button" className="button button--secondary" disabled={!canAcceptEntry(selectedEntry)} onClick={() => { setSelectedEntryId(null); openAction(selectedEntry, 'accept'); }}>Зафиксировать приёмку</button>}{selectedEntry.kind === 'expense' && paidAmountFor(selectedEntry) < acceptedAmountFor(selectedEntry) && <button type="button" className="button button--primary" onClick={() => { setSelectedEntryId(null); openAction(selectedEntry, 'pay'); }}>Зафиксировать оплату</button>}{selectedEntry.kind === 'income' && paidAmountFor(selectedEntry) < selectedEntry.amount && <button type="button" className="button button--primary" onClick={() => { setSelectedEntryId(null); openAction(selectedEntry, 'receive'); }}>Зафиксировать поступление</button>}</div></Modal>}
+      {selectedEntry && <FinanceDrawer title={financeEntryTitle(selectedEntry)} subtitle={selectedEntry.kind === 'expense' ? 'Расход' : 'Поступление'} onClose={() => setSelectedEntryId(null)}>
+        <div className="finance-drawer__total"><span>{selectedEntry.kind === 'expense' ? 'Оплачено' : 'Получено'}</span><strong>{money(paidAmountFor(selectedEntry))}</strong><small>{selectedEntry.kind === 'expense' && paidAmountFor(selectedEntry) > 0 ? paymentEvidence(selectedEntry, state.documents).sourceLabel : ''}</small></div>
+        <dl className="finance-definition-list"><div><dt>{selectedEntry.kind === 'expense' ? 'Получатель' : 'Плательщик'}</dt><dd>{selectedCounterparty ? <button type="button" onClick={() => { setSelectedEntryId(null); setCounterpartyId(selectedCounterparty.id); }}>{selectedEntry.counterparty} <ArrowUpRight size={14} /></button> : selectedEntry.counterparty}</dd></div><div><dt>Сумма договорённости</dt><dd>{money(selectedEntry.amount)}</dd></div>{paidAmountFor(selectedEntry) < selectedEntry.amount && <div><dt>{selectedEntry.kind === 'expense' ? 'Осталось оплатить' : 'Ожидается'}</dt><dd>{money(selectedEntry.amount - paidAmountFor(selectedEntry))}</dd></div>}<div><dt>Дата документа / записи</dt><dd>{formatDate(selectedEntry.date, true)}</dd></div>{!selectedEntry.payments?.length && <div><dt>Дата оплаты</dt><dd>{selectedEntry.paidAt ? formatDate(selectedEntry.paidAt, true) : 'Не установлена'}</dd></div>}</dl>
+        {(needsExpenseApproval(selectedEntry) || selectedEntry.kind === 'expense' && !selectedEntry.historicalPayment && acceptedAmountFor(selectedEntry) < selectedEntry.amount || selectedEntry.kind === 'expense' && paidAmountFor(selectedEntry) < acceptedAmountFor(selectedEntry) || selectedEntry.kind === 'income' && paidAmountFor(selectedEntry) < selectedEntry.amount) && <section className="finance-next-action">
+          {needsExpenseApproval(selectedEntry) ? <button type="button" className="button button--primary" onClick={() => approveExpense(selectedEntry)}>Утвердить расход</button> : selectedEntry.kind === 'income' ? <button type="button" className="button button--primary" onClick={() => openAction(selectedEntry, 'receive')}>Записать поступление</button> : paidAmountFor(selectedEntry) < acceptedAmountFor(selectedEntry) ? <button type="button" className="button button--primary" onClick={() => openAction(selectedEntry, 'pay')}>Записать оплату</button> : canAcceptEntry(selectedEntry) ? <button type="button" className="button button--primary" onClick={() => openAction(selectedEntry, 'accept')}>Зафиксировать приёмку</button> : <><p>Для записи приёмки сначала подтвердите работу или поставку.</p><button type="button" className="button button--secondary" onClick={() => { setSelectedEntryId(null); onNavigate(selectedEntry.procurementItemId ? 'procurement' : 'schedule', selectedEntry.procurementItemId ?? selectedEntry.stageId); }}>Открыть {selectedEntry.procurementItemId ? 'поставку' : 'этап'}</button></>}
+          {selectedEntry.kind === 'expense' && !selectedEntry.historicalPayment
+            && paidAmountFor(selectedEntry) < acceptedAmountFor(selectedEntry)
+            && acceptedAmountFor(selectedEntry) < selectedEntry.amount && canAcceptEntry(selectedEntry)
+            && <button type="button" className="button button--secondary" onClick={() => openAction(selectedEntry, 'accept')}>Принять ещё</button>}
+        </section>}
+        <details className="finance-disclosure"><summary>Документы и источник</summary><p className="finance-original-description">{selectedEntry.description}</p>{selectedEntry.document && <p className="finance-muted">{selectedEntry.document}</p>}{selectedEntry.kind === 'expense' && <PaymentEvidence entry={selectedEntry} documents={state.documents} />}{selectedEntry.historicalPayment && <><p className="finance-muted">{selectedEntry.historicalPayment.confirmation}</p><button type="button" className="button button--secondary" onClick={() => { setSelectedEntryId(null); onNavigate('project', selectedEntry.historicalPayment!.sourceDocumentId); }}>Открыть исходный документ</button></>}{!selectedEntry.historicalPayment && selectedEntry.paymentDocument && <p>{selectedEntry.paymentDocument}</p>}</details>
+        <details className="finance-disclosure"><summary>История платежей</summary><PaymentHistory entry={selectedEntry} />{!paidAmountFor(selectedEntry) && <p className="finance-muted">Платежей пока нет.</p>}</details>
+        <details className="finance-disclosure"><summary>Смета, этап и приёмка</summary><dl className="finance-definition-list"><div><dt>Статья</dt><dd>{state.budgetLines.find(line => line.id === selectedEntry.budgetLineId)?.name ?? 'Не распределено'}</dd></div><div><dt>Этап</dt><dd>{state.stages.find(stage => stage.id === selectedEntry.stageId)?.shortName ?? 'Не указан'}</dd></div>{selectedEntry.kind === 'expense' && <div><dt>Финансовая приёмка</dt><dd>{acceptedAmountFor(selectedEntry) ? money(acceptedAmountFor(selectedEntry)) : 'Не записана'}</dd></div>}</dl>{selectedEntry.createdBy && <p className="finance-muted">Добавил: {selectedEntry.createdBy}</p>}{selectedEntry.approvedBy && <p className="finance-muted">Утвердил: {selectedEntry.approvedBy}</p>}</details>
+      </FinanceDrawer>}
 
-      {selectedLine && <Modal wide title={selectedLine.name} subtitle="Статья сметы и все связанные обязательства." onClose={() => setSelectedLineId(null)}>{selectedLine.sourceRow && <section className="entity-detail-card"><small>Исходная смета · строка {selectedLine.sourceRow}</small>{selectedLine.outsideSourceTotal && <p>В файле: {money(selectedLine.sourcePlan ?? 0)}. Строка не включена в итог исходной формулы; её включение в бюджет требует решения.</p>}<p>Колонка «Факт»: {selectedLine.sourceFact === undefined ? "не заполнена" : money(selectedLine.sourceFact)}. Это значение для сверки, отдельно от реестра оплат.</p>{Object.entries(selectedLine.sourceParticipantAmounts ?? {}).filter(([, amount]) => amount !== null).map(([name, amount]) => <span key={name}>{name}: {money(amount!)} · из исходной таблицы</span>)}</section>}<div className="finance-drilldown"><div><small>План</small><strong>{money(selectedLine.plan)}</strong></div><div><small>Прогноз</small><strong>{money(lineForecast(state, selectedLine))}</strong></div><div><small>Обязательства</small><strong>{money(lineTotals(state, selectedLine).committed)}</strong></div><div><small>Принято</small><strong>{money(lineTotals(state, selectedLine).accepted)}</strong></div><div><small>Оплачено</small><strong>{money(lineTotals(state, selectedLine).paid)}</strong></div></div><div className="entity-related-list">{state.financeEntries.filter((entry) => entry.budgetLineId === selectedLine.id).map((entry) => <button type="button" key={entry.id} onClick={() => { setSelectedLineId(null); setSelectedEntryId(entry.id); }}><span><strong>{entry.description}</strong><small>{entry.counterparty} · {formatDate(entry.date, true)}</small></span><strong>{money(entry.amount)}</strong></button>)}{!state.financeEntries.some((entry) => entry.budgetLineId === selectedLine.id) && <div className="table-empty">По статье ещё нет обязательств и оплат.</div>}</div><div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => openLineEdit(selectedLine)}>Изменить план и прогноз</button><button type="button" className="button button--primary" onClick={() => { setSelectedLineId(null); setForm({ ...form, budgetLineId: selectedLine.id, stageId: selectedLine.stageIds[0] }); setShowForm(true); }}>Добавить обязательство</button></div></Modal>}
+      {selectedLine && <Modal wide title={selectedLine.name} subtitle="Статья сметы и все связанные обязательства." onClose={() => setSelectedLineId(null)}>{selectedLine.sourceRow && <section className="entity-detail-card"><small>Исходная смета · строка {selectedLine.sourceRow}</small>{selectedLine.outsideSourceTotal && <p>В файле: {money(selectedLine.sourcePlan ?? 0)}. Строка не включена в итог исходной формулы; её включение в бюджет требует решения.</p>}<p>Колонка «Факт»: {selectedLine.sourceFact === undefined ? "не заполнена" : money(selectedLine.sourceFact)}. Это значение для сверки, отдельно от реестра оплат.</p>{Object.entries(selectedLine.sourceParticipantAmounts ?? {}).filter(([, amount]) => amount !== null).map(([name, amount]) => <span key={name}>{name}: {money(amount!)} · из исходной таблицы</span>)}</section>}<div className="finance-drilldown"><div><small>План</small><strong>{money(selectedLine.plan)}</strong></div><div><small>Прогноз</small><strong>{money(lineForecast(state, selectedLine))}</strong></div><div><small>Обязательства</small><strong>{money(lineTotals(state, selectedLine).committed)}</strong></div><div><small>Принято</small><strong>{money(lineTotals(state, selectedLine).accepted)}</strong></div><div><small>Оплачено</small><strong>{money(lineTotals(state, selectedLine).paid)}</strong></div></div><div className="entity-related-list">{state.financeEntries.filter((entry) => entry.budgetLineId === selectedLine.id).map((entry) => <button type="button" key={entry.id} onClick={() => { setSelectedLineId(null); setSelectedEntryId(entry.id); }}><span><strong>{entry.description}</strong><small>{entry.counterparty} · {formatDate(entry.date, true)}</small></span><strong>{money(entry.amount)}</strong></button>)}{!state.financeEntries.some((entry) => entry.budgetLineId === selectedLine.id) && <div className="table-empty">По статье ещё нет обязательств и оплат.</div>}</div><div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => openLineEdit(selectedLine)}>Изменить план и прогноз</button><button type="button" className="button button--primary" onClick={() => { setSelectedLineId(null); setFormKind('expense'); setFormError(''); setForm({ ...form, budgetLineId: selectedLine.id, stageId: selectedLine.stageIds[0] }); setShowForm(true); }}>Добавить обязательство</button></div></Modal>}
 
       {counterpartyId && <CounterpartyModal state={state} counterpartyId={counterpartyId} onClose={() => setCounterpartyId(null)} onOpenFinanceEntry={(id) => { setCounterpartyId(null); setSelectedEntryId(id); }} />}
 

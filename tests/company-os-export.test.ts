@@ -65,7 +65,10 @@ test('IKIOMA export contains no customer PII, only unpaid obligations and invest
 
   assert.equal(payload.investor_projects.length, 1);
   const investor = payload.investor_projects[0];
-  assert.equal(investor.forecast_cost_rub, 5400000);
+  assert.equal(investor.forecast_cost_rub, 6100000); // Includes 700,000 of costs without a budget article.
+  assert.equal(investor.committed_cost_rub, 700000);
+  assert.equal(investor.total_committed_cost_rub, 700000);
+  assert.equal(investor.outstanding_cost_rub, 400000);
   assert.equal(investor.physical_progress_pct, 70);
   assert.equal(investor.accepted_progress_pct, 50);
   assert.equal(investor.evidence.photos_count, 1);

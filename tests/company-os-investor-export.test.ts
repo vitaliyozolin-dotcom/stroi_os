@@ -38,9 +38,12 @@ test('investor export is aggregated and excludes customer/address/people data', 
   assert.equal(payload.meta.project, 'ikioma-investor');
   assert.equal(payload.investor_projects.length, 1);
   const project = payload.investor_projects[0];
-  assert.equal(project.forecast_cost_rub, 5_400_000);
+  assert.equal(project.forecast_cost_rub, 6_900_000); // Includes both expenses without article links.
   assert.equal(project.paid_cost_rub, 1_100_000);
-  assert.equal(project.accepted_cost_rub, 400_000);
+  assert.equal(project.accepted_cost_rub, 1_400_000); // Legacy paid entry has no explicit acceptance amount.
+  assert.equal(project.committed_cost_rub, 400_000); // Preserve this endpoint's published unpaid-remainder alias.
+  assert.equal(project.total_committed_cost_rub, 1_500_000);
+  assert.equal(project.outstanding_cost_rub, 400_000);
   assert.equal(project.quality.photos_count, 1);
   assert.equal(project.procurement.risk_count, 1);
   assert.equal(project.tasks.overdue_count, 1);

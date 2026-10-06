@@ -12,11 +12,15 @@ await mkdir(`${projectRoot}dist/server/automations`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/integrations`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/leads`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/lib`, { recursive: true });
+await mkdir(`${projectRoot}dist/src/domain`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/projects`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/routes`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
 
 await Promise.all([
+  copyFile(`${projectRoot}src/domain/finance-totals.js`, `${projectRoot}dist/src/domain/finance-totals.js`),
+  copyFile(`${projectRoot}sites/company-os-export.js`, `${projectRoot}dist/server/company-os-export.js`),
+  copyFile(`${projectRoot}sites/company-os-investor-export.js`, `${projectRoot}dist/server/company-os-investor-export.js`),
   copyFile(`${projectRoot}sites/lib/schedule-forecast.js`, `${projectRoot}dist/server/lib/schedule-forecast.js`),
   copyFile(`${projectRoot}sites/projects/schedule-review.js`, `${projectRoot}dist/server/projects/schedule-review.js`),
   copyFile(`${projectRoot}sites/lib/stage-control.js`, `${projectRoot}dist/server/lib/stage-control.js`),

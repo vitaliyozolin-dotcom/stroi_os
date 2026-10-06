@@ -1,31 +1,7 @@
-import type { AppState, BudgetLine, ExpenseStatus } from '../entities/index';
-
-export const acceptedAmountFor = (entry: AppState['financeEntries'][number]) =>
-  entry.acceptedAmount ?? (entry.status === 'accepted' || entry.status === 'paid' ? entry.amount : 0);
-
-export const paidAmountFor = (entry: AppState['financeEntries'][number]) =>
-  entry.paidAmount ?? (entry.status === 'paid' ? entry.amount : 0);
-
-const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
-
-// A calculated safety floor, not a rewrite or approval of the stored estimate.
-export const lineForecast = (state: AppState, line: BudgetLine) => {
-  const values = lineTotals(state, line);
-  return roundMoney(Math.max(line.forecast, values.committed, values.accepted, values.paid));
-};
-
-export const unallocatedExpenses = (state: AppState) => {
-  const ids = new Set(state.budgetLines.map(line => line.id));
-  return state.financeEntries.filter(entry => entry.kind === 'expense' && (!entry.budgetLineId || !ids.has(entry.budgetLineId)));
-};
-
-export const unallocatedExpenseTotals = (state: AppState) => {
-  const entries = unallocatedExpenses(state);
-  const committed = roundMoney(entries.reduce((sum, entry) => sum + entry.amount, 0));
-  const accepted = roundMoney(entries.reduce((sum, entry) => sum + acceptedAmountFor(entry), 0));
-  const paid = roundMoney(entries.reduce((sum, entry) => sum + paidAmountFor(entry), 0));
-  return { committed, accepted, paid, forecast: Math.max(committed, accepted, paid) };
-};
+import type { AppState, BudgetLine } from '../entities/index';
+import { paidAmountFor, roundMoney } from './finance-totals.js';
+export { acceptedAmountFor, paidAmountFor, financeTotals, lineTotals, lineForecast,
+  unallocatedExpenses, unallocatedExpenseTotals, stageFinanceTotals } from './finance-totals.js';
 
 // Unknown payment dates must never inherit document/import dates.
 export const paymentDate = (entry: AppState['financeEntries'][number]) => {
@@ -59,47 +35,4 @@ export const sourceEstimateTotals = (lines: BudgetLine[]) => {
   const plan = round(source.reduce((sum, line) => sum + (line.sourcePlan ?? line.plan), 0));
   const fact = round(source.reduce((sum, line) => sum + (Number.isFinite(line.sourceFact) ? line.sourceFact! : 0), 0));
   return { plan, fact, deviation: round(fact - plan) };
-};
-
-export const financeTotals = (state: AppState) => {
-  const expenses = state.financeEntries.filter((entry) => entry.kind === 'expense');
-  const income = state.financeEntries.filter((entry) => entry.kind === 'income');
-  const hasStatus = (current: ExpenseStatus, accepted: ExpenseStatus[]) => accepted.includes(current);
-
-  return {
-    plan: state.budgetLines.reduce((sum, line) => sum + line.plan, 0),
-    forecast: roundMoney(state.budgetLines.reduce((sum, line) => sum + lineForecast(state, line), 0) + unallocatedExpenseTotals(state).forecast),
-    storedForecast: roundMoney(state.budgetLines.reduce((sum, line) => sum + line.forecast, 0)),
-    committed: expenses.filter((entry) => hasStatus(entry.status, ['committed', 'accepted', 'paid'])).reduce((sum, entry) => sum + entry.amount, 0),
-    accepted: expenses.reduce((sum, entry) => sum + acceptedAmountFor(entry), 0),
-    paid: expenses.reduce((sum, entry) => sum + paidAmountFor(entry), 0),
-    received: income.reduce((sum, entry) => sum + paidAmountFor(entry), 0),
-    contractedIncome: income.reduce((sum, entry) => sum + entry.amount, 0),
-  };
-};
-
-export const lineTotals = (state: AppState, line: BudgetLine) => {
-  const entries = state.financeEntries.filter((entry) => entry.kind === 'expense' && entry.budgetLineId === line.id);
-  return {
-    committed: entries.reduce((sum, entry) => sum + entry.amount, 0),
-    accepted: entries.reduce((sum, entry) => sum + acceptedAmountFor(entry), 0),
-    paid: entries.reduce((sum, entry) => sum + paidAmountFor(entry), 0),
-  };
-};
-
-export const stageFinanceTotals = (state: AppState, stageId: string) => {
-  const budgetLines = state.budgetLines.filter((line) => line.stageIds.includes(stageId));
-  const entries = state.financeEntries.filter((entry) => entry.stageId === stageId);
-  const expenses = entries.filter((entry) => entry.kind === 'expense');
-  const income = entries.filter((entry) => entry.kind === 'income');
-
-  return {
-    plan: budgetLines.reduce((sum, line) => sum + line.plan / Math.max(1, line.stageIds.length), 0),
-    forecast: budgetLines.reduce((sum, line) => sum + line.forecast / Math.max(1, line.stageIds.length), 0),
-    committed: expenses.reduce((sum, entry) => sum + entry.amount, 0),
-    accepted: expenses.reduce((sum, entry) => sum + acceptedAmountFor(entry), 0),
-    paid: expenses.reduce((sum, entry) => sum + paidAmountFor(entry), 0),
-    billed: income.reduce((sum, entry) => sum + entry.amount, 0),
-    received: income.reduce((sum, entry) => sum + paidAmountFor(entry), 0),
-  };
 };

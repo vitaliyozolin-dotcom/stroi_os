@@ -1,3 +1,5 @@
+import { FINANCE_RULES_VERSION, financeTotals, outstandingExpenseTotal, outstandingAmountFor } from '../src/domain/finance-totals.js';
+
 const OIDC_ISSUER = 'https://token.actions.githubusercontent.com';
 const OIDC_AUDIENCE = 'company-os-export';
 const COMPANY_OS_REPOSITORY = 'vitaliyozolin-dotcom/Company-OS';
@@ -68,6 +70,8 @@ export const verifyCompanyOsOidc = async (token, { fetchImpl = fetch, cryptoImpl
 
 const cleanNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const cleanDate = (value) => typeof value === 'string' && value ? value : null;
+const paymentDueDate = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value ? value : null;
 const cleanText = (value, max = 240) => String(value || '').trim().slice(0, max);
 
 const mapLeadStage = (stage) => ({
@@ -87,21 +91,21 @@ const parseStateRow = (row) => {
 
 const financeProject = ({ row, state }) => {
   const commitments = (state.financeEntries ?? []).flatMap((entry) => {
-    if (entry?.kind !== 'expense' || !['committed', 'accepted'].includes(entry.status)) return [];
-    const remaining = Math.max(0, cleanNumber(entry.amount) - cleanNumber(entry.paidAmount));
+    if (entry?.kind !== 'expense') return [];
+    const remaining = outstandingAmountFor(entry);
     if (!remaining) return [];
     return [{
-      id: String(entry.id), amount_rub: Math.round(remaining), due_date: cleanDate(entry.date),
+      id: String(entry.id), amount_rub: Math.round(remaining), due_date: paymentDueDate(entry.dueDate),
       mandatory: true, status: entry.status === 'accepted' ? 'accepted' : 'open',
       source_ref: `ikioma:${state.project.id}:finance:${entry.id}`,
     }];
   });
   const inflows = (state.financeEntries ?? []).flatMap((entry) => {
-    if (entry?.kind !== 'income' || entry.status === 'paid') return [];
+    if (entry?.kind !== 'income') return [];
     return [{
       id: String(entry.id),
-      amount_rub: Math.round(Math.max(0, cleanNumber(entry.amount) - cleanNumber(entry.paidAmount))),
-      due_date: cleanDate(entry.date), confirmed: false, status: 'expected',
+      amount_rub: Math.round(outstandingAmountFor(entry)),
+      due_date: paymentDueDate(entry.dueDate), confirmed: false, status: 'expected',
       source_ref: `ikioma:${state.project.id}:finance:${entry.id}`,
     }];
   }).filter((item) => item.amount_rub > 0);
@@ -141,19 +145,8 @@ const weightedProgress = (stages, acceptedOnly = false) => {
 };
 
 const investorProject = ({ row, state }) => {
-  const expenses = (state.financeEntries ?? []).filter((entry) => entry?.kind === 'expense');
-  const committedCost = expenses.reduce((sum, entry) => sum + cleanNumber(entry.amount), 0);
-  const acceptedCost = expenses.reduce((sum, entry) => {
-    if (cleanNumber(entry.acceptedAmount) > 0) return sum + cleanNumber(entry.acceptedAmount);
-    return sum + (['accepted', 'paid'].includes(entry.status) ? cleanNumber(entry.amount) : 0);
-  }, 0);
-  const paidCost = expenses.reduce((sum, entry) => {
-    if (cleanNumber(entry.paidAmount) > 0) return sum + cleanNumber(entry.paidAmount);
-    return sum + (entry.status === 'paid' ? cleanNumber(entry.amount) : 0);
-  }, 0);
-  const budgetForecast = (state.budgetLines ?? []).reduce((sum, item) => sum + cleanNumber(item.forecast), 0);
-  const targetCost = cleanNumber(state.project.targetCost) || (state.budgetLines ?? []).reduce((sum, item) => sum + cleanNumber(item.plan), 0);
-  const forecastCost = budgetForecast || targetCost;
+  const totals = financeTotals(state);
+  const targetCost = cleanNumber(state.project.targetCost) || totals.plan;
   const checkpoints = state.checkpoints ?? [];
   const stages = state.stages ?? [];
   const evidence = {
@@ -179,8 +172,13 @@ const investorProject = ({ row, state }) => {
     project_id: String(state.project.id), as_of: row.updated_at,
     source_ref: `ikioma:${state.project.id}:revision:${row.revision}`,
     contract_value_rub: Math.round(cleanNumber(state.project.contractValue)),
-    target_cost_rub: Math.round(targetCost), forecast_cost_rub: Math.round(forecastCost),
-    committed_cost_rub: Math.round(committedCost), accepted_cost_rub: Math.round(acceptedCost), paid_cost_rub: Math.round(paidCost),
+    target_cost_rub: Math.round(targetCost), forecast_cost_rub: Math.round(totals.forecast),
+    // Compatibility alias: this endpoint has always used committed_cost_rub for
+    // the full amount. New consumers use the two explicit fields below instead.
+    committed_cost_rub: Math.round(totals.committed),
+    total_committed_cost_rub: Math.round(totals.committed),
+    outstanding_cost_rub: Math.round(outstandingExpenseTotal(state)),
+    accepted_cost_rub: Math.round(totals.accepted), paid_cost_rub: Math.round(totals.paid),
     start_date: cleanDate(state.project.startDate), target_date: cleanDate(state.project.targetDate), forecast_date: cleanDate(state.project.forecastDate),
     physical_progress_pct: weightedProgress(stages, false), accepted_progress_pct: weightedProgress(stages, true),
     stages: stageRows, evidence, risks,
@@ -199,7 +197,7 @@ export const buildIkiomaCompanyOsPayload = ({ stateRows = [], leadRows = [], gen
   const latest = stateRows.map((row) => row.updated_at).filter(Boolean).sort().at(-1) || generatedAt;
   return {
     meta: {
-      project: 'ikioma', generated_at: generatedAt, schema_version: 1,
+      project: 'ikioma', generated_at: generatedAt, schema_version: 1, finance_rules_version: FINANCE_RULES_VERSION,
       source_of_truth: 'IKIOMA OS PostgreSQL', privacy: 'no_customer_pii',
     },
     adapter_sources: [{

@@ -171,3 +171,140 @@ test('source rows outside its total are retained without increasing the accepted
   input.budgetLines[1].sourcePlan = -1;
   assert.throws(() => parseHistoryRegister(input));
 });
+
+test('a revised source budget preserves classification history, independent forecast and payment links by stable id', () => {
+  const firstInput = register();
+  const before = prepareHistoryImport(current(), firstInput, identity.name, now, true).state;
+  const classification = [{ group: 'construction' as const, at: now, by: identity.name }];
+  Object.assign(before.budgetLines[0], { costGroup: 'construction', costGroupHistory: classification, forecast: 155000 });
+  const originalPayment = structuredClone(before.financeEntries[0]);
+  const snapshot = structuredClone(before);
+  const revision = register();
+  revision.sources[0].sha256 = 'b'.repeat(64);
+  Object.assign(revision.budgetLines[0], { name: 'Материалы и монтаж', sourceRow: 4, plan: 140000, sourceFact: 110000 });
+  revision.budgetReconciliation.sumOfPlanItems = 140000;
+  const result = prepareHistoryImport(before, revision, identity.name, '2026-10-01T00:00:00Z', true);
+  assert.equal(result.state.budgetLines.length, 1);
+  assert.deepEqual(result.state.budgetLines[0], {
+    ...revision.budgetLines[0], forecast: 155000, sourcePlan: undefined, outsideSourceTotal: undefined,
+    sourceParticipantAmounts: undefined, costGroup: 'construction', costGroupHistory: classification,
+  });
+  assert.deepEqual(result.state.financeEntries[0], originalPayment);
+  assert.deepEqual(before, snapshot);
+  assert.equal(validateFinanceChanges(before, result.state, identity, now), '');
+  assert.deepEqual(result.state.budgetLines[0].costGroupHistory, classification);
+  const again = prepareHistoryImport(result.state, revision, identity.name, '2026-10-02T00:00:00Z', true);
+  assert.deepEqual(again.state, result.state);
+});
+
+test('a default forecast follows the revised plan but independent forecasts above or below it survive', () => {
+  for (const [oldForecast, expected] of [[120000, 140000], [155000, 155000], [100000, 100000]]) {
+    const before = current();
+    before.budgetLines = [{ id: 'source-1', name: 'Материалы', sourceRow: 1, stageIds: ['sip'], plan: 120000, forecast: oldForecast }];
+    const input = register();
+    input.paidInvoices = [];
+    input.budgetLines[0].plan = 140000;
+    input.budgetReconciliation.sumOfPlanItems = 140000;
+    const after = prepareHistoryImport(before, input, identity.name, now, true).state;
+    assert.equal(after.budgetLines[0].plan, 140000);
+    assert.equal(after.budgetLines[0].forecast, expected);
+  }
+});
+
+test('an unambiguous row and name match keeps the existing id and its financial links', () => {
+  const before = prepareHistoryImport(current(), register(), identity.name, now, true).state;
+  Object.assign(before.budgetLines[0], { costGroup: 'overhead', forecast: 125000 });
+  const payment = structuredClone(before.financeEntries[0]);
+  const input = register();
+  input.sources[0].sha256 = 'b'.repeat(64);
+  input.budgetLines[0].id = 'new-source-id';
+  input.budgetLines[0].name = ' Материалы ';
+  const after = prepareHistoryImport(before, input, identity.name, now, true).state;
+  assert.equal(after.budgetLines.length, 1);
+  assert.equal(after.budgetLines[0].id, 'source-1');
+  assert.equal(after.budgetLines[0].costGroup, 'overhead');
+  assert.equal(after.budgetLines[0].forecast, 125000);
+  assert.deepEqual(after.financeEntries[0], payment);
+  assert.equal(validateFinanceChanges(before, after, identity, now), '');
+});
+
+test('row fallback cannot steal an id matched elsewhere in the same import', () => {
+  const before = current();
+  before.budgetLines = [{ id: 'source-1', name: 'Материалы', sourceRow: 1, stageIds: ['sip'], plan: 100, forecast: 130, costGroup: 'construction' }];
+  const input = register();
+  input.paidInvoices = [];
+  input.budgetLines = [
+    { id: 'new-line', name: 'Материалы', sourceRow: 1, stageIds: ['sip'], plan: 20 },
+    { id: 'source-1', name: 'Материалы переименованы', sourceRow: 2, stageIds: ['sip'], plan: 110 },
+  ];
+  input.budgetReconciliation.sumOfPlanItems = 130;
+  const after = prepareHistoryImport(before, input, identity.name, now, true).state;
+  assert.deepEqual(after.budgetLines.map(line => [line.id, line.forecast, line.costGroup]), [
+    ['new-line', 20, undefined], ['source-1', 130, 'construction'],
+  ]);
+});
+
+test('reused row numbers and ambiguous prior rows do not inherit another article classification or forecast', () => {
+  for (const ambiguous of [false, true]) {
+    const before = current();
+    before.budgetLines = [{ id: 'previous-line', name: ambiguous ? 'Материалы' : 'Другая статья', sourceRow: 1, stageIds: ['sip'], plan: 100, forecast: 150, costGroup: 'overhead' }];
+    if (ambiguous) before.budgetLines.push({ ...before.budgetLines[0], id: 'another-previous-line' });
+    const input = register();
+    input.paidInvoices = [];
+    const after = prepareHistoryImport(before, input, identity.name, now, true).state;
+    assert.equal(after.budgetLines[0].id, 'source-1');
+    assert.equal(after.budgetLines[0].costGroup, undefined);
+    assert.equal(after.budgetLines[0].forecast, 120000);
+  }
+});
+
+test('confirming an existing expense imports its known payment date and deduplicates it', () => {
+  const before = current();
+  before.financeEntries.push({ id: 'legacy-expense', kind: 'expense', status: 'committed', amount: 500, date: '2026-08-01', description: 'Подготовка', counterparty: 'Исполнитель' });
+  const input = register();
+  input.paidInvoices = [];
+  input.existingPaidExpenses = [{ existingOperation: true, vendor: 'Исполнитель', description: 'Подготовка', amount: 500, documentDate: '2026-08-01', paymentDate: '2026-08-07', file: 'invoice.pdf', dedupKey: 'existing:dated', paymentConfirmation: 'Владелец подтвердил оплату и дату' }];
+  const after = prepareHistoryImport(before, input, identity.name, now, false).state;
+  assert.equal(after.financeEntries[0].date, '2026-08-01');
+  assert.equal(after.financeEntries[0].paidAt, '2026-08-07');
+  assert.equal(after.financeEntries[0].paidAmount, 500);
+  assert.equal(after.financeEntries[0].acceptedAmount, 0);
+  assert.equal(validateFinanceChanges(before, after, identity, now), '');
+  assert.deepEqual(prepareHistoryImport(after, input, identity.name, now, false).state, after);
+  input.existingPaidExpenses![0].paymentDate = '2026-08-08';
+  assert.throws(() => prepareHistoryImport(after, input, identity.name, now, false), /Дата оплаты отличается/);
+});
+
+test('existing known payment dates are preserved or matched, never overwritten by a conflicting import', () => {
+  const before = current();
+  before.financeEntries.push({ id: 'legacy-expense', kind: 'expense', status: 'committed', amount: 500, date: '2026-08-01', paidAt: '2026-08-07', description: 'Подготовка', counterparty: 'Исполнитель' });
+  const input = register();
+  input.paidInvoices = [];
+  input.existingPaidExpenses = [{ existingOperation: true, vendor: 'Исполнитель', description: 'Подготовка', amount: 500, documentDate: '2026-08-01', file: 'invoice.pdf', dedupKey: 'existing:dated', paymentConfirmation: 'Подтверждение владельца' }];
+  for (const paymentDate of [undefined, null, '2026-08-07']) {
+    input.existingPaidExpenses[0].paymentDate = paymentDate;
+    const after = prepareHistoryImport(before, input, identity.name, now, false).state;
+    assert.equal(after.financeEntries[0].paidAt, '2026-08-07');
+    assert.equal(validateFinanceChanges(before, after, identity, now), '');
+  }
+  const snapshot = structuredClone(before);
+  input.existingPaidExpenses[0].paymentDate = '2026-08-08';
+  assert.throws(() => prepareHistoryImport(before, input, identity.name, now, false), /Дата оплаты отличается/);
+  assert.deepEqual(before, snapshot);
+});
+
+test('invalid source totals, facts, participant amounts and duplicate worksheet rows fail validation', () => {
+  const invalidInputs: ((input: HistoryRegister) => void)[] = [
+    input => { input.budgetReconciliation.sourceDisplayedPlan = NaN; },
+    input => { input.budgetReconciliation.sumOfPlanItems = -1; },
+    input => { input.budgetLines[0].sourceFact = Infinity; },
+    input => { input.budgetLines[0].participantAmounts = { Владелец: NaN }; },
+    input => { input.budgetLines[0].sourceRow = 0; },
+    input => { input.budgetLines.push({ ...input.budgetLines[0], id: 'different-id' }); },
+  ];
+  for (const mutate of invalidInputs) {
+    const input = register();
+    mutate(input);
+    assert.throws(() => parseHistoryRegister(input));
+  }
+});
