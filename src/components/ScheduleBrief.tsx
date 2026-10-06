@@ -41,8 +41,7 @@ export function ScheduleBrief({ state, role, actor, userId, onChange, onNavigate
     <details className="panel schedule-brief__details"><summary>Исходные сроки, история переносов и отдельные записи</summary><BaselinePanel compact state={state} role={role} actor={actor} onChange={onChange} /><StageRadar state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} /></details>
   </>;
   return <>
-    <ProjectScheduleDates state={state} action={<button className="text-button" type="button" onClick={() => onNavigate('schedule')}>График работ</button>} onReview={() => setReview(view.issues[0]?.stageId || state.stages[0]?.id || '')} />
-    {children}
+    <ProjectScheduleDates state={state} action={<button className="text-button" type="button" onClick={() => onNavigate('schedule')}>График работ</button>} onReview={() => setReview(view.issues[0]?.stageId || state.stages[0]?.id || '')}>{children}</ProjectScheduleDates>
     <details className="panel overview-schedule-details">
       <summary>Подробности сроков и сверка ППР</summary>
       <div className="page-stack">{details}</div>
