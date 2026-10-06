@@ -1,6 +1,6 @@
-import { Banknote } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import type { AppState } from '../entities/index';
-import { paidAmountFor, paymentMovements, undatedPayments } from '../domain/index';
+import { paymentMovements, undatedPayments } from '../domain/index';
 import { money } from '../presentation/formatting';
 import { financeCalendarToday } from '../domain/finance-calendar';
 const startOfWeek = (date: Date) => {
@@ -44,18 +44,18 @@ export function CashflowPanel({ state }: { state: AppState }) {
   }
   const maxCash = Math.max(1, ...cashflow.flatMap((point) => [point.expense, point.income]));
   const hasCashflow = cashflow.some((point) => point.expense > 0 || point.income > 0);
- return <details className="panel finance-cashflow"><summary>Денежный поток · 6 недель</summary>          <div className="chart-legend"><span><i className="legend-dot legend-dot--income" /> Поступления</span><span><i className="legend-dot legend-dot--expense" /> Выплаты</span><small>тыс. ₽</small></div>
-          {hasCashflow ? <div className="cash-chart">
+ return <details className="finance-history"><summary><span>Движение денег по неделям</span><small>Последние 6 недель</small><ChevronDown size={16} aria-hidden="true" /></summary><div className="finance-history__body">
+          {hasCashflow ? <><div className="chart-legend"><span><i className="legend-dot legend-dot--income" /> Поступления</span><span><i className="legend-dot legend-dot--expense" /> Выплаты</span><small>тыс. ₽</small></div><div className="cash-chart">
             {cashflow.map((point) => (
               <div className="cash-chart__column" key={point.label}>
                 <div className="cash-chart__bars">
-                  <span className="cash-chart__bar cash-chart__bar--income" style={{ height: `${Math.max(2, point.income / maxCash * 100)}%` }} title={`Поступления ${point.income} тыс. ₽`} />
-                  <span className="cash-chart__bar cash-chart__bar--expense" style={{ height: `${Math.max(2, point.expense / maxCash * 100)}%` }} title={`Выплаты ${point.expense} тыс. ₽`} />
+                  <span className="cash-chart__bar cash-chart__bar--income" style={{ height: `${point.income > 0 ? Math.max(2, point.income / maxCash * 100) : 0}%` }} title={`Поступления ${point.income} тыс. ₽`} />
+                  <span className="cash-chart__bar cash-chart__bar--expense" style={{ height: `${point.expense > 0 ? Math.max(2, point.expense / maxCash * 100) : 0}%` }} title={`Выплаты ${point.expense} тыс. ₽`} />
                 </div>
                 <small>{point.label}</small>
               </div>
             ))}
-          </div> : <div className="task-empty"><Banknote size={28} /><strong>Нет датированных движений за эти недели</strong><p>Оплаты без установленной даты учитываются в общих итогах, но не распределяются по неделям.</p></div>}
-          {(undated.expense > 0 || undated.income > 0) && <p role="note">Дата не установлена: выплаты {money(undated.expense)}, поступления {money(undated.income)}. Эти суммы не включены в график.</p>}
-          {state.financeEntries.some(entry => !entry.payments?.length && paidAmountFor(entry) > 0) && <p role="note">Старые записи показаны по указанной в них дате оплаты. Их разбивка на отдельные платежи ещё не сверена.</p>}</details>;
+          </div></> : <p className="finance-history__empty">За последние 6 недель нет платежей с известной датой.</p>}
+          {(undated.expense > 0 || undated.income > 0) && <p className="finance-history__note">Без даты: {[(undated.expense > 0 ? `выплаты ${money(undated.expense)}` : ''), (undated.income > 0 ? `поступления ${money(undated.income)}` : '')].filter(Boolean).join(' · ')}. Учтены в общих суммах, но не в графике.</p>}
+          </div></details>;
 }
