@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { ArrowUpRight, CalendarDays, Check } from 'lucide-react';
+import { ArrowUpRight, CalendarDays } from 'lucide-react';
 import type { AppState, FinanceEntry } from '../entities/index';
 import { financeCalendarItems, financeCalendarTotal, validFinanceDueDate, type FinanceCalendarGroup } from '../domain/finance-calendar';
 import { needsExpenseApproval } from '../domain/expense-workflow';
@@ -15,8 +15,9 @@ const groups: { id: FinanceCalendarGroup; title: string }[] = [
   { id: 'undated', title: 'Без даты' },
 ];
 
-export function FinancePaymentCalendar({ state, actor, onChange, onOpenEntry }: {
+export function FinancePaymentCalendar({ state, actor, onChange, onOpenEntry, onAddEntry }: {
   state: AppState; actor: string; onChange: (next: AppState) => void; onOpenEntry: (id: string) => void;
+  onAddEntry: (kind: 'expense' | 'income') => void;
 }) {
   const [kind, setKind] = useState<'expense' | 'income'>('expense');
   const [editing, setEditing] = useState<{ id: string; snapshot: string; value: string } | null>(null);
@@ -50,8 +51,8 @@ export function FinancePaymentCalendar({ state, actor, onChange, onOpenEntry }: 
       </div>
       {items.length > 0 && <div className="finance-calendar__total"><small>{kind === 'expense' ? 'Осталось по обязательствам' : 'Осталось получить'}</small><strong>{money(total)}</strong></div>}
     </div>
-    <p className="finance-calendar__note">Остатки по внесённым обязательствам. Сроки задаются отдельно.</p>
-    {!items.length && <div className="finance-calendar__empty"><Check size={22} aria-hidden="true" /><strong>{kind === 'expense' ? 'Предстоящих выплат не записано' : 'Ожидаемых поступлений не записано'}</strong><span>{state.financeEntries.some(entry => entry.kind === kind) ? kind === 'expense' ? 'Все внесённые обязательства оплачены.' : 'Все внесённые поступления получены.' : 'Добавьте операцию, чтобы запланировать платёж.'}</span></div>}
+    {items.length > 0 && <p className="finance-calendar__note">Остатки по внесённым обязательствам. Сроки задаются отдельно.</p>}
+    {!items.length && <div className="finance-calendar__empty"><CalendarDays size={22} aria-hidden="true" /><div><strong>{kind === 'expense' ? 'Будущие выплаты ещё не внесены' : 'Будущие поступления ещё не внесены'}</strong><p>{kind === 'expense' ? 'Добавьте предстоящий расход и назначьте дату оплаты.' : 'Добавьте ожидаемое поступление и назначьте дату.'}</p></div><button type="button" className="button button--secondary" onClick={() => onAddEntry(kind)}>{kind === 'expense' ? 'Добавить расход' : 'Добавить поступление'}</button></div>}
     {groups.map(group => {
       const rows = items.filter(item => item.group === group.id);
       if (!rows.length) return null;

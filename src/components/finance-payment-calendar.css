@@ -29,11 +29,17 @@
 .finance-calendar__editor .button { min-height: 40px; padding: 8px 12px; }
 .finance-calendar__editor > p { flex: 1 0 100%; margin: 0; color: #a34f40; font-size: 12px; }
 .finance-calendar__clear { font: inherit; font-size: 12px; padding: 10px; background: transparent; border: 0; color: #68745e; cursor: pointer; }
-.finance-calendar__empty { display: grid; justify-items: center; gap: 12px; padding: 40px 20px; text-align: center; border: 1px solid #e1e4d8; border-radius: 8px; color: #67745b; }
-.finance-calendar__empty strong { color: #333d2c; font-weight: 500; }
-.finance-calendar__empty span { color: #777e6e; font-size: 13px; }
+.finance-calendar__empty { display: flex; align-items: center; gap: 16px; margin-top: 24px; padding: 24px 0; border-block: 1px solid #dfe2d6; color: #77826a; }
+.finance-calendar__empty > svg { flex: 0 0 auto; }
+.finance-calendar__empty > div { flex: 1; }
+.finance-calendar__empty strong { color: #333d2c; font-size: 15px; font-weight: 500; }
+.finance-calendar__empty p { margin: 7px 0 0; color: #777e6e; font-size: 12px; line-height: 1.6; }
+.finance-calendar__empty > .button { flex: 0 0 auto; min-height: 42px; font-size: 12px; }
 .finance-calendar button:focus-visible, .finance-calendar input:focus-visible { outline: 2px solid #627450; outline-offset: 3px; }
 @media (max-width: 700px) {
+  .finance-calendar__empty { flex-wrap: wrap; gap: 12px; padding: 20px 0; }
+  .finance-calendar__empty > div { flex-basis: calc(100% - 40px); }
+  .finance-calendar__empty > .button { margin-left: 34px; }
   .finance-calendar__head { align-items: flex-start; gap: 15px; }
   .finance-calendar__total { text-align: left; }
   .finance-calendar__row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; }

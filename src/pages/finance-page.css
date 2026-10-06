@@ -48,6 +48,19 @@
 .finance-load-more { display:block; margin:24px auto 0; padding:12px 20px; border:1px solid #d7dbce; border-radius:4px; background:transparent; font:inherit; font-size:12px; color:#647356; cursor:pointer; }
 .finance-page__footer { display:flex; flex-wrap:wrap; gap:22px; padding:30px 0 12px; }
 .finance-page__footer button { font:inherit; font-size:11px; color:#878d7d; padding:6px 0; background:transparent; border:0; cursor:pointer; }
+.finance-history { width:100%; margin-top:28px; border-block:1px solid #dce0d1; }
+.finance-history > summary { display:flex; align-items:center; gap:14px; min-height:52px; padding:14px 0; color:#626e55; font-size:13px; cursor:pointer; list-style:none; }
+.finance-history > summary::-webkit-details-marker { display:none; }
+.finance-history > summary > small { color:#92998a; font-size:11px; }
+.finance-history > summary > svg { margin-left:auto; flex:0 0 auto; }
+.finance-history[open] > summary > svg { transform:rotate(180deg); }
+.finance-history > summary:focus-visible { outline:2px solid #667c54; outline-offset:4px; }
+.finance-history__body { padding:0 0 18px; }
+.finance-history__empty { margin:3px 0 10px; font-size:13px; line-height:1.6; color:#657359; }
+.finance-history__note { margin:12px 0 0; font-size:12px; line-height:1.6; color:#8a9280; }
+.finance-history .chart-legend { margin-top:0; }
+.finance-history .cash-chart { margin-bottom:20px; }
+.finance-history .cash-chart__bar { min-height:0; }
 .finance-page button:focus-visible, .finance-page input:focus-visible, .finance-page select:focus-visible, .finance-drawer button:focus-visible, .finance-drawer summary:focus-visible { outline:2px solid #667c54; outline-offset:4px; }
 .finance-drawer { position:fixed; inset:0 0 0 auto; box-sizing:border-box; width:min(580px,100%); height:100dvh; max-width:100%; max-height:100dvh; margin:0; padding:0; border:0; border-left:1px solid #daddd1; border-radius:0; color:#283024; background:#f8f8f2; overflow-y:auto; box-shadow:-12px 0 70px #14210f20; }
 .finance-drawer::backdrop { background:#14201066; backdrop-filter:blur(3px); }
@@ -89,6 +102,8 @@
   .finance-money > button > strong { font-size:29px; }
 }
 @media(max-width:680px) {
+  .finance-history > summary { flex-wrap:wrap; gap:5px 12px; }
+  .finance-history > summary > small { order:3; flex-basis:100%; }
   .finance-page__heading { margin-bottom:22px; gap:16px; align-items:center; }
   .finance-page__heading h1 { font-size:30px; }
   .finance-eyebrow { font-size:10px; }
