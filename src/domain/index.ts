@@ -3,6 +3,12 @@ export {
   financeTotals,
   sourceEstimateTotals,
   lineTotals,
+  lineForecast,
+  unallocatedExpenses,
+  unallocatedExpenseTotals,
+  paymentDate,
+  paymentMovements,
+  undatedPayments,
   paidAmountFor,
   stageFinanceTotals,
 } from './finance.ts';

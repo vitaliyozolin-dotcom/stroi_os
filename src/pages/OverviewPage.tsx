@@ -19,7 +19,7 @@ import {
   Truck,
 } from 'lucide-react';
 import type { CSSProperties } from 'react';
-import { financeTotals, sourceEstimateTotals, paidAmountFor, projectProgressTotals as progressTotals } from '../domain/index';
+import { financeTotals, sourceEstimateTotals, paidAmountFor, paymentMovements, undatedPayments, projectProgressTotals as progressTotals } from '../domain/index';
 import { formatDate, formatDateTime, money, shortMoney } from '../presentation/formatting';
 import { stageStatusLabel, taskStatusLabel } from '../presentation/status-labels';
 import type { AppState, DashboardWidget, UserRole } from '../entities/index';
@@ -45,6 +45,7 @@ const weekLabel = (start: Date, end: Date) => {
 
 export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId) => void; onOpenProjects?: () => void }) {
   const finance = financeTotals(state);
+  const undated = undatedPayments(state);
   const sourceEstimate = sourceEstimateTotals(state.budgetLines);
   const progress = progressTotals(state);
   const currentStage = state.stages.find((stage) => ['in_progress', 'blocked', 'rework', 'awaiting_inspection'].includes(stage.status))
@@ -74,15 +75,17 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
     return { start, end, label: weekLabel(start, end), expense: 0, income: 0 };
   });
   for (const entry of state.financeEntries) {
-    const amount = paidAmountFor(entry);
-    if (amount <= 0) continue;
-    const paidAt = entry.paidAt || (entry.status === 'paid' ? entry.date : '');
-    if (!paidAt) continue;
-    const date = new Date(`${paidAt.slice(0, 10)}T12:00:00Z`);
-    const point = cashflow.find((item) => date >= item.start && date <= item.end);
-    if (!point) continue;
-    if (entry.kind === 'income') point.income += amount / 1000;
-    else point.expense += amount / 1000;
+    for (const movement of paymentMovements(entry)) {
+      const amount = movement.amount;
+      if (amount <= 0) continue;
+      const paidAt = movement.date;
+      if (!paidAt) continue;
+      const date = new Date(`${paidAt.slice(0, 10)}T12:00:00Z`);
+      const point = cashflow.find((item) => date >= item.start && date <= item.end);
+      if (!point) continue;
+      if (entry.kind === 'income') point.income += amount / 1000;
+      else point.expense += amount / 1000;
+    }
   }
   const maxCash = Math.max(1, ...cashflow.flatMap((point) => [point.expense, point.income]));
   const hasCashflow = cashflow.some((point) => point.expense > 0 || point.income > 0);
@@ -303,7 +306,9 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
                 <small>{point.label}</small>
               </div>
             ))}
-          </div> : <div className="task-empty"><Banknote size={28} /><strong>Движений денег пока нет</strong><p>График начнёт строиться после первой фактической оплаты или поступления.</p></div>}
+          </div> : <div className="task-empty"><Banknote size={28} /><strong>Нет датированных движений за эти недели</strong><p>Оплаты без установленной даты учитываются в общих итогах, но не распределяются по неделям.</p></div>}
+          {(undated.expense > 0 || undated.income > 0) && <p role="note">Дата не установлена: выплаты {money(undated.expense)}, поступления {money(undated.income)}. Эти суммы не включены в график.</p>}
+          {state.financeEntries.some(entry => !entry.payments?.length && paidAmountFor(entry) > 0) && <p role="note">Старые записи показаны по указанной в них дате оплаты. Их разбивка на отдельные платежи ещё не сверена.</p>}
         </article>}
 
         {show('quality') && <article className="panel compact-panel">

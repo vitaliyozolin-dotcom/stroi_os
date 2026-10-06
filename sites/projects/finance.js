@@ -43,6 +43,10 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
       sourceKeys.add(entry.historicalPayment.sourceUniqueKey);
     }
     const old = oldEntries.get(entry.id);
+    // Events are server-owned, append-only facts. Older clients must reload
+    // instead of silently dropping a payment added by another session.
+    if (JSON.stringify(entry.payments ?? []) !== JSON.stringify(old?.payments ?? [])) return 'История платежей изменилась. Обновите запись; редактировать или удалять платежи нельзя.';
+    if (JSON.stringify(entry.legacyPayment) !== JSON.stringify(old?.legacyPayment)) return 'Исходная накопленная оплата защищена от изменений.';
     if (old && JSON.stringify(old) === JSON.stringify(entry)) continue;
     if (identity.role !== 'management') return 'Финансовые операции доступны только роли «Управление».';
     // Classification may annotate a historical payment without rewriting its facts.
@@ -100,7 +104,20 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
     else { delete entry.approvedAt; delete entry.approvedBy; }
     if (accepts) entry.acceptedBy = identity.name;
     else if (old?.acceptedBy) entry.acceptedBy = old.acceptedBy;
-    if (pays) entry.paidBy = identity.name;
+    if (pays) {
+      entry.paidBy = identity.name;
+      if (!old?.payments?.length && paid(old) > 0) entry.legacyPayment = {
+        amount: paid(old), lastRecordedDate: old.paidAt, document: old.paymentDocument,
+      };
+      entry.payments = [...(old?.payments ?? []), {
+        id: `${entry.id}:payment:${cents(paidAmount)}`,
+        amount: (cents(paidAmount) - cents(old ? paid(old) : 0)) / 100,
+        date: entry.paidAt,
+        document: entry.paymentDocument.trim(),
+        recordedAt: now,
+        recordedBy: identity.name,
+      }];
+    }
     else if (old?.paidBy) entry.paidBy = old.paidBy;
   }
   for (const old of oldEntries.values()) {
