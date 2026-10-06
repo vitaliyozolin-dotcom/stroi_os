@@ -5,45 +5,21 @@ import { ScheduleBrief } from '../components/ScheduleBrief';
 import {
   ArrowUpRight,
   Banknote,
-  CalendarClock,
-  CheckCircle2,
   ChevronRight,
   CircleDollarSign,
   Clock3,
-  ShieldCheck,
   TrendingUp,
-  Truck,
 } from 'lucide-react';
-import { financeTotals, sourceEstimateTotals, paidAmountFor, projectProgressTotals as progressTotals } from '../domain/index';
+import { financeTotals, sourceEstimateTotals, projectProgressTotals as progressTotals } from '../domain/index';
 import { formatDateTime, money, shortMoney } from '../presentation/formatting';
-import { stageStatusLabel } from '../presentation/status-labels';
 import type { AppState, DashboardWidget, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { MetricCard, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
-
-const shiftDays = (date: Date, days: number) => {
-  const value = new Date(date);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value;
-};
 
 export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
   const finance = financeTotals(state);
   const sourceEstimate = sourceEstimateTotals(state.budgetLines);
   const progress = progressTotals(state);
-  const currentStage = state.stages.find((stage) => ['in_progress', 'blocked', 'rework', 'awaiting_inspection'].includes(stage.status))
-    ?? state.stages.find((stage) => stage.status === 'ready')
-    ;
-  const reviewCount = state.checkpoints.filter((item) => item.status === 'in_review').length;
-  const reworkCount = state.checkpoints.filter((item) => item.status === 'rework').length;
-  const riskySupply = state.procurement.filter((item) => item.risk);
-  const margin = state.project.contractValue - finance.forecast;
-  const marginPercent = state.project.contractValue > 0 ? Math.round(margin / state.project.contractValue * 100) : null;
-  const today = new Date();
-  const cashCutoff = shiftDays(today, 30);
-  const cashNeed = state.financeEntries
-    .filter((entry) => entry.kind === 'expense' && paidAmountFor(entry) < entry.amount && new Date(`${entry.date}T23:59:59Z`) <= cashCutoff)
-    .reduce((sum, entry) => sum + Math.max(0, entry.amount - paidAmountFor(entry)), 0);
   const lastUpdated = state.activity[0]?.timestamp ?? state.project.createdAt;
   const show = (widget: DashboardWidget) => role === 'foreman' || state.settings.dashboardWidgets.includes(widget);
 
@@ -123,56 +99,15 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
       </section>}
 
       {role === 'management' && show('finance') && <CostGroups state={state} onChange={onChange} compact />}
-      <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
+      <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate}>
+        {show('progress') && <section className="overview-ppr-progress" aria-label="Выполнение ППР" style={{ width: '100%', maxWidth: 420 }}>
+          <MetricCard label="Выполнение ППР" value={state.stages.length ? `${progress.physical}%` : '—'}
+            detail={<><ProgressBar value={progress.physical} /><span>{state.stages.length ? 'По внесённым этапам и задачам · не готовность всего дома' : 'Добавьте этапы в график работ'}</span></>}
+            icon={TrendingUp} tone="dark" onClick={() => onNavigate('schedule')} />
+        </section>}
+      </ScheduleBrief>
       {show('progress') && <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />}
       <OverviewFocus state={state} role={role} show={show} onNavigate={onNavigate} />
-
-      {(show('progress') || show('finance')) && <details className="panel overview-secondary-metrics" open={role === 'foreman'}>
-        <summary>Дополнительные показатели проекта</summary>
-        {(show('progress') || show('finance')) && <section className="metric-grid">
-        {show('progress') &&
-        <MetricCard
-          label="Выполнение по задачам"
-          value={`${progress.physical}%`}
-          detail={<><ProgressBar value={progress.physical} /><span>Учётный показатель, не физический объём дома</span></>}
-          icon={TrendingUp}
-          tone="dark"
-          onClick={() => onNavigate('schedule')}
-        />}
-        {role === 'foreman' && currentStage ? (
-          <>
-            <MetricCard label="Запись для проверки" value={stageStatusLabel[currentStage.status]} detail={<span>{currentStage.name}</span>} icon={Clock3} onClick={() => onNavigate('schedule')} />
-            <MetricCard label="Контроль качества" value={`${reviewCount + reworkCount} отчёта`} detail={<span>{reviewCount} на проверке · {reworkCount} требует доработки</span>} icon={ShieldCheck} tone={reworkCount ? 'warning' : 'positive'} onClick={() => onNavigate('quality')} />
-            <MetricCard label="Поставки с риском" value={`${riskySupply.length}`} detail={<span>{riskySupply[0]?.risk ?? 'Рисков по поставкам нет'}</span>} icon={Truck} tone={riskySupply.length ? 'warning' : 'positive'} onClick={() => onNavigate('procurement')} />
-          </>
-        ) : show('finance') ? (
-          <>
-            <MetricCard
-              label="Прогноз себестоимости"
-              value={shortMoney(finance.forecast)}
-              detail={<span className={finance.plan && finance.forecast > finance.plan ? 'negative-text' : 'positive-text'}>{!finance.plan ? 'Смета ещё не загружена' : finance.forecast > finance.plan ? `+${shortMoney(finance.forecast - finance.plan)} к плану` : 'В пределах плана'}</span>}
-              icon={CircleDollarSign}
-              tone={finance.forecast > finance.plan ? 'warning' : 'positive'}
-              onClick={() => onNavigate('finance')}
-            />
-            <MetricCard
-              label="Прогноз маржи"
-              value={shortMoney(margin)}
-              detail={<span>{marginPercent === null ? 'Стоимость договора не указана' : `${marginPercent}% от договора до налогов и финансирования`}</span>}
-              icon={Banknote}
-              onClick={() => onNavigate('finance')}
-            />
-            <MetricCard
-              label="Нужно денег на 30 дней"
-              value={shortMoney(cashNeed)}
-              detail={<span>{shortMoney(finance.received - finance.paid)} — остаток по учёту</span>}
-              icon={CalendarClock}
-              onClick={() => onNavigate('finance')}
-            />
-          </>
-        ) : null}
-      </section>}
-      </details>}
 
       {show('activity') && <details className="overview-history"><summary>История проекта</summary>
         <SectionHeader eyebrow="Журнал проекта" title="История изменений" />
