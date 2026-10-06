@@ -7,20 +7,69 @@ const fingerprint = (value: string) => { let result = 2166136261; for (const let
 const normalized = (value: string) => value.toLocaleLowerCase().replace(/[\s"«»]/g, '');
 const safeName = (value: string) => value.trim().slice(0, 180).replace(/[^\p{L}\p{N}._ -]+/gu, '_').replace(/\s+/g, ' ').trim();
 const dateValid = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+const nonnegativeAmount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const text = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+
+function importedBudgetLines(current: AppState, sourceLines: SourceLine[]): BudgetLine[] {
+  // An unchanged identifier wins even if rows moved in the source workbook.
+  const sourceIds = new Set(sourceLines.map(line => line.id));
+  const previousById = new Map(current.budgetLines.map(line => [line.id, line]));
+  const usedIds = new Set<string>();
+  return sourceLines.map(line => {
+    let previous = previousById.get(line.id);
+    if (!previous) {
+      // A row number alone is not identity: rows may have been inserted or reused.
+      const candidates = current.budgetLines.filter(item => item.sourceRow === line.sourceRow);
+      if (sourceLines.filter(item => item.sourceRow === line.sourceRow).length === 1
+        && candidates.length === 1 && !sourceIds.has(candidates[0].id) && !usedIds.has(candidates[0].id)
+        && normalized(candidates[0].name) === normalized(line.name)) previous = candidates[0];
+    }
+    const id = previous?.id ?? line.id;
+    usedIds.add(id);
+    const plan = line.plan ?? 0;
+    // The old plan was also the default forecast. Only that default follows the
+    // new plan; an independently adjusted forecast remains an owner's estimate.
+    const forecast = previous && Math.round(previous.forecast * 100) !== Math.round(previous.plan * 100)
+      ? previous.forecast : plan;
+    return {
+      id, name: line.name,
+      stageIds: line.stageIds.filter(id => current.stages.some(stage => stage.id === id)),
+      plan, forecast, sourceRow: line.sourceRow, sourcePlan: line.sourcePlan,
+      outsideSourceTotal: line.outsideSourceTotal, sourceFact: line.sourceFact ?? undefined,
+      sourceParticipantAmounts: line.participantAmounts,
+      ...(previous?.costGroup !== undefined ? { costGroup: previous.costGroup } : {}),
+      ...(previous?.costGroupHistory ? { costGroupHistory: structuredClone(previous.costGroupHistory) } : {}),
+    };
+  });
+}
+
+function checkPaymentDate(entry: FinanceEntry, record: RecordInput) {
+  if (entry.paidAt && record.paymentDate && entry.paidAt !== record.paymentDate) {
+    throw new Error(`Дата оплаты отличается от существующей записи: ${record.description}. Сначала сверьте даты.`);
+  }
+}
+
 export function parseHistoryRegister(value: unknown): HistoryRegister {
   const input = value as HistoryRegister;
   if (input?.format !== 'IKIOMA-Kelosi-staged-import-v1' || !Array.isArray(input.sources) || !Array.isArray(input.budgetLines) || !Array.isArray(input.paidInvoices) || !Array.isArray(input.paidLemanaPurchases)) throw new Error('Нужен подготовленный реестр импорта.');
   if (input.existingPaidExpenses && (!Array.isArray(input.existingPaidExpenses) || input.existingPaidExpenses.some((item) => item.existingOperation !== true))) throw new Error('Некорректное подтверждение существующих расходов.');
   if (input.budgetApproval !== undefined && (typeof input.budgetApproval !== 'string' || !input.budgetApproval.trim())) throw new Error('Не указано основание утверждения сметы.');
   if (input.sources.length > 100 || input.budgetLines.length > 300 || input.paidInvoices.length + input.paidLemanaPurchases.length + (input.existingPaidExpenses?.length ?? 0) > 500) throw new Error('Слишком большой реестр.');
-  for (const source of input.sources) if (!source.fileName || !/^[a-f0-9]{64}$/.test(source.sha256)) throw new Error('Не указан отпечаток исходного документа.');
+  if (!nonnegativeAmount(input.budgetReconciliation?.sourceDisplayedPlan) || !nonnegativeAmount(input.budgetReconciliation?.sumOfPlanItems)) throw new Error('Не указаны корректные итоги исходной сметы.');
+  for (const source of input.sources) if (!text(source.fileName) || !/^[a-f0-9]{64}$/.test(source.sha256)) throw new Error('Не указан отпечаток исходного документа.');
   const ids = new Set<string>();
+  const rows = new Set<number>();
   for (const line of input.budgetLines) {
-    if (!line.id || ids.has(line.id) || !line.name || !Number.isInteger(line.sourceRow) || !Array.isArray(line.stageIds) || line.plan !== null && (!Number.isFinite(line.plan) || line.plan < 0)) throw new Error('Некорректная статья сметы.');
+    if (!text(line.id) || ids.has(line.id) || !text(line.name) || !Number.isInteger(line.sourceRow) || line.sourceRow <= 0 || rows.has(line.sourceRow)
+      || !Array.isArray(line.stageIds) || line.stageIds.some(id => !text(id)) || line.plan !== null && !nonnegativeAmount(line.plan)) throw new Error('Некорректная или повторяющаяся статья сметы.');
     ids.add(line.id);
-    if (line.sourcePlan !== undefined && (!Number.isFinite(line.sourcePlan) || line.sourcePlan < 0)
+    rows.add(line.sourceRow);
+    if (line.sourcePlan !== undefined && !nonnegativeAmount(line.sourcePlan)
       || line.outsideSourceTotal !== undefined && typeof line.outsideSourceTotal !== 'boolean'
       || line.outsideSourceTotal && (line.plan !== 0 || !Number.isFinite(line.sourcePlan))) throw new Error('Проверьте строки, не вошедшие в итог исходной сметы.');
+    if (line.sourceFact !== undefined && line.sourceFact !== null && !nonnegativeAmount(line.sourceFact)
+      || line.participantAmounts !== undefined && (line.participantAmounts === null || typeof line.participantAmounts !== 'object' || Array.isArray(line.participantAmounts)
+        || Object.values(line.participantAmounts).some(amount => amount !== null && !nonnegativeAmount(amount)))) throw new Error('Некорректные суммы исходной сметы.');
   }
   const keys = new Set<string>();
   for (const item of [...input.paidInvoices, ...input.paidLemanaPurchases, ...(input.existingPaidExpenses ?? [])]) {
@@ -46,7 +95,7 @@ export function prepareHistoryImport(current: AppState, input: HistoryRegister, 
   const sourceBudget = input.sources.find((source) => source.fileName.endsWith('.xlsx')) ?? input.sources[0];
   const budgetChanged = includeBudget && current.budgetMeta.importSourceSha256 !== sourceBudget?.sha256;
   if (budgetChanged) {
-    const lines: BudgetLine[] = input.budgetLines.map((line) => ({ id: line.id, name: line.name, stageIds: line.stageIds.filter((id) => next.stages.some((stage) => stage.id === id)), plan: line.plan ?? 0, forecast: line.plan ?? 0, sourceRow: line.sourceRow, sourcePlan: line.sourcePlan, outsideSourceTotal: line.outsideSourceTotal, sourceFact: line.sourceFact ?? undefined, sourceParticipantAmounts: line.participantAmounts }));
+    const lines = importedBudgetLines(current, input.budgetLines);
     const total = Math.round(lines.reduce((sum, line) => sum + line.plan, 0) * 100) / 100;
     if (total !== input.budgetReconciliation?.sumOfPlanItems) throw new Error('Сумма статей не совпадает с реестром.');
     const referenced = new Set(next.financeEntries.map((entry) => entry.budgetLineId));
@@ -64,6 +113,7 @@ export function prepareHistoryImport(current: AppState, input: HistoryRegister, 
   for (const record of records) {
     const imported = next.financeEntries.find((entry) => entry.historicalPayment?.sourceUniqueKey === record.dedupKey);
     if (imported) {
+      checkPaymentDate(imported, record);
       const line = next.budgetLines.find(item => item.sourceRow === record.suggestedBudgetSourceRow);
       if (includeBudget && !imported.budgetLineId && line) { imported.budgetLineId = line.id; updated++; }
       skipped++; continue;
@@ -72,8 +122,10 @@ export function prepareHistoryImport(current: AppState, input: HistoryRegister, 
       const matches = next.financeEntries.filter((entry) => entry.kind === 'expense' && normalized(entry.counterparty) === normalized(record.vendor) && entry.description === record.description && entry.date === record.documentDate && Math.round(entry.amount * 100) === Math.round(record.amount * 100));
       const entry = matches[0];
       if (matches.length !== 1 || entry.status !== 'committed' || entry.historicalPayment || (entry.paidAmount ?? 0) !== 0 || (entry.acceptedAmount ?? 0) !== 0) throw new Error(`Сначала сверьте существующий расход: ${record.description}.`);
+      checkPaymentDate(entry, record);
       const doc = matchingDocument(record.file)!, source = input.sources.find((item) => item.fileName === record.file)!;
       entry.status = 'paid'; entry.paidAmount = entry.amount; entry.acceptedAmount = 0;
+      if (record.paymentDate) entry.paidAt = record.paymentDate;
       entry.paymentDocument = `Подтверждение владельца: ${record.file}`;
       entry.historicalPayment = { existingOperation: true, sourceDocumentId: doc.id, sourceUniqueKey: record.dedupKey, sourceSha256: source.sha256, confirmation: record.paymentConfirmation, sourceDate: entry.date, recordedAt: now, recordedBy: actor };
       updated++; continue;

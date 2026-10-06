@@ -1,3 +1,4 @@
+import { FINANCE_RULES_VERSION, financeTotals, outstandingExpenseTotal } from '../src/domain/finance-totals.js';
 import { verifyCompanyOsOidc } from './company-os-export.js';
 
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -29,18 +30,7 @@ const stageEvidence = (state, stageId) => {
 };
 
 const projectPack = ({ row, state }) => {
-  const expenseEntries = (state.financeEntries ?? []).filter((item) => item?.kind === 'expense');
-  const paidCost = expenseEntries.reduce((sum, item) => {
-    if (Number(item.paidAmount) > 0) return sum + number(item.paidAmount);
-    if (item.status === 'paid') return sum + number(item.amount);
-    return sum;
-  }, 0);
-  const acceptedCost = expenseEntries.reduce((sum, item) => sum + number(item.acceptedAmount), 0);
-  const committedCost = expenseEntries.reduce((sum, item) => {
-    const paid = number(item.paidAmount) || (item.status === 'paid' ? number(item.amount) : 0);
-    return sum + Math.max(0, number(item.amount) - paid);
-  }, 0);
-  const budgetForecast = (state.budgetLines ?? []).reduce((sum, item) => sum + number(item.forecast), 0);
+  const totals = financeTotals(state);
   const stages = (state.stages ?? []).map((stage) => {
     const evidence = stageEvidence(state, stage.id);
     return {
@@ -75,10 +65,15 @@ const projectPack = ({ row, state }) => {
     area_m2: number(state.project.area),
     contract_value_rub: Math.round(number(state.project.contractValue)),
     target_cost_rub: Math.round(number(state.project.targetCost)),
-    forecast_cost_rub: Math.round(budgetForecast || number(state.project.targetCost)),
-    paid_cost_rub: Math.round(paidCost),
-    accepted_cost_rub: Math.round(acceptedCost),
-    committed_cost_rub: Math.round(committedCost),
+    forecast_cost_rub: Math.round(totals.forecast),
+    paid_cost_rub: Math.round(totals.paid),
+    accepted_cost_rub: Math.round(totals.accepted),
+    // Compatibility alias: this endpoint historically exposed the unpaid
+    // remainder as committed_cost_rub. Keep that meaning for existing consumers.
+    // Both endpoints now share the explicit total/outstanding fields.
+    committed_cost_rub: Math.round(outstandingExpenseTotal(state)),
+    total_committed_cost_rub: Math.round(totals.committed),
+    outstanding_cost_rub: Math.round(outstandingExpenseTotal(state)),
     start_date: cleanDate(state.project.startDate),
     target_date: cleanDate(state.project.targetDate),
     forecast_date: cleanDate(state.project.forecastDate),
@@ -100,6 +95,7 @@ export const buildIkiomaInvestorPayload = ({ stateRows = [], generatedAt = new D
     project: 'ikioma-investor',
     generated_at: generatedAt,
     schema_version: 1,
+    finance_rules_version: FINANCE_RULES_VERSION,
     source_of_truth: 'IKIOMA OS PostgreSQL',
     privacy: 'no_customer_pii_no_address_no_raw_media',
   },

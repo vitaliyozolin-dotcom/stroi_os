@@ -30,6 +30,9 @@ export interface BudgetLine extends CostClassification {
 }
 
 export interface FinanceEntry extends CostClassification {
+  /** Planned date for the unpaid remainder; independent of document/payment dates. */
+  dueDate?: string;
+  dueDateHistory?: { date: string | null; at: string; by: string }[];
   payments?: { id: string; amount: number; date: string; document: string; recordedAt: string; recordedBy: string }[];
   legacyPayment?: { amount: number; lastRecordedDate?: string; document?: string };
   budgetAllocation?: { at: string; by: string; budgetLineId: string };

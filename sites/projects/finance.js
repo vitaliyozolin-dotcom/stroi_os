@@ -47,11 +47,17 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
     // instead of silently dropping a payment added by another session.
     if (JSON.stringify(entry.payments ?? []) !== JSON.stringify(old?.payments ?? [])) return 'История платежей изменилась. Обновите запись; редактировать или удалять платежи нельзя.';
     if (JSON.stringify(entry.legacyPayment) !== JSON.stringify(old?.legacyPayment)) return 'Исходная накопленная оплата защищена от изменений.';
+    if (JSON.stringify(entry.dueDateHistory ?? []) !== JSON.stringify(old?.dueDateHistory ?? [])) return 'Срок платежа обновился. Откройте запись заново; история сроков сохраняется автоматически.';
+    const dueDateChanged = entry.dueDate !== old?.dueDate;
+    if (dueDateChanged && identity.role !== 'management') return 'Срок платежа меняет только роль «Управление».';
+    if (dueDateChanged && entry.dueDate !== undefined && !validDate(entry.dueDate)) return 'Укажите корректную плановую дату платежа.';
+    entry.dueDateHistory = [...(old?.dueDateHistory ?? []), ...(dueDateChanged ? [{ date: entry.dueDate ?? null, at: now, by: identity.name }] : [])];
+    if (!entry.dueDateHistory.length) delete entry.dueDateHistory;
     if (old && JSON.stringify(old) === JSON.stringify(entry)) continue;
     if (identity.role !== 'management') return 'Финансовые операции доступны только роли «Управление».';
-    // Classification may annotate a historical payment without rewriting its facts.
-    const withoutClassification = ({ costGroup, costGroupHistory, ...record }) => record;
-    if (old && JSON.stringify(withoutClassification(old)) === JSON.stringify(withoutClassification(entry))) continue;
+    // Planning/classification may annotate historical records without rewriting facts.
+    const withoutAnnotations = ({ costGroup, costGroupHistory, dueDate, dueDateHistory, ...record }) => record;
+    if (old && JSON.stringify(withoutAnnotations(old)) === JSON.stringify(withoutAnnotations(entry))) continue;
     if (old?.historicalPayment && !old.budgetLineId && entry.budgetLineId) {
       const withoutAllocation = ({ budgetLineId, budgetAllocation, ...record }) => record;
       if (JSON.stringify(withoutAllocation(old)) === JSON.stringify(withoutAllocation(entry))

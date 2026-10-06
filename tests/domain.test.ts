@@ -32,7 +32,7 @@ const stateWithFinance = (): AppState => ({
 test('stage finance totals allocate shared budgets and apply compatible amount fallbacks', () => {
   assert.deepEqual(stageFinanceTotals(stateWithFinance(), 'foundation'), {
     plan: 800,
-    forecast: 1_000,
+    forecast: 2_200, // Effective budgets plus this stage's 1,200 of unallocated costs.
     committed: 1_200,
     accepted: 1_050,
     paid: 400,
