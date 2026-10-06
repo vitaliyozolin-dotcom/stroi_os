@@ -1,3 +1,4 @@
+import { CashflowPanel } from '../components/CashflowPanel';
 import { createFinanceCommands } from '../application';
 import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
@@ -174,6 +175,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
 
   return (
     <div className="page-stack">
+      <CashflowPanel state={state} />
       <section className="page-title-row">
         <div>
           <span className="eyebrow">Экономика дома · {state.project.code}</span>
