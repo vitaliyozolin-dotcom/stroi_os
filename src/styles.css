@@ -9288,3 +9288,7 @@ body { background: var(--canvas); }
 .app-shell .metric-card > strong { font-weight: 600; letter-spacing: -.035em; }
 .app-shell .status-badge { font-weight: 500; }
 .app-shell .user-chip > span { border-radius: 4px; }
+
+/* Keep progress visible alongside the selected project across sections. */
+.app-shell .project-switcher { height: auto; min-height: 74px; }
+.app-shell .project-switcher .project-switcher__progress { color: #c6cfb6; font-size: 11px; line-height: 1.4; letter-spacing: 0; }

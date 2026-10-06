@@ -46,7 +46,7 @@ import type { AuthenticatedUser, UserRole } from './entities/index';
 import type { PageId } from './presentation/navigation';
 import { useProjectState, type SyncPhase } from './useProjectState';
 import { createProjectState } from './seed';
-import { isTaskOverdue } from './domain/index';
+import { isTaskOverdue, projectProgressTotals } from './domain/index';
 import { normalizeAppState, projectRepository } from './infrastructure/project-http';
 import { clearProjectCache, projectCacheFactory } from './infrastructure/project-cache';
 
@@ -277,7 +277,9 @@ function App() {
 
         <button className="project-switcher" data-tour="project-switcher" type="button" onClick={() => setProjectOpen(true)}>
           <span className="project-switcher__icon"><House size={19} /></span>
-          <span><small>{state.project.code}</small><strong>{state.project.name}</strong></span>
+          <span><small>{state.project.code}</small><strong>{state.project.name}</strong>
+            {state.project.status !== 'workspace' && <small className="project-switcher__progress" title="Выполнение внесённых этапов и задач ППР, не готовность всего дома">ППР · {state.stages.length ? `${projectProgressTotals(state).physical}%` : '—'}</small>}
+          </span>
           <ChevronDown size={15} />
         </button>
 
