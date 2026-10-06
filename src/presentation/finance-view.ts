@@ -24,6 +24,4 @@ export function financeMovementRows(state: AppState) {
     .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || a.id.localeCompare(b.id));
 }
 
-export const financeToday = () => new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit',
-}).format(new Date());
+export { financeCalendarToday as financeToday } from '../domain/finance-calendar';
