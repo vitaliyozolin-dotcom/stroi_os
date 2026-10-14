@@ -1,5 +1,18 @@
 project:
 
+  business_knowledge_reference_2026_10_14:
+    kind: private_evidence_appendix
+    status: draft
+    as_of: "2026-10-14"
+    title: "ИКИОМА и Келози — паспорт бизнеса и объекта"
+    library_file_id: "libfile_79bf8e0427ac819182fa1d46a81faa28"
+    library_path: "/IKIOMA/IKIOMA_Company_and_Kelosi_Passport.md"
+    scope: ["история бизнеса и бренда", "продукт и технология", "объект", "участники", "конкуренты", "источники и пробелы"]
+    access: "Внутренний документ; не копировать частные источники в публичный репозиторий"
+    authority: "Приложение фактов; не заменяет журнал решений этого паспорта и не расширяет полномочия"
+    runtime_integration: "Не выполнялась; ссылка обеспечивает обнаружение приложения при чтении паспорта"
+    automation: "Новые назначения, бюджеты, сроки и обязательства не утверждены этим приложением"
+
   owner_telegram_execution_2026_10_14:
     decision_id: IKIOMA-OWNER-TELEGRAM-EXECUTION-2026-10-14
     status: active
