@@ -1,3 +1,4 @@
+import { createProjectCommitment } from '../src/application/finance-commitment.js';
 import {
   authenticatedIdentity,
   projectIdentity,
@@ -1143,7 +1144,6 @@ const telegramConfirmExpense = async (callback, draft, binding, env) => {
     description: clean(draft.payload.description, 500),
     sourceDraftId: draft.id,
   };
-  let expenseCreated = false;
   await assertTelegramDraftLease(env.DB, draft);
   const mutation = await mutateProjectFromTelegram(
     env,
@@ -1154,7 +1154,6 @@ const telegramConfirmExpense = async (callback, draft, binding, env) => {
     `Добавлен расход ${Math.round(amount).toLocaleString('ru-RU')} ₽ · ${entry.description}`,
     (state) => {
       if ((state.financeEntries ?? []).some((item) => item.id === entryId || item.sourceDraftId === draft.id)) {
-        expenseCreated = false;
         return TELEGRAM_MUTATION_NOOP;
       }
       const currentUser = (state.settings?.users ?? []).find((item) => item.id === binding.system_user_id && item.status !== 'disabled');
@@ -1170,21 +1169,13 @@ const telegramConfirmExpense = async (callback, draft, binding, env) => {
       entry.budgetLineId = currentBudgetLine.id;
       entry.counterparty = currentCounterparty.name;
       entry.counterpartyId = currentCounterparty.id;
-      expenseCreated = true;
-      const currentCommitted = (state.financeEntries ?? [])
-        .filter((item) => item.kind === 'expense' && item.budgetLineId === budgetLine.id)
-        .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      state.budgetLines = (state.budgetLines ?? []).map((item) => item.id === budgetLine.id
-        ? { ...item, forecast: Math.max(Number(item.forecast) || 0, currentCommitted + amount) }
-        : item);
-      state.financeEntries = [entry, ...(state.financeEntries ?? [])];
-      state.activity = [{
-        id: `activity-${crypto.randomUUID()}`,
-        timestamp: now,
-        actor: user.name,
-        text: `Добавлен расход ${Math.round(amount).toLocaleString('ru-RU')} ₽ · ${entry.description}`,
-        tone: 'neutral',
-      }, ...(state.activity ?? [])];
+      const result = createProjectCommitment(state, { ...entry, sourceDraftId: draft.id }, {
+        identity: { name: currentUser.name, role: currentUser.role },
+        clock: { now: () => now },
+        ids: { next: (prefix) => `${prefix}-${crypto.randomUUID()}` },
+      });
+      if (!result.ok) throw new Error(`expense_details_missing: ${result.error}`);
+      return result.change?.state ?? TELEGRAM_MUTATION_NOOP;
     },
   );
   await dispatchNotifications(

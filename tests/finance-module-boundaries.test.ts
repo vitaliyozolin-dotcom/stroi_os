@@ -21,6 +21,8 @@ test('finance commands go through the domain and preserve the existing revision-
   const page = source('src/pages/FinancePage.tsx');
   assert.match(page, /finance\.approveExpense\(entry\.id\)/);
   assert.match(page, /finance\.recordPayment\(input\)/);
+  assert.match(page, /finance\.createCommitment\(/);
+  assert.doesNotMatch(page, /financeEntries:/);
   assert.doesNotMatch(page, /approvedAt:|acceptedAmount:|paidAmount:/);
 });
 
@@ -38,4 +40,14 @@ test('both deployment artifacts include every runtime file in the financial modu
     assert.ok(prepare.includes(`'${file.slice(0, -3)}'`), file);
   }
   assert.match(prepare, /src\/domain\/finance\/\$\{name\}\.js.*dist\/src\/domain\/finance\/\$\{name\}\.js/);
+  assert.match(dockerfile, /COPY --from=build \/app\/src\/application\/finance-commitment\.js \.\/src\/application\/finance-commitment\.js/);
+  assert.match(prepare, /src\/application\/finance-commitment\.js.*dist\/src\/application\/finance-commitment\.js/);
+});
+
+test('web and Telegram create commitments through the same runtime-neutral application use case', () => {
+  const module = source('src/application/finance-commitment.js');
+  assert.match(module, /from '..\/domain\/finance\/index\.js'/);
+  assert.doesNotMatch(module, /\bfetch\(|\.DB\b|\.prepare\(|from ['"]react|process\.env/);
+  assert.match(source('src/application/finance.ts'), /createProjectCommitment\(state, input, context\)/);
+  assert.match(source('sites/worker.js'), /createProjectCommitment\(state, \{ \.\.\.entry, sourceDraftId: draft\.id \}/);
 });

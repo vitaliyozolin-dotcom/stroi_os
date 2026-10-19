@@ -14,11 +14,13 @@ await mkdir(`${projectRoot}dist/server/leads`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/lib`, { recursive: true });
 await mkdir(`${projectRoot}dist/src/domain`, { recursive: true });
 await mkdir(`${projectRoot}dist/src/domain/finance`, { recursive: true });
+await mkdir(`${projectRoot}dist/src/application`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/projects`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/routes`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
 
 await Promise.all([
+  copyFile(`${projectRoot}src/application/finance-commitment.js`, `${projectRoot}dist/src/application/finance-commitment.js`),
   ...['index', 'policy', 'state-validation', 'transitions'].map((name) => copyFile(`${projectRoot}src/domain/finance/${name}.js`, `${projectRoot}dist/src/domain/finance/${name}.js`)),
   copyFile(`${projectRoot}src/domain/finance-totals.js`, `${projectRoot}dist/src/domain/finance-totals.js`),
   copyFile(`${projectRoot}sites/company-os-export.js`, `${projectRoot}dist/server/company-os-export.js`),

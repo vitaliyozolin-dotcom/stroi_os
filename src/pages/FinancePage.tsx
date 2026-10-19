@@ -71,42 +71,15 @@ export function FinancePage({ state, actor, role, focusId, onChange, onNavigate,
 
   const addOperation = (event: FormEvent) => {
     event.preventDefault();
-    const amount = Number(form.amount);
-    const counterparty = state.counterparties.find((item) => item.id === form.counterpartyId);
-    if (!Number.isFinite(amount) || amount <= 0 || !counterparty || !form.description.trim()) { setFormError('Укажите сумму, контрагента и назначение.'); return; }
-    const selectedLine = state.budgetLines.find((line) => line.id === form.budgetLineId) ?? firstLine;
-    if (formKind === 'expense' && (!selectedLine || !selectedLine.stageIds.includes(form.stageId))) { setFormError('Для этой статьи пока не выбран этап. Уточните связь статьи в смете.'); return; }
-    const currentCommitted = selectedLine ? lineTotals(state, selectedLine).committed : 0;
-    const entryId = uid('finance');
-    const next: AppState = {
-      ...state,
-      budgetLines: formKind === 'expense' ? state.budgetLines.map((line) => line.id === selectedLine.id
-        ? { ...line, forecast: Math.max(line.forecast, currentCommitted + amount) }
-        : line) : state.budgetLines,
-      financeEntries: [{
-        id: entryId,
-        kind: formKind,
-        status: 'committed',
-        createdBy: actor,
-        amount,
-        date: form.date,
-        stageId: formKind === 'expense' ? form.stageId : undefined,
-        budgetLineId: formKind === 'expense' ? form.budgetLineId : undefined,
-        counterparty: counterparty.name,
-        counterpartyId: counterparty.id,
-        description: form.description.trim(),
-      }, ...state.financeEntries],
-      activity: [{
-        id: uid('activity'),
-        timestamp: new Date().toISOString(),
-        actor,
-        text: `${formKind === 'expense' ? 'Добавлен расход' : 'Добавлено поступление'} ${money(amount)} · ${form.description.trim()}`,
-        tone: 'neutral',
-      }, ...state.activity],
-    };
-    saveChange(next);
+    const result = finance.createCommitment({
+      kind: formKind, amount: Number(form.amount), date: form.date,
+      counterpartyId: form.counterpartyId, description: form.description,
+      budgetLineId: formKind === 'expense' ? form.budgetLineId : undefined,
+      stageId: formKind === 'expense' ? form.stageId : undefined,
+    });
+    if (!result.ok) { setFormError(result.error); return; }
     setShowForm(false);
-    setSelectedEntryId(entryId);
+    setSelectedEntryId(result.entryId);
     setForm({ ...form, amount: '', counterpartyId: '', description: '' });
   };
 
@@ -161,7 +134,15 @@ export function FinancePage({ state, actor, role, focusId, onChange, onNavigate,
     { id: 'budget', label: 'Смета' },
     { id: 'calendar', label: 'Платёжный календарь' },
   ] as const;
-  const openNew = (kind: 'expense' | 'income') => { setFormKind(kind); setFormError(''); setForm(current => ({ ...current, date: financeToday() })); setShowForm(true); };
+  const openNew = (kind: 'expense' | 'income') => {
+    setFormKind(kind);
+    setFormError('');
+    setForm(current => {
+      const line = state.budgetLines.find(item => item.id === current.budgetLineId) ?? firstLine;
+      return { ...current, date: financeToday(), budgetLineId: line?.id ?? '', stageId: line?.stageIds.includes(current.stageId) ? current.stageId : line?.stageIds[0] ?? '' };
+    });
+    setShowForm(true);
+  };
 
   return (
     <div className="finance-page">
@@ -213,7 +194,7 @@ export function FinancePage({ state, actor, role, focusId, onChange, onNavigate,
             </div>
             </>}
             {formKind === 'income' && <div className="form-grid"><Field label="Сумма, ₽"><input required min="0.01" step="0.01" inputMode="decimal" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="1400000" /></Field><Field label="Статус"><div className="locked-field"><LockKeyhole size={15} /> Запланировано</div></Field></div>}
-            <Field label="За что" hint="Короткое название покупки или поступления"><textarea required rows={3} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="За что платим или какое поступление ожидаем" /></Field>
+            <Field label="За что" hint="Короткое название покупки или поступления"><textarea required maxLength={500} rows={3} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="За что платим или какое поступление ожидаем" /></Field>
             <div className="form-grid"><Field label={formKind === 'expense' ? 'Контрагент' : 'Плательщик'} hint="Выбор из единого справочника"><select required value={form.counterpartyId} onChange={(event) => setForm({ ...form, counterpartyId: event.target.value })}><option value="">Выберите контрагента</option>{state.counterparties.filter((item) => item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}{item.specialty ? ` · ${item.specialty}` : ''}</option>)}</select></Field><Field label="Дата"><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></Field></div>
             {formKind === 'expense' && <div className="form-warning"><ReceiptText size={18} /><span>После сохранения откройте расход: там доступны утверждение, приёмка и запись оплаты.</span></div>}
             <div className="modal__actions"><button className="button button--ghost" type="button" onClick={() => setShowForm(false)}>Отмена</button><button className="button button--primary" type="submit" disabled={!state.counterparties.length}><CircleDollarSign size={18} /> Сохранить договорённость</button></div>

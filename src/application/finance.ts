@@ -6,6 +6,7 @@ import {
 } from '../domain/finance/index.js';
 import type { Clock, IdGenerator } from './ports';
 import { commitStateChange, type StateChangeSink } from './state-change.ts';
+import { createProjectCommitment, type CreateCommitmentInput } from './finance-commitment.js';
 
 export type FinanceCommandResult = { ok: true; change: StateChange | null } | { ok: false; error: string };
 type FactCommand = FinanceFactInput & { entryId: string };
@@ -63,11 +64,12 @@ export const recordProjectReceipt = (state: AppState, input: FactCommand, contex
 // The existing sync workflow owns repository writes, revisions, retries and conflicts.
 export const createFinanceUseCases = (state: AppState, identity: FinanceActor, clock: Clock, ids: IdGenerator, sink: StateChangeSink) => {
   const context = { identity, clock, ids };
-  const commit = (result: FinanceCommandResult) => {
+  const commit = <T extends FinanceCommandResult>(result: T): T => {
     if (result.ok && result.change) commitStateChange(result.change, sink);
     return result;
   };
   return {
+    createCommitment: (input: CreateCommitmentInput) => commit(createProjectCommitment(state, input, context)),
     approveExpense: (entryId: string) => commit(approveProjectExpense(state, entryId, context)),
     acceptExpense: (input: FactCommand) => commit(acceptProjectExpense(state, input, context)),
     recordPayment: (input: FactCommand) => commit(recordProjectPayment(state, input, context)),
