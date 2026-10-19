@@ -1,5 +1,6 @@
 import { validateBaselineChanges } from '../projects/baseline.js';
 import { validateStageControl } from '../projects/stage-control.js';
+import { validateFinanceChanges } from '../projects/finance.js';
 
 const MAX_STATE_BYTES = 6_000_000;
 
@@ -42,6 +43,8 @@ export const createTelegramProjectStore = ({ ensureSchema, readSnapshot, changes
       if (stageError) throw new Error(`invalid_stage_transition: ${stageError}`);
       const baselineError = validateBaselineChanges(previous, state, { role, name: actor }, now);
       if (baselineError) throw new Error(`invalid_baseline_transition: ${baselineError}`);
+      const financeError = validateFinanceChanges(previous, state, { role, name: actor }, now);
+      if (financeError) throw new Error(`invalid_finance_transition: ${financeError}`);
       const stateJson = JSON.stringify(state);
       const stateBytes = new TextEncoder().encode(stateJson).byteLength;
       if (stateBytes > MAX_STATE_BYTES) throw new Error('payload_too_large');

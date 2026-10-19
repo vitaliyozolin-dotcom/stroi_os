@@ -59,15 +59,17 @@ export const applyRemoteSnapshot = (model: SyncModel, remote: SyncSnapshot): Syn
 
 export const reconcileRemoteSnapshot = (model: SyncModel, remote: SyncSnapshot): RemoteReconciliation => {
   if (!model.dirty) return { kind: 'remote', model: applyRemoteSnapshot(model, remote) };
-  if (model.revision === remote.revision) return { kind: 'save', model: { ...model, ready: true } };
   if (JSON.stringify(model.state) === JSON.stringify(remote.state)) return { kind: 'remote', model: applyRemoteSnapshot(model, remote) };
+  if (model.revision === remote.revision) return { kind: 'save', model: { ...model, ready: true } };
   const merged = mergeProjectStates(model.base, model.state, remote.state);
   if (merged.conflicts.length) return { kind: 'conflict', model: { ...model, ready: true }, conflicts: merged.conflicts };
+  const mergedState = synchronizeDerivedProgress(merged.state);
+  if (JSON.stringify(mergedState) === JSON.stringify(remote.state)) return { kind: 'remote', model: applyRemoteSnapshot(model, remote) };
   return {
     kind: 'save',
     model: {
       ...model,
-      state: synchronizeDerivedProgress(merged.state),
+      state: mergedState,
       base: synchronizeDerivedProgress(remote.state),
       revision: remote.revision,
       updatedAt: remote.updatedAt,

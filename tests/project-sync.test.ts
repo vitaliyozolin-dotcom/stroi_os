@@ -22,6 +22,30 @@ test('local changes retain audit metadata without mutating the source', () => {
   assert.equal(model.state.tasks[0].status, 'todo');
 });
 
+test('reloading an acknowledged dirty cache never writes an identical financial snapshot again', () => {
+  const initial = snapshot(5);
+  initial.state.financeEntries.push({ id: 'paid-1', kind: 'expense', status: 'paid', amount: 100, acceptedAmount: 100, paidAmount: 100, date: '2026-10-19', description: 'Работы', counterparty: 'Подрядчик', payments: [{ id: 'payment-1', amount: 100, date: '2026-10-19', document: 'Чек', recordedAt: '2026-10-19T10:00:00Z', recordedBy: 'Управляющий' }] });
+  const cached = createSyncModel(initial, true, false);
+  const result = reconcileRemoteSnapshot(cached, { ...initial, state: structuredClone(cached.state) });
+  assert.equal(result.kind, 'remote');
+  assert.equal(result.model.dirty, false);
+  assert.equal(result.model.revision, 5);
+  assert.deepEqual(result.model.state.financeEntries, cached.state.financeEntries);
+});
+
+test('server-stamped payment facts acknowledge an older dirty cache without a no-op save', () => {
+  const cached = createSyncModel(snapshot(4), true, false);
+  cached.state.financeEntries = [{ id: 'paid-1', kind: 'expense', status: 'paid', amount: 100, acceptedAmount: 100, paidAmount: 100, date: '2026-10-19', description: 'Работы', counterparty: 'Подрядчик' }];
+  cached.base = structuredClone(cached.state);
+  const server = { state: structuredClone(cached.state), revision: 5 };
+  server.state.financeEntries[0].payments = [{ id: 'payment-1', amount: 100, date: '2026-10-19', document: 'Чек', recordedAt: '2026-10-19T10:00:00Z', recordedBy: 'Управляющий' }];
+  const result = reconcileRemoteSnapshot(cached, server);
+  assert.equal(result.kind, 'remote');
+  assert.equal(result.model.dirty, false);
+  assert.equal(result.model.revision, 5);
+  assert.deepEqual(result.model.state.financeEntries[0].payments, server.state.financeEntries[0].payments);
+});
+
 test('hydration merges independent changes and exposes same-record conflicts', () => {
   const model = createSyncModel(snapshot(1), false, false);
   const local = structuredClone(model.state);

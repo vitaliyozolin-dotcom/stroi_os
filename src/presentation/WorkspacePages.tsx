@@ -37,7 +37,7 @@ export function WorkspacePages({ state, session, role, focusEntityId, updateStat
           <Route path="/projects/:projectId/tasks" element={<TasksPage state={state} role={role} session={session} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />} />
           <Route path="/projects/:projectId/marketing" element={<MarketingPage state={state} actor={session.name} focusId={focusEntityId} onChange={updateState} />} />
           <Route path="/projects/:projectId/counterparties" element={<CounterpartiesPage state={state} actor={session.name} focusId={focusEntityId} onChange={updateState} />} />
-          <Route path="/projects/:projectId/finance" element={<FinancePage onOpenQuestions={openQuestions} state={state} actor={session.name} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />} />
+          <Route path="/projects/:projectId/finance" element={<FinancePage role={role} onOpenQuestions={openQuestions} state={state} actor={session.name} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />} />
           <Route path="/projects/:projectId/schedule" element={<SchedulePage state={state} role={role} actor={session.name} userId={session.id} focusId={focusEntityId} onChange={updateState} />} />
           <Route path="/projects/:projectId/procurement" element={<ProcurementPage state={state} role={role} actor={session.name} focusId={focusEntityId} onChange={updateState} />} />
           <Route path="/projects/:projectId/quality" element={<QualityPage state={state} role={role} actor={session.name} focusId={focusEntityId} onChange={updateState} />} />

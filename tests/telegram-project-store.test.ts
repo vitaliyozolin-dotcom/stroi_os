@@ -78,3 +78,42 @@ test('Telegram project mutation fails after three conflicting revisions', async 
     /revision_conflict/,
   );
 });
+
+test('Telegram shares the financial write policy and rejects unauthorized or unaccepted payments before SQL', async () => {
+  const previous = { project: { id: 'project-1' }, financeEntries: [{ id: 'e', kind: 'expense', status: 'committed', amount: 100, date: '2026-10-19', description: 'Работы', counterparty: 'Подрядчик' }] };
+  const store = createTelegramProjectStore({ ensureSchema: async () => undefined, readSnapshot: async () => ({ state: previous, revision: 1 }), changes: () => 1, mutationNoop: noop });
+  for (const role of ['management', 'foreman', 'client']) {
+    const db = { prepare: () => assert.fail('financial rejection must happen before SQL') };
+    await assert.rejects(store.mutate({ DB: db }, 'project-1', 'Actor', role, 'payment', 'Оплата', (state: typeof previous) => {
+      Object.assign(state.financeEntries[0], { paidAmount: 10, paidAt: '2026-10-19', paymentDocument: 'Чек' });
+    }), /invalid_finance_transition/);
+  }
+});
+
+test('Telegram CAS retries stamp one payment event from the latest authoritative snapshot', async () => {
+  let reads = 0;
+  let updates = 0;
+  let persisted: { financeEntries: { paidAmount: number; payments: { amount: number; recordedBy: string }[] }[] } | undefined;
+  const db = { prepare: (sql: string) => ({ bind: (...values: unknown[]) => ({ run: async () => {
+    if (sql.includes('UPDATE project_state')) {
+      updates += 1;
+      if (updates === 1) return { changes: 0 };
+      persisted = JSON.parse(String(values[0]));
+    }
+    return { changes: 1 };
+  } }) }) };
+  const store = createTelegramProjectStore({
+    ensureSchema: async () => undefined, changes: (result: { changes: number }) => result.changes, mutationNoop: noop,
+    readSnapshot: async () => {
+      reads += 1;
+      return { revision: reads, state: { project: { id: 'project-1' }, financeEntries: [{ id: 'e', kind: 'expense', status: 'accepted', amount: 100, acceptedAmount: 100, paidAmount: reads === 1 ? 0 : 20, payments: reads === 1 ? [] : [{ id: 'existing', amount: 20, date: '2026-10-18', document: 'Первый чек', recordedAt: 'before', recordedBy: 'Другой управляющий' }] }] } };
+    },
+  });
+  await store.mutate({ DB: db }, 'project-1', 'Настоящий актор', 'management', 'payment', 'Оплата', (state: { financeEntries: { paidAmount: number }[] }) => {
+    Object.assign(state.financeEntries[0], { paidAmount: state.financeEntries[0].paidAmount + 30, paidAt: '2026-10-19', paymentDocument: 'Новый чек', paidBy: 'Подставное имя' });
+  });
+  assert.equal(updates, 2);
+  assert.equal(persisted?.financeEntries[0].paidAmount, 50);
+  assert.deepEqual(persisted?.financeEntries[0].payments.map(payment => payment.amount), [20, 30]);
+  assert.equal(persisted?.financeEntries[0].payments[1].recordedBy, 'Настоящий актор');
+});

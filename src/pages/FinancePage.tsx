@@ -1,5 +1,5 @@
 import { CashflowPanel } from '../components/CashflowPanel';
-import { createFinanceCommands } from '../application';
+import { createFinanceCommands, createFinanceUseCases } from '../application';
 import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
@@ -9,9 +9,9 @@ import {
   Plus,
   ReceiptText,
 } from 'lucide-react';
-import { acceptedAmountFor, financeTotals, lineTotals, lineForecast, unallocatedExpenses, unallocatedExpenseTotals, paidAmountFor, financeMoney, needsExpenseApproval, expenseAcceptanceSources, financeActionError } from '../domain/index';
+import { acceptedAmountFor, financeTotals, lineTotals, lineForecast, unallocatedExpenses, unallocatedExpenseTotals, paidAmountFor, financeMoney, needsExpenseApproval, expenseAcceptanceSources } from '../domain/index';
 import { formatDate, money, shortMoney } from '../presentation/formatting';
-import type { AppState, ExpenseStatus, FinanceEntry, ProjectDocument } from '../entities/index';
+import type { AppState, FinanceEntry, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { Field, Modal } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';
@@ -26,8 +26,10 @@ import { FinanceDrawer } from '../components/FinanceDrawer';
 import { financeEntryTitle, financeToday } from '../presentation/finance-view';
 import './finance-page.css';
 
-export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpenQuestions }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenQuestions: () => void }) {
+export function FinancePage({ state, actor, role, focusId, onChange, onNavigate, onOpenQuestions }: { state: AppState; actor: string; role: UserRole; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenQuestions: () => void }) {
   const saveChange = createFinanceCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
+  const finance = createFinanceUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const [approvalError, setApprovalError] = useState('');
   const totals = financeTotals(state);
   const margin = state.project.contractValue - totals.forecast;
   const unallocated = unallocatedExpenseTotals(state);
@@ -57,6 +59,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
     description: '',
     date: financeToday(),
   });
+  useEffect(() => { setApprovalError(''); }, [selectedEntryId]);
   const handledFocus = useRef<string | null>(null);
   useEffect(() => {
     if (!focusId) { handledFocus.current = null; return; }
@@ -114,9 +117,8 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
 
   const canAcceptEntry = (entry: FinanceEntry) => !needsExpenseApproval(entry) && expenseAcceptanceSources(state, entry).length > 0;
   const approveExpense = (entry: FinanceEntry) => {
-    if (!needsExpenseApproval(entry)) return;
-    const now = new Date().toISOString();
-    saveChange({ ...state, financeEntries: state.financeEntries.map((item) => item.id === entry.id ? { ...item, approvedBy: actor, approvedAt: now } : item), activity: [{ id: uid('activity'), timestamp: now, actor, text: `Утверждён расход ${money(entry.amount)} · ${entry.description}`, tone: 'positive' }, ...state.activity] });
+    const result = finance.approveExpense(entry.id);
+    setApprovalError(result.ok ? '' : result.error);
   };
 
   const openAction = (entry: FinanceEntry, kind: 'accept' | 'pay' | 'receive') => {
@@ -130,26 +132,11 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
 
   const saveAction = (event: FormEvent) => {
     event.preventDefault();
-    const entry = state.financeEntries.find((item) => item.id === actionEntryId);
-    const amount = Number(actionForm.amount);
-    if (!entry) return;
-    const error = financeActionError(state, entry, actionKind, amount, actionForm.date, actionForm.document, actionForm.source);
-    if (error) { setActionError(error); return; }
-    const now = new Date().toISOString();
-    let text = '';
-    const financeEntries = state.financeEntries.map((item) => {
-      if (item.id !== entry.id) return item;
-      if (actionKind === 'accept') {
-        const acceptedAmount = financeMoney(acceptedAmountFor(item) + amount);
-        text = `${item.description}: принято ${money(amount)}`;
-        return { ...item, status: 'accepted' as ExpenseStatus, acceptedAmount, acceptedAt: actionForm.date, acceptedBy: actor, acceptanceSource: actionForm.source, acceptanceDocument: actionForm.document.trim(), document: actionForm.document.trim() };
-      }
-      const paidAmount = financeMoney(paidAmountFor(item) + amount);
-      text = `${item.description}: ${actionKind === 'receive' ? 'получено' : 'оплачено'} ${money(amount)}`;
-      return { ...item, status: paidAmount >= item.amount ? 'paid' as ExpenseStatus : item.status, paidAmount, paidAt: actionForm.date, paidBy: actor, paymentDocument: actionForm.document.trim() };
-    });
-    const document: ProjectDocument | null = actionForm.document.trim() ? { id: uid('document'), name: actionForm.document.trim(), type: actionKind === 'accept' ? 'Акт / приёмка' : 'Платёжный документ', category: actionKind === 'accept' ? 'act' : 'other', documentDate: actionForm.date, updatedAt: now, clientVisible: false, status: 'current', direction: actionKind === 'accept' ? 'incoming' : 'outgoing', counterpartyId: entry.counterpartyId, stageId: entry.stageId, financeEntryId: entry.id, receivedAt: actionKind === 'accept' ? now : undefined, sentAt: actionKind === 'accept' ? undefined : now, storageLocation: `ИКИОМА ОС / ${state.project.code} / Финансы` } : null;
-    saveChange({ ...state, financeEntries, documents: document ? [document, ...state.documents] : state.documents, activity: [{ id: uid('activity'), timestamp: now, actor, text, tone: actionKind === 'accept' ? 'neutral' : 'positive' }, ...state.activity] });
+    if (!actionEntryId) return;
+    const input = { entryId: actionEntryId, amount: Number(actionForm.amount), date: actionForm.date, document: actionForm.document, source: actionForm.source };
+    const result = actionKind === 'accept' ? finance.acceptExpense(input)
+      : actionKind === 'pay' ? finance.recordPayment(input) : finance.recordReceipt(input);
+    if (!result.ok) { setActionError(result.error); return; }
     setActionEntryId(null);
   };
 
@@ -240,6 +227,7 @@ export function FinancePage({ state, actor, focusId, onChange, onNavigate, onOpe
       </FinanceDrawer>}
 
       {selectedEntry && <FinanceDrawer title={financeEntryTitle(selectedEntry)} subtitle={selectedEntry.kind === 'expense' ? 'Расход' : 'Поступление'} onClose={() => setSelectedEntryId(null)}>
+        {approvalError && <p role="alert" className="form-warning">{approvalError}</p>}
         <div className="finance-drawer__total"><span>{selectedEntry.kind === 'expense' ? 'Оплачено' : 'Получено'}</span><strong>{money(paidAmountFor(selectedEntry))}</strong><small>{selectedEntry.kind === 'expense' && paidAmountFor(selectedEntry) > 0 ? paymentEvidence(selectedEntry, state.documents).sourceLabel : ''}</small></div>
         <dl className="finance-definition-list"><div><dt>{selectedEntry.kind === 'expense' ? 'Получатель' : 'Плательщик'}</dt><dd>{selectedCounterparty ? <button type="button" onClick={() => { setSelectedEntryId(null); setCounterpartyId(selectedCounterparty.id); }}>{selectedEntry.counterparty} <ArrowUpRight size={14} /></button> : selectedEntry.counterparty}</dd></div><div><dt>Сумма договорённости</dt><dd>{money(selectedEntry.amount)}</dd></div>{paidAmountFor(selectedEntry) < selectedEntry.amount && <div><dt>{selectedEntry.kind === 'expense' ? 'Осталось оплатить' : 'Ожидается'}</dt><dd>{money(selectedEntry.amount - paidAmountFor(selectedEntry))}</dd></div>}<div><dt>Дата документа / записи</dt><dd>{formatDate(selectedEntry.date, true)}</dd></div>{!selectedEntry.payments?.length && <div><dt>Дата оплаты</dt><dd>{selectedEntry.paidAt ? formatDate(selectedEntry.paidAt, true) : 'Не установлена'}</dd></div>}</dl>
         {(needsExpenseApproval(selectedEntry) || selectedEntry.kind === 'expense' && !selectedEntry.historicalPayment && acceptedAmountFor(selectedEntry) < selectedEntry.amount || selectedEntry.kind === 'expense' && paidAmountFor(selectedEntry) < acceptedAmountFor(selectedEntry) || selectedEntry.kind === 'income' && paidAmountFor(selectedEntry) < selectedEntry.amount) && <section className="finance-next-action">
