@@ -20,12 +20,21 @@ const styles = `
   .card{background:#fff;border:1px solid #e1e5de;border-radius:24px;padding:32px;box-shadow:0 24px 70px rgba(28,45,34,.11)}h1{font-size:30px;line-height:1.1;letter-spacing:-.04em;margin:0 0 10px}p{color:#68746c;margin:0 0 24px;line-height:1.5}.meta{display:grid;gap:9px;padding:15px;border-radius:14px;background:#f5f7f3;margin-bottom:24px}.meta span{display:flex;justify-content:space-between;gap:16px;font-size:13px;color:#68746c}.meta strong{color:#17211b;text-align:right}
   label{display:block;font-size:13px;font-weight:700;margin:0 0 8px}.field{margin-bottom:18px}input{width:100%;height:50px;border:1px solid #d8ddd6;border-radius:13px;padding:0 15px;font:inherit;background:#fbfcfa;outline:none}input:focus{border-color:#1f6b45;box-shadow:0 0 0 4px rgba(31,107,69,.1);background:#fff}small{display:block;color:#879189;line-height:1.45;margin-top:7px}
   button,.button{width:100%;height:52px;border:0;border-radius:13px;background:#1f6b45;color:#fff;font:700 15px inherit;cursor:pointer;margin-top:4px;text-decoration:none;display:grid;place-items:center}button:hover,.button:hover{background:#18583a}.error{padding:12px 14px;border-radius:12px;background:#fff0ed;color:#9d382a;font-size:13px;margin:0 0 18px}.foot{text-align:center;color:#879189;font-size:12px;margin-top:18px}
+  .brand .mark{background:transparent;border-radius:0}.brand .mark img{display:block;max-width:100%;height:34px;object-fit:contain}
   @media(max-width:520px){body{padding:16px;align-items:end}.card{padding:26px 22px;border-radius:22px}h1{font-size:28px}}
 `;
 
 const shell = (content, title = 'Доступ — ИКИОМА ОС') => `<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${escapeHtml(title)}</title><style>${styles}</style></head>
-<body><main class="shell"><div class="brand"><span class="mark">И</span><span>ИКИОМА ОС</span></div>${content}<div class="foot">Защищённый доступ · ИКИОМА</div></main></body></html>`;
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="application-name" content="ИКИОМА ОС" />
+    <meta name="apple-mobile-web-app-title" content="ИКИОМА" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="icon" href="/favicon.ico?v=20261019" sizes="16x16 32x32 48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/icon-32-20261019.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/brand/icon-180-20261019.png" />
+    <link rel="manifest" href="/manifest.webmanifest?v=20261019" /><title>${escapeHtml(title)}</title><style>${styles}</style></head>
+<body><main class="shell"><div class="brand"><span class="mark" aria-hidden="true"><img src="/brand/ikioma-mark-20261019.png" alt="" width="28" height="34"></span><span>ИКИОМА ОС</span></div>${content}<div class="foot">Защищённый доступ · ИКИОМА</div></main></body></html>`;
 
 export const activationPage = ({ token, invite, error = '' }) => shell(`
   <section class="card">

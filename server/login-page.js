@@ -11,7 +11,16 @@ export const loginPage = ({ username = '', error = '', blocked = false, notice =
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#111510">
+  <meta name="theme-color" content="#202724">
+  <meta name="application-name" content="ИКИОМА ОС" />
+    <meta name="apple-mobile-web-app-title" content="ИКИОМА" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="icon" href="/favicon.ico?v=20261019" sizes="16x16 32x32 48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/icon-32-20261019.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/brand/icon-180-20261019.png" />
+    <link rel="manifest" href="/manifest.webmanifest?v=20261019" />
   <title>Вход — ИКИОМА ОС</title>
   <style>
     :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#151914;background:#f5f4ef;font-synthesis:none;-webkit-font-smoothing:antialiased;--ink:#111510;--paper:#f5f4ef;--accent:#d5ff48;--muted:#696e64}
@@ -38,12 +47,13 @@ export const loginPage = ({ username = '', error = '', blocked = false, notice =
     }
     @media(max-width:360px){.identity{padding-left:20px;padding-right:20px}.entry{padding-left:20px;padding-right:20px}h1{font-size:31px}}
     @media(max-width:760px) and (max-height:700px){.identity{padding-top:max(20px,env(safe-area-inset-top));padding-bottom:20px}.mobile-note{margin-top:12px}.entry{padding-top:26px}.eyebrow{margin-bottom:14px}.intro{margin-bottom:22px}.foot{margin-top:24px}}
+    .brand .mark{background:transparent;border-radius:0}.brand .mark img{display:block;width:auto;height:100%;object-fit:contain}.brand{letter-spacing:0}.brand em{color:#e77c38}
   </style>
 </head>
 <body>
   <main class="shell">
     <aside class="identity" aria-label="ИКИОМА ОС">
-      <div class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-2M10 6h4M10 10h4M10 14h4M10 18h4"/></svg></span><span>ИКИОМА <em>ОС</em></span></div>
+      <div class="brand"><span class="mark" aria-hidden="true"><img src="/brand/ikioma-mark-20261019.png" alt="" width="32" height="38"></span><span>ИКИОМА <em>ОС</em></span></div>
       <p class="statement">От плана<br>до готового<br><span>дома.</span></p>
       <svg class="drawing" viewBox="0 0 510 300" fill="none" aria-hidden="true">
         <g stroke="#343d2d" stroke-width="1"><path d="m15 220 250 70 230-130M15 240l195 55M65 194l250 69M115 168l250 68M165 141l250 69M215 115l250 69M56 232l240-131M108 246l240-131M160 261l240-131M212 275l240-131"/></g>

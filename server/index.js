@@ -8,7 +8,7 @@ import { handleCompanyOsExport } from '../sites/company-os-export.js';
 import { handleCompanyOsInvestorExport } from '../sites/company-os-investor-export.js';
 import { FileBucket } from './file-bucket.js';
 import { PostgresDatabase } from './postgres.js';
-import { isPublicRoute } from './public-routes.js';
+import { isPublicRoute, isPublicBrandAsset } from './public-routes.js';
 import { loginPage } from './login-page.js';
 import { activationPage, invalidActivationPage } from './access-page.js';
 import {
@@ -60,6 +60,7 @@ const telegramOutboxIntervalMs = Math.max(15_000, Number(process.env.TELEGRAM_OU
 const mimeTypes = {
   '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml', '.webp': 'image/webp', '.woff2': 'font/woff2', '.ico': 'image/x-icon',
 };
 
@@ -81,7 +82,7 @@ const assets = {
       return new Response(Readable.toWeb(createReadStream(target)), {
         headers: {
           'Content-Type': mimeTypes[extname(target).toLowerCase()] || 'application/octet-stream',
-          'Cache-Control': target.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+          'Cache-Control': ['index.html', 'manifest.webmanifest', 'favicon.ico'].some((name) => target.endsWith(name)) ? 'no-cache' : 'public, max-age=31536000, immutable',
         },
       });
     } catch { return new Response('Not found', { status: 404 }); }
@@ -103,7 +104,7 @@ const htmlResponse = (html, status = 200, extraHeaders = {}) => new Response(htm
   headers: {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    'Content-Security-Policy': "default-src 'none'; img-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     ...extraHeaders,
@@ -370,6 +371,10 @@ const server = createServer(async (incoming, outgoing) => {
         'Set-Cookie': userAccess.clearCookie(),
         'Clear-Site-Data': '"cache", "storage"',
       }));
+    }
+
+    if (isPublicBrandAsset(url) && ['GET', 'HEAD'].includes(request.method)) {
+      return writeResponse(outgoing, await assets.fetch(request));
     }
 
     let identity = null;

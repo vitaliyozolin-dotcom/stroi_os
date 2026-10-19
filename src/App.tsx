@@ -245,7 +245,7 @@ function App() {
       {mobileMenu && <button className="mobile-scrim" type="button" aria-label="Закрыть меню" onClick={() => setMobileMenu(false)} />}
       <aside className={`sidebar ${mobileMenu ? 'sidebar--open' : ''}`}>
         <div className="sidebar__brand">
-          <span className="brand-mark"><Building2 size={22} /></span>
+          <span className="brand-mark" aria-hidden="true"><img src="/brand/ikioma-mark-20261019.png" alt="" width="27" height="32" /></span>
           <span className="brand-copy"><strong>ИКИОМА <span>ОС</span></strong></span>
           <button type="button" className="sidebar__mobile-close" onClick={() => setMobileMenu(false)} aria-label="Закрыть меню"><X size={19} /></button>
         </div>

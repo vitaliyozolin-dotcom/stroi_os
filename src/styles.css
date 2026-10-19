@@ -9294,3 +9294,8 @@ body { background: var(--canvas); }
 .app-shell .project-switcher .project-switcher__progress { color: #c6cfb6; font-size: 11px; line-height: 1.4; letter-spacing: 0; }
 
 .sidebar__nav a, .sidebar__footer a, .mobile-bottom-nav a { text-decoration: none; }
+/* Approved IKIOMA two-part house mark, brand book page 5. */
+.app-shell .brand-mark { background: transparent; border-radius: 0; box-shadow: none; }
+.app-shell .brand-mark img { display: block; width: 27px; height: 32px; object-fit: contain; }
+.app-shell .brand-copy strong { letter-spacing: 0; font-weight: 750; }
+.app-shell .brand-copy strong span { color: #e77c38; }

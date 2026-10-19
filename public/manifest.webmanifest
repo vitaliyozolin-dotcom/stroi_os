@@ -1,0 +1,32 @@
+{
+  "id": "/",
+  "name": "ИКИОМА ОС",
+  "short_name": "ИКИОМА",
+  "description": "Управление строительством: объекты, команда и финансы",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f0e9",
+  "theme_color": "#202724",
+  "icons": [
+    {
+      "src": "/brand/icon-192-20261019.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/icon-512-20261019.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/icon-maskable-512-20261019.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
