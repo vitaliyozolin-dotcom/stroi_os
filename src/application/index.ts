@@ -1,6 +1,6 @@
 export { commitStateChange, createMutationContext, createPageStateSink } from './state-change.ts';
-export { createCounterpartyUseCases, saveProjectCounterparty } from './counterparties.ts';
-export type { SaveCounterpartyInput, CounterpartyCommandResult } from './counterparties.ts';
+export { createCounterpartyUseCases, saveProjectCounterparty, addProjectCounterpartyDocument } from './counterparties.ts';
+export type { SaveCounterpartyInput, CounterpartyCommandResult, AddCounterpartyDocumentInput, CounterpartyDocumentResult } from './counterparties.ts';
 export { approveProjectExpense, acceptProjectExpense, recordProjectPayment, recordProjectReceipt, createFinanceUseCases } from './finance.ts';
 export type { FinanceCommandResult } from './finance.ts';
 export { editProjectBudgetLine, classifyProjectCosts, setProjectPaymentDueDate } from './finance-planning.ts';
@@ -9,7 +9,7 @@ export { importProjectFinanceHistory, historyImportSnapshot } from './finance-hi
 export type { HistoryImportCommand, HistoryImportCommandResult } from './finance-history.ts';
 export { createProjectCommitment } from './finance-commitment.js';
 export type { CreateCommitmentInput, CreateCommitmentResult } from './finance-commitment.js';
-export { createClientDecisionCommands, createCounterpartyCommands, createMarketingCommands, createProcurementCommands, createProjectDocumentCommands, createScheduleCommands, createSettingsCommands } from './page-commands.ts';
+export { createClientDecisionCommands, createMarketingCommands, createProcurementCommands, createProjectDocumentCommands, createScheduleCommands, createSettingsCommands } from './page-commands.ts';
 export { applyLocalChange, applyRemoteSnapshot, createSyncModel, reconcileRemoteSnapshot, reconcileRevisionConflict, reconcileSavedSnapshot } from './project-sync.ts';
 export type { RemoteReconciliation, SaveReconciliation, SyncModel, SyncSnapshot } from './project-sync.ts';
 export { applyProjectRemote, createProjectWorkflow, flushProjectChanges, hydrateProject, keepProjectLocalVersion, retryProjectSync, switchProjectWorkflow, useProjectServerVersion } from './project-sync-workflow.ts';
