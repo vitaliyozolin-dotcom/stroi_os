@@ -1,3 +1,5 @@
+import { createFinanceUseCases } from '../application';
+import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
 import { OverviewFocus } from '../components/OverviewFocus';
 import { ConstructionNow } from '../components/ConstructionNow';
 import { CostGroups } from '../components/CostGroups';
@@ -17,6 +19,7 @@ import type { PageId } from '../presentation/navigation';
 import { MetricCard, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 
 export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
+  const financeCommands = createFinanceUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
   const finance = financeTotals(state);
   const sourceEstimate = sourceEstimateTotals(state.budgetLines);
   const progress = progressTotals(state);
@@ -98,7 +101,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
         <p className="overview-money__note">Осталось оплатить по прогнозу: <strong>{shortMoney(Math.max(0, finance.forecast - finance.paid))}</strong>. По внесённым данным; фактическую стоимость завершения нужно сверить.</p>
       </section>}
 
-      {role === 'management' && show('finance') && <CostGroups state={state} onChange={onChange} compact />}
+      {role === 'management' && show('finance') && <CostGroups state={state} onClassify={financeCommands.classifyCosts} compact />}
       <ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate}>
         {show('progress') && <button className="overview-ppr-progress" type="button" onClick={() => onNavigate('schedule')} aria-label="Выполнение ППР — открыть график работ">
           <span className="overview-ppr-progress__heading"><span>Выполнение ППР</span><strong>{state.stages.length ? `${progress.physical}%` : '—'}</strong></span>

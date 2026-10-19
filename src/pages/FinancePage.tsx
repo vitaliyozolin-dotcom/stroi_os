@@ -1,6 +1,7 @@
+import { budgetLineSnapshot } from '../domain/finance/index.js';
 import { CashflowPanel } from '../components/CashflowPanel';
-import { createFinanceCommands, createFinanceUseCases } from '../application';
-import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
+import { createFinanceUseCases } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   ArrowUpRight,
@@ -27,7 +28,6 @@ import { financeEntryTitle, financeToday } from '../presentation/finance-view';
 import './finance-page.css';
 
 export function FinancePage({ state, actor, role, focusId, onChange, onNavigate, onOpenQuestions }: { state: AppState; actor: string; role: UserRole; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenQuestions: () => void }) {
-  const saveChange = createFinanceCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const finance = createFinanceUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
   const [approvalError, setApprovalError] = useState('');
   const totals = financeTotals(state);
@@ -49,7 +49,8 @@ export function FinancePage({ state, actor, role, focusId, onChange, onNavigate,
   const [actionForm, setActionForm] = useState({ amount: '', date: financeToday(), document: '', source: '' });
   const [actionError, setActionError] = useState('');
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
-  const [lineForm, setLineForm] = useState({ plan: '', forecast: '', version: state.budgetMeta.version, source: state.budgetMeta.source });
+  const [lineError, setLineError] = useState('');
+  const [lineForm, setLineForm] = useState({ plan: '', forecast: '', version: state.budgetMeta.version, source: state.budgetMeta.source, expected: '' });
   const firstLine = state.budgetLines[0];
   const [form, setForm] = useState({
     budgetLineId: firstLine?.id ?? '',
@@ -116,16 +117,15 @@ export function FinancePage({ state, actor, role, focusId, onChange, onNavigate,
   const openLineEdit = (line: AppState['budgetLines'][number]) => {
     setSelectedLineId(null);
     setEditingLineId(line.id);
-    setLineForm({ plan: String(line.plan), forecast: String(line.forecast), version: state.budgetMeta.version, source: state.budgetMeta.source });
+    setLineError('');
+    setLineForm({ plan: String(line.plan), forecast: String(line.forecast), version: state.budgetMeta.version, source: state.budgetMeta.source, expected: budgetLineSnapshot(state, line.id) });
   };
 
   const saveLine = (event: FormEvent) => {
     event.preventDefault();
-    const plan = Number(lineForm.plan);
-    const forecast = Number(lineForm.forecast);
-    if (!editingLineId || plan < 0 || forecast < 0 || !lineForm.source.trim()) return;
-    const line = state.budgetLines.find((item) => item.id === editingLineId);
-    saveChange({ ...state, budgetLines: state.budgetLines.map((item) => item.id === editingLineId ? { ...item, plan, forecast } : item), budgetMeta: { ...state.budgetMeta, version: lineForm.version.trim() || state.budgetMeta.version, source: lineForm.source.trim(), importedAt: new Date().toISOString() }, activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `Обновлена статья сметы ${line?.name ?? ''}: план ${money(plan)}`, tone: 'neutral' }, ...state.activity] });
+    if (!editingLineId) return;
+    const result = finance.updateBudgetLine({ ...lineForm, lineId: editingLineId, plan: Number(lineForm.plan), forecast: Number(lineForm.forecast) });
+    if (!result.ok) { setLineError(result.error); return; }
     setEditingLineId(null);
   };
 
@@ -164,8 +164,8 @@ export function FinancePage({ state, actor, role, focusId, onChange, onNavigate,
         event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
       }}>{tabs.map(tab => <button key={tab.id} type="button" id={`finance-tab-${tab.id}`} role="tab" aria-selected={view === tab.id} tabIndex={view === tab.id ? 0 : -1} aria-controls={`finance-view-${tab.id}`} onClick={() => setView(tab.id)}>{tab.label}</button>)}</nav>
       <div id="finance-view-operations" role="tabpanel" aria-labelledby="finance-tab-operations" hidden={view !== 'operations'}><FinanceOperations state={state} onOpenEntry={setSelectedEntryId} /><CashflowPanel state={state} /></div>
-      <div id="finance-view-budget" role="tabpanel" aria-labelledby="finance-tab-budget" hidden={view !== 'budget'}><FinanceBudgetPanel state={state} onChange={saveChange} onOpenLine={setSelectedLineId} onOpenUnallocated={() => setShowUnallocated(true)} onImport={() => setShowHistoryImport(true)} /></div>
-      <div id="finance-view-calendar" role="tabpanel" aria-labelledby="finance-tab-calendar" hidden={view !== 'calendar'}><FinancePaymentCalendar state={state} actor={actor} onChange={saveChange} onOpenEntry={setSelectedEntryId} onAddEntry={openNew} /></div>
+      <div id="finance-view-budget" role="tabpanel" aria-labelledby="finance-tab-budget" hidden={view !== 'budget'}><FinanceBudgetPanel state={state} onClassify={finance.classifyCosts} onOpenLine={setSelectedLineId} onOpenUnallocated={() => setShowUnallocated(true)} onImport={() => setShowHistoryImport(true)} /></div>
+      <div id="finance-view-calendar" role="tabpanel" aria-labelledby="finance-tab-calendar" hidden={view !== 'calendar'}><FinancePaymentCalendar state={state} onSetDueDate={finance.setDueDate} onOpenEntry={setSelectedEntryId} onAddEntry={openNew} /></div>
       <footer className="finance-page__footer"><button type="button" onClick={onOpenQuestions}>Как вести учёт</button><button type="button" onClick={() => setShowHistoryImport(true)}>Импорт прошлых оплат</button></footer>
       {showUnallocated && <FinanceDrawer title="Расходы без статьи" subtitle="Уже включены в общие суммы" onClose={() => setShowUnallocated(false)}><p className="finance-muted">Откройте расход, чтобы посмотреть его источник и связи со сметой.</p><div className="finance-linked-list">{unallocatedEntries.map(entry => <button type="button" key={entry.id} onClick={() => { setShowUnallocated(false); setSelectedEntryId(entry.id); }}><span><strong>{financeEntryTitle(entry)}</strong><small>{entry.counterparty}</small></span><strong>{money(paidAmountFor(entry))}<small>оплачено</small></strong></button>)}</div></FinanceDrawer>}
 
@@ -201,7 +201,7 @@ export function FinancePage({ state, actor, role, focusId, onChange, onNavigate,
           </form>
         </Modal>
       )}
-      {showHistoryImport && <HistoryImport state={state} actor={actor} onSave={saveChange} onClose={() => setShowHistoryImport(false)} />}
+      {showHistoryImport && <HistoryImport state={state} onImport={finance.importHistory} onClose={() => setShowHistoryImport(false)} />}
 
       {summaryOpen && <FinanceDrawer title={summaryOpen === 'paid' ? 'Оплачено по проекту' : summaryOpen === 'received' ? 'Поступило в проект' : 'Доступные деньги'} subtitle="По записанным операциям" onClose={() => setSummaryOpen(null)}>
         {summaryOpen === 'balance' ? <><div className="finance-drawer__total"><span>Остаток на счетах</span><strong>Пока не установлен</strong></div><p className="finance-muted">Для доступного остатка нужно сверить счета, кассу и оплаты участников из своих средств.</p><dl className="finance-definition-list"><div><dt>Записано поступлений</dt><dd>{money(totals.received)}</dd></div><div><dt>Записано выплат</dt><dd>{money(totals.paid)}</dd></div><div><dt>Разность по учёту</dt><dd>{money(balance)}</dd></div></dl><p className="finance-inline-note">Эта разность не является подтверждённым остатком банка или долгом участнику.</p><details className="finance-disclosure"><summary>Прогноз экономики</summary><dl className="finance-definition-list"><div><dt>План затрат</dt><dd>{money(totals.plan)}</dd></div><div><dt>Расчётный прогноз</dt><dd>{money(totals.forecast)}</dd></div><div><dt>Цена договора − прогноз затрат</dt><dd>{money(margin)}</dd></div></dl><p className="finance-muted">Прогноз предварительный. Полнота стоимости достройки ещё не подтверждена.</p></details></> : <><div className="finance-drawer__total"><span>{summaryOpen === 'paid' ? 'Оплачено' : 'Получено'}</span><strong>{money(summaryOpen === 'paid' ? totals.paid : totals.received)}</strong></div><div className="finance-linked-list">{state.financeEntries.filter(entry => entry.kind === (summaryOpen === 'paid' ? 'expense' : 'income') && paidAmountFor(entry) > 0).map(entry => <button type="button" key={entry.id} onClick={() => { setSummaryOpen(null); setSelectedEntryId(entry.id); }}><span><strong>{financeEntryTitle(entry)}</strong><small>{entry.counterparty}</small></span><strong>{money(paidAmountFor(entry))}</strong></button>)}</div>{!(summaryOpen === 'paid' ? totals.paid : totals.received) && <p className="finance-muted">Записей пока нет.</p>}</>}
@@ -229,7 +229,7 @@ export function FinancePage({ state, actor, role, focusId, onChange, onNavigate,
 
       {actionEntryId && (() => { const entry = state.financeEntries.find((item) => item.id === actionEntryId); if (!entry) return null; const title = actionKind === 'accept' ? 'Фактическая приёмка' : actionKind === 'pay' ? 'Фактическая оплата' : 'Фактическое поступление'; return <Modal title={title} subtitle={`${entry.description} · ${entry.counterparty}`} onClose={() => setActionEntryId(null)}><form className="modal-form" onSubmit={saveAction}>{actionError && <p role="alert" className="form-warning">{actionError}</p>}{actionKind === 'accept' && <Field label="Принятая работа или поставка" hint="Выберите конкретное основание, к которому относится эта сумма"><select required value={actionForm.source} onChange={(event) => setActionForm({ ...actionForm, source: event.target.value })}><option value="">Выберите основание</option>{expenseAcceptanceSources(state, entry).map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}</select></Field>}<div className="finance-action-context"><div><small>Обязательство</small><strong>{money(entry.amount)}</strong></div><div><small>{actionKind === 'accept' ? 'Уже принято' : actionKind === 'receive' ? 'Уже получено' : 'Уже оплачено'}</small><strong>{money(actionKind === 'accept' ? acceptedAmountFor(entry) : paidAmountFor(entry))}</strong></div></div><div className="form-grid"><Field label="Фактическая сумма, ₽"><input required min="0.01" step="0.01" max={financeMoney(actionKind === 'accept' ? entry.amount - acceptedAmountFor(entry) : actionKind === 'pay' ? acceptedAmountFor(entry) - paidAmountFor(entry) : entry.amount - paidAmountFor(entry))} type="number" inputMode="numeric" value={actionForm.amount} onChange={(event) => setActionForm({ ...actionForm, amount: event.target.value })} /></Field><Field label="Фактическая дата"><input required type="date" value={actionForm.date} onChange={(event) => setActionForm({ ...actionForm, date: event.target.value })} /></Field></div><Field label={actionKind === 'accept' ? 'Акт / УПД / ТН' : 'Платёжное поручение / чек'} hint="Документ автоматически попадёт в историю контрагента"><input required value={actionForm.document} onChange={(event) => setActionForm({ ...actionForm, document: event.target.value })} placeholder={actionKind === 'accept' ? 'Акт №…' : 'Платёжное поручение №…'} /></Field><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setActionEntryId(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить факт</button></div></form></Modal>; })()}
 
-      {editingLineId && <Modal title="Изменить статью сметы" subtitle={state.budgetLines.find((item) => item.id === editingLineId)?.name} onClose={() => setEditingLineId(null)}><form className="modal-form" onSubmit={saveLine}><div className="form-grid"><Field label="План, ₽" hint="Утверждённая базовая сумма"><input required min="0" type="number" inputMode="numeric" value={lineForm.plan} onChange={(event) => setLineForm({ ...lineForm, plan: event.target.value })} /></Field><Field label="Прогноз, ₽" hint="Ожидаемый итог с учётом изменений"><input required min="0" type="number" inputMode="numeric" value={lineForm.forecast} onChange={(event) => setLineForm({ ...lineForm, forecast: event.target.value })} /></Field><Field label="Версия сметы"><input value={lineForm.version} onChange={(event) => setLineForm({ ...lineForm, version: event.target.value })} /></Field></div><Field label="Источник плана"><input required value={lineForm.source} onChange={(event) => setLineForm({ ...lineForm, source: event.target.value })} /></Field><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingLineId(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить статью</button></div></form></Modal>}
+      {editingLineId && <Modal title="Изменить статью сметы" subtitle={state.budgetLines.find((item) => item.id === editingLineId)?.name} onClose={() => setEditingLineId(null)}><form className="modal-form" onSubmit={saveLine}>{lineError && <p role="alert" className="form-warning">{lineError}</p>}<div className="form-grid"><Field label="План, ₽" hint="Утверждённая базовая сумма"><input required min="0" step="0.01" type="number" inputMode="decimal" value={lineForm.plan} onChange={(event) => setLineForm({ ...lineForm, plan: event.target.value })} /></Field><Field label="Прогноз, ₽" hint="Ожидаемый итог с учётом изменений"><input required min="0" step="0.01" type="number" inputMode="decimal" value={lineForm.forecast} onChange={(event) => setLineForm({ ...lineForm, forecast: event.target.value })} /></Field><Field label="Версия сметы"><input value={lineForm.version} onChange={(event) => setLineForm({ ...lineForm, version: event.target.value })} /></Field></div><Field label="Источник плана"><input required value={lineForm.source} onChange={(event) => setLineForm({ ...lineForm, source: event.target.value })} /></Field><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingLineId(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить статью</button></div></form></Modal>}
     </div>
   );
 }

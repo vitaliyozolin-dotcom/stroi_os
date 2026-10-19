@@ -2,7 +2,7 @@ import type { AppState, FinanceEntry, UserRole } from '../../entities/index';
 
 export interface FinanceActor { name: string; role: UserRole }
 /** Explicit module context: tasks, marketing, settings and UI state stay outside finance. */
-export type FinanceState = Pick<AppState, 'project' | 'financeEntries' | 'budgetLines' | 'documents' | 'procurement' | 'checkpoints' | 'stages' | 'counterparties'>;
+export type FinanceState = Pick<AppState, 'project' | 'financeEntries' | 'budgetLines' | 'budgetMeta' | 'documents' | 'procurement' | 'checkpoints' | 'stages' | 'counterparties'>;
 export type FinanceAcceptanceContext = Pick<FinanceState, 'procurement' | 'checkpoints' | 'stages'>;
 export interface FinanceFactInput { amount: number; date: string; document: string; source?: string }
 export type FinanceEntryResult = { ok: true; entry: FinanceEntry; changed: boolean } | { ok: false; error: string };
@@ -24,3 +24,13 @@ export function recordPaymentEntry(state: FinanceAcceptanceContext, entry: Finan
 export function recordReceiptEntry(state: FinanceAcceptanceContext, entry: FinanceEntry, input: FinanceFactInput, identity: FinanceActor): FinanceEntryResult;
 /** Validates a private candidate snapshot and stamps authoritative financial facts in place. */
 export function validateFinanceChanges(previous: FinanceState | null, candidate: FinanceState, identity: FinanceActor, timestamp: string): string;
+export interface BudgetLineInput { lineId: string; plan: number; forecast: number; version: string; source: string; expected: string }
+export interface CostClassificationInput { lines: Record<string, import('../../entities/index').CostGroup>; entries: Record<string, import('../../entities/index').CostGroup | ''>; expected: string }
+export interface FinanceDueDateInput { entryId: string; date: string; expected: string }
+export type FinancePlanningResult = { ok: true; changed: boolean; patch: Partial<Pick<AppState, 'budgetLines' | 'budgetMeta' | 'financeEntries'>> } | { ok: false; error: string };
+export function budgetLineSnapshot(state: Pick<AppState, 'budgetLines' | 'budgetMeta'>, lineId: string): string;
+export function classificationSnapshot(state: Pick<AppState, 'budgetLines' | 'financeEntries'>): string;
+export function updateBudgetLine(state: AppState, input: BudgetLineInput, identity: FinanceActor, timestamp: string): FinancePlanningResult;
+export function classifyFinanceCosts(state: AppState, input: CostClassificationInput, identity: FinanceActor): FinancePlanningResult;
+export function setFinanceDueDate(state: AppState, input: FinanceDueDateInput, identity: FinanceActor): FinancePlanningResult;
+export function validateBudgetPlanningChanges(previous: AppState | null, state: AppState, identity: FinanceActor): string;

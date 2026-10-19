@@ -1,11 +1,11 @@
+import type { FinanceDueDateInput, FinanceCommandResult } from '../application';
 import { useState, type FormEvent } from 'react';
 import { ArrowUpRight, CalendarDays } from 'lucide-react';
 import type { AppState, FinanceEntry } from '../entities/index';
-import { financeCalendarItems, financeCalendarTotal, validFinanceDueDate, type FinanceCalendarGroup } from '../domain/finance-calendar';
+import { financeCalendarItems, financeCalendarTotal, type FinanceCalendarGroup } from '../domain/finance-calendar';
 import { needsExpenseApproval } from '../domain/expense-workflow';
 import { formatDate, money } from '../presentation/formatting';
 import { financeEntryTitle } from '../presentation/finance-view';
-import { uid } from '../infrastructure/runtime';
 import './finance-payment-calendar.css';
 
 const groups: { id: FinanceCalendarGroup; title: string }[] = [
@@ -15,8 +15,8 @@ const groups: { id: FinanceCalendarGroup; title: string }[] = [
   { id: 'undated', title: 'Без даты' },
 ];
 
-export function FinancePaymentCalendar({ state, actor, onChange, onOpenEntry, onAddEntry }: {
-  state: AppState; actor: string; onChange: (next: AppState) => void; onOpenEntry: (id: string) => void;
+export function FinancePaymentCalendar({ state, onSetDueDate, onOpenEntry, onAddEntry }: {
+  state: AppState; onSetDueDate: (input: FinanceDueDateInput) => FinanceCommandResult; onOpenEntry: (id: string) => void;
   onAddEntry: (kind: 'expense' | 'income') => void;
 }) {
   const [kind, setKind] = useState<'expense' | 'income'>('expense');
@@ -31,16 +31,8 @@ export function FinancePaymentCalendar({ state, actor, onChange, onOpenEntry, on
   const saveDate = (event: FormEvent) => {
     event.preventDefault();
     if (!editing) return;
-    const entry = state.financeEntries.find(item => item.id === editing.id);
-    if (!entry || JSON.stringify(entry) !== editing.snapshot) { setError('Запись обновилась. Закройте выбор даты и откройте заново.'); return; }
-    if (editing.value && !validFinanceDueDate(editing.value)) { setError('Укажите корректную дату.'); return; }
-    const dueDate = editing.value || undefined;
-    if (dueDate === entry.dueDate) { setEditing(null); return; }
-    const now = new Date().toISOString();
-    onChange({ ...state,
-      financeEntries: state.financeEntries.map(item => item.id === entry.id ? { ...item, dueDate } : item),
-      activity: [{ id: uid('activity'), timestamp: now, actor, text: `${dueDate ? `Плановая дата ${kind === 'expense' ? 'выплаты' : 'поступления'}: ${formatDate(dueDate, true)}` : 'Плановая дата платежа снята'} · ${entry.description}`, tone: 'neutral' }, ...state.activity],
-    });
+    const result = onSetDueDate({ entryId: editing.id, date: editing.value, expected: editing.snapshot });
+    if (!result.ok) { setError(result.error); return; }
     setEditing(null);
   };
   return <section className="finance-calendar" aria-label="Платёжный календарь">

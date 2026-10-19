@@ -1,16 +1,18 @@
+import type { CostClassificationInput, FinanceCommandResult } from '../application';
+import { classificationSnapshot } from '../domain/finance/index.js';
 import { useState, type FormEvent } from 'react';
 import type { AppState, CostGroup } from '../entities/index';
 import { costGroups, costGroupLabels, costGroupTotals } from '../domain/cost-groups';
 import { money } from '../presentation/formatting';
 import { Modal } from './Ui';
 
-export function CostGroups({ state, onChange, compact = false }: { state: AppState; onChange?: (state: AppState) => void; compact?: boolean }) {
+export function CostGroups({ state, onClassify, compact = false }: { state: AppState; onClassify?: (input: CostClassificationInput) => FinanceCommandResult; compact?: boolean }) {
   const [editing, setEditing] = useState(false);
   const totals = costGroupTotals(state);
   const totalPlan = costGroups.reduce((sum, group) => sum + totals[group].plan, 0);
   const totalPaid = costGroups.reduce((sum, group) => sum + totals[group].paid, 0);
   return <section className={`cost-groups ${compact ? 'cost-groups--compact' : 'panel'}`} aria-label="Строительные и накладные расходы">
-    <div className="cost-groups__head"><h2>Бюджет и расходы</h2>{onChange && <button type="button" className="text-button" onClick={() => setEditing(true)}>Распределить</button>}</div>
+    <div className="cost-groups__head"><h2>Бюджет и расходы</h2>{onClassify && <button type="button" className="text-button" onClick={() => setEditing(true)}>Распределить</button>}</div>
     <table className="cost-groups__table" aria-label="План и оплаты по категориям">
       <thead><tr><th scope="col">Категория</th><th scope="col">План по смете</th><th scope="col">Оплачено</th></tr></thead>
       <tbody>{costGroups.map(group => <tr key={group}>
@@ -21,18 +23,18 @@ export function CostGroups({ state, onChange, compact = false }: { state: AppSta
     </table>
     <p className="cost-groups__note">Резерв — часть плана. Смешанные статьи пока не распределены.</p>
     {!compact && <p className="muted">Строительство — материалы, монтаж и работы на объекте. Накладные — административные расходы. План берётся из статей сметы, оплачено — из реестра платежей.</p>}
-    {editing && onChange && <ClassificationEditor state={state} onChange={onChange} onClose={() => setEditing(false)} />}
+    {editing && onClassify && <ClassificationEditor state={state} onClassify={onClassify} onClose={() => setEditing(false)} />}
   </section>;
 }
-function ClassificationEditor({ state, onChange, onClose }: { state: AppState; onChange: (state: AppState) => void; onClose: () => void }) {
+function ClassificationEditor({ state, onClassify, onClose }: { state: AppState; onClassify: (input: CostClassificationInput) => FinanceCommandResult; onClose: () => void }) {
   const [lines, setLines] = useState<Record<string, CostGroup>>(() => Object.fromEntries(state.budgetLines.map(line => [line.id, line.costGroup ?? 'unallocated'])));
   const [entries, setEntries] = useState<Record<string, CostGroup | ''>>(() => Object.fromEntries(state.financeEntries.filter(e => e.kind === 'expense').map(e => [e.id, e.costGroup ?? ''])));
-  const [opened] = useState(() => JSON.stringify([state.budgetLines, state.financeEntries]));
+  const [opened] = useState(() => classificationSnapshot(state));
   const [error, setError] = useState('');
   const save = (event: FormEvent) => {
     event.preventDefault();
-    if (JSON.stringify([state.budgetLines, state.financeEntries]) !== opened) { setError('Данные обновились. Откройте распределение заново.'); return; }
-    onChange({ ...state, budgetLines: state.budgetLines.map(line => ({ ...line, costGroup: lines[line.id] })), financeEntries: state.financeEntries.map(e => e.kind === 'expense' ? { ...e, costGroup: entries[e.id] || undefined } : e) });
+    const result = onClassify({ lines, entries, expected: opened });
+    if (!result.ok) { setError(result.error); return; }
     onClose();
   };
   return <Modal title="Строительство и накладные" subtitle="Меняется только категория. Суммы, документы и оплаты сохраняются." onClose={onClose}>

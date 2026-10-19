@@ -22,8 +22,18 @@ test('finance commands go through the domain and preserve the existing revision-
   assert.match(page, /finance\.approveExpense\(entry\.id\)/);
   assert.match(page, /finance\.recordPayment\(input\)/);
   assert.match(page, /finance\.createCommitment\(/);
+  assert.match(page, /finance\.updateBudgetLine\(/);
+  assert.doesNotMatch(page, /budgetLines:|budgetMeta:/);
   assert.doesNotMatch(page, /financeEntries:/);
   assert.doesNotMatch(page, /approvedAt:|acceptedAmount:|paidAmount:/);
+});
+
+test('classification and calendar editors submit commands without assembling financial state', () => {
+  const groups = source('src/components/CostGroups.tsx');
+  const calendar = source('src/components/FinancePaymentCalendar.tsx');
+  assert.match(groups, /onClassify\(\{ lines, entries, expected: opened \}\)/);
+  assert.match(calendar, /onSetDueDate\(\{ entryId: editing\.id, date: editing\.value, expected: editing\.snapshot \}\)/);
+  assert.doesNotMatch(groups + calendar, /financeEntries:|budgetLines:|dueDateHistory:|new Date\(\)\.toISOString\(\)/);
 });
 
 test('HTTP and Telegram share authoritative financial policy through the public domain module', () => {

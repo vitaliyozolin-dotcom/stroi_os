@@ -18,7 +18,6 @@ const pageCommand = (action: string, summary: string): PageCommandFactory =>
     sink,
   );
 
-export const createFinanceCommands = pageCommand('finance_updated', 'Обновлены финансы проекта');
 export const createCounterpartyCommands = pageCommand('counterparty_updated', 'Обновлены контрагенты проекта');
 export const createScheduleCommands = pageCommand('schedule_updated', 'Обновлён график проекта');
 export const createProcurementCommands = pageCommand('procurement_updated', 'Обновлено снабжение проекта');

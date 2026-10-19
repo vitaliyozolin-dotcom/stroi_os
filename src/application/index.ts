@@ -1,9 +1,13 @@
 export { commitStateChange, createMutationContext, createPageStateSink } from './state-change.ts';
 export { approveProjectExpense, acceptProjectExpense, recordProjectPayment, recordProjectReceipt, createFinanceUseCases } from './finance.ts';
 export type { FinanceCommandResult } from './finance.ts';
+export { editProjectBudgetLine, classifyProjectCosts, setProjectPaymentDueDate } from './finance-planning.ts';
+export type { BudgetLineInput, CostClassificationInput, FinanceDueDateInput } from '../domain/finance/index.js';
+export { importProjectFinanceHistory, historyImportSnapshot } from './finance-history.ts';
+export type { HistoryImportCommand, HistoryImportCommandResult } from './finance-history.ts';
 export { createProjectCommitment } from './finance-commitment.js';
 export type { CreateCommitmentInput, CreateCommitmentResult } from './finance-commitment.js';
-export { createClientDecisionCommands, createCounterpartyCommands, createFinanceCommands, createMarketingCommands, createProcurementCommands, createProjectDocumentCommands, createScheduleCommands, createSettingsCommands } from './page-commands.ts';
+export { createClientDecisionCommands, createCounterpartyCommands, createMarketingCommands, createProcurementCommands, createProjectDocumentCommands, createScheduleCommands, createSettingsCommands } from './page-commands.ts';
 export { applyLocalChange, applyRemoteSnapshot, createSyncModel, reconcileRemoteSnapshot, reconcileRevisionConflict, reconcileSavedSnapshot } from './project-sync.ts';
 export type { RemoteReconciliation, SaveReconciliation, SyncModel, SyncSnapshot } from './project-sync.ts';
 export { applyProjectRemote, createProjectWorkflow, flushProjectChanges, hydrateProject, keepProjectLocalVersion, retryProjectSync, switchProjectWorkflow, useProjectServerVersion } from './project-sync-workflow.ts';

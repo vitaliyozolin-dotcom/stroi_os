@@ -1,3 +1,4 @@
+import type { CostClassificationInput, FinanceCommandResult } from '../application';
 import { ChevronDown, ChevronRight, Upload } from 'lucide-react';
 import type { AppState, BudgetLine, CostGroup } from '../entities/index';
 import { financeTotals, lineForecast, lineTotals, paidAmountFor, sourceEstimateTotals, unallocatedExpenses, unallocatedExpenseTotals } from '../domain/index';
@@ -8,7 +9,7 @@ import './finance-budget-panel.css';
 
 type FinanceBudgetPanelProps = {
   state: AppState;
-  onChange: (next: AppState) => void;
+  onClassify: (input: CostClassificationInput) => FinanceCommandResult;
   onOpenLine: (id: string) => void;
   onOpenUnallocated: () => void;
   onImport: () => void;
@@ -36,7 +37,7 @@ function BudgetLineRow({ state, line, onOpen }: { state: AppState; line: BudgetL
   </button>;
 }
 
-export function FinanceBudgetPanel({ state, onChange, onOpenLine, onOpenUnallocated, onImport }: FinanceBudgetPanelProps) {
+export function FinanceBudgetPanel({ state, onClassify, onOpenLine, onOpenUnallocated, onImport }: FinanceBudgetPanelProps) {
   const totals = financeTotals(state);
   const groups = costGroupTotals(state);
   const source = sourceEstimateTotals(state.budgetLines);
@@ -111,7 +112,7 @@ export function FinanceBudgetPanel({ state, onChange, onOpenLine, onOpenUnalloca
       </details>
       <details className="money-budget__reference">
         <summary>Распределение строительства и накладных<ChevronDown size={15} /></summary>
-        <div className="money-budget__reference-body"><CostGroups state={state} onChange={onChange} compact /></div>
+        <div className="money-budget__reference-body"><CostGroups state={state} onClassify={onClassify} compact /></div>
       </details>
     </div>
   </section>;

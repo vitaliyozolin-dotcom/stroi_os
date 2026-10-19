@@ -7,10 +7,13 @@ import {
 import type { Clock, IdGenerator } from './ports';
 import { commitStateChange, type StateChangeSink } from './state-change.ts';
 import { createProjectCommitment, type CreateCommitmentInput } from './finance-commitment.js';
+import { editProjectBudgetLine, classifyProjectCosts, setProjectPaymentDueDate } from './finance-planning.ts';
+import type { BudgetLineInput, CostClassificationInput, FinanceDueDateInput } from '../domain/finance/index.js';
+import { importProjectFinanceHistory, type HistoryImportCommand } from './finance-history.ts';
 
 export type FinanceCommandResult = { ok: true; change: StateChange | null } | { ok: false; error: string };
 type FactCommand = FinanceFactInput & { entryId: string };
-interface FinanceCommandContext { identity: FinanceActor; clock: Clock; ids: IdGenerator }
+export interface FinanceCommandContext { identity: FinanceActor; clock: Clock; ids: IdGenerator }
 const missingEntry = (): FinanceCommandResult => ({ ok: false, error: 'Финансовая операция не найдена. Обновите список.' });
 const money = (value: number) => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
 
@@ -69,6 +72,10 @@ export const createFinanceUseCases = (state: AppState, identity: FinanceActor, c
     return result;
   };
   return {
+    importHistory: (input: HistoryImportCommand) => commit(importProjectFinanceHistory(state, input, context)),
+    updateBudgetLine: (input: BudgetLineInput) => commit(editProjectBudgetLine(state, input, context)),
+    classifyCosts: (input: CostClassificationInput) => commit(classifyProjectCosts(state, input, context)),
+    setDueDate: (input: FinanceDueDateInput) => commit(setProjectPaymentDueDate(state, input, context)),
     createCommitment: (input: CreateCommitmentInput) => commit(createProjectCommitment(state, input, context)),
     approveExpense: (entryId: string) => commit(approveProjectExpense(state, entryId, context)),
     acceptExpense: (input: FactCommand) => commit(acceptProjectExpense(state, input, context)),

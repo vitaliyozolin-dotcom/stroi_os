@@ -1,8 +1,11 @@
 import { cents, recordedAcceptedAmount as accepted, recordedPaidAmount as paid, text, validDate, hasFinanceAcceptanceSource } from './policy.js';
+import { validateBudgetPlanningChanges } from './planning.js';
 
 // Validate changed facts only: old records remain readable and unrelated saves do
 // not rewrite historical amounts. Role filtering occurs before this boundary.
 export const validateFinanceChanges = (previous, state, identity, now) => {
+  const budgetError = validateBudgetPlanningChanges(previous, state, identity);
+  if (budgetError) return budgetError;
   const groups = ['construction', 'overhead', 'reserve', 'unallocated'];
   for (const collection of ['budgetLines', 'financeEntries']) {
     const oldRecords = new Map((previous?.[collection] ?? []).map(row => [row.id, row]));
