@@ -713,9 +713,20 @@ project:
     approved_by: "Виталий Озолин"
     source: "Сделай так, чтоб выглядело как приложение; скриншот мобильной главной"
     scope: ["мобильная шапка с утвержденным знаком", "карточки показателей и бюджет", "нижняя навигация и safe area", "инструкция установки на главный экран"]
-    implementation_status: prepared
+    implementation_status: deployed_verified
     owner: "Скай"
     deadline: "2026-10-19"
     acceptance: ["375/390/430 px без обрезки значений", "ссылки разделов и установка работают", "desktop сохраняет компоновку", "данные и расчеты не изменены", "штатная сборка и проверка действующего выпуска"]
     limitation: "Панели браузера исчезают при запуске установленной иконки; сайт не может убрать их внутри Safari"
-    next_step: "Проверить мобильную компоновку и выпустить штатным deploy"
+    next_step: "Владельцу добавить иконку через Safari и открыть её на iPhone; установка требует действия на устройстве"
+    deployed_sha: "9ea30c5df751aa12885ecbc3e4cc04cee4ff28c0"
+    production_url: "https://stroios-188-225-38-55.sslip.io"
+    verification:
+      build: "338 tests: 335 passed, 0 failed, 3 skipped; TypeScript и Vite прошли"
+      browser: "Действующий адрес: 320/375/390/430px, desktop 1440px; суммы без обрезки, фиксированная шапка, переходы вкладок, установка iPhone и скрытие установки в standalone"
+      state: "Финансовый текст сохранен; в проверке не было записей в API и ошибок JS"
+      evidence: "/var/lib/stroios-deploy/evidence/mobile-app-20261019"
+      deployment: "STROIOS_DEPLOY_OK, Telegram ready; штатная резервная копия и откат сохранены"
+      physical_iphone_install: "Не выполнялась; проверена инструкция и браузерная эмуляция"
+    backup: "/var/backups/stroios/20261019T105820Z-74474353d6.wiTVp9"
+    previous_release: "c1ae557d96b573bb026a6bca0f3c97b4e6c5c8f6"
