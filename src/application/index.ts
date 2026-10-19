@@ -1,4 +1,6 @@
 export { commitStateChange, createMutationContext, createPageStateSink } from './state-change.ts';
+export { createCounterpartyUseCases, saveProjectCounterparty } from './counterparties.ts';
+export type { SaveCounterpartyInput, CounterpartyCommandResult } from './counterparties.ts';
 export { approveProjectExpense, acceptProjectExpense, recordProjectPayment, recordProjectReceipt, createFinanceUseCases } from './finance.ts';
 export type { FinanceCommandResult } from './finance.ts';
 export { editProjectBudgetLine, classifyProjectCosts, setProjectPaymentDueDate } from './finance-planning.ts';
