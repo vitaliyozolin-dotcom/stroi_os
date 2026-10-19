@@ -14,10 +14,10 @@ export function CostGroups({ state, onChange, compact = false }: { state: AppSta
     <table className="cost-groups__table" aria-label="План и оплаты по категориям">
       <thead><tr><th scope="col">Категория</th><th scope="col">План по смете</th><th scope="col">Оплачено</th></tr></thead>
       <tbody>{costGroups.map(group => <tr key={group}>
-        <th scope="row">{costGroupLabels[group]}</th><td>{money(totals[group].plan)}</td>
-        <td>{group === 'reserve' ? <span aria-label="Резерв не является расходом">—</span> : money(totals[group].paid)}</td>
+        <th scope="row">{costGroupLabels[group]}</th><td data-label="План по смете">{money(totals[group].plan)}</td>
+        <td data-label="Оплачено">{group === 'reserve' ? <span aria-label="Резерв не является расходом">—</span> : money(totals[group].paid)}</td>
       </tr>)}</tbody>
-      <tfoot><tr><th scope="row">Всего</th><td>{money(totalPlan)}</td><td>{money(totalPaid)}</td></tr></tfoot>
+      <tfoot><tr><th scope="row">Всего</th><td data-label="План по смете">{money(totalPlan)}</td><td data-label="Оплачено">{money(totalPaid)}</td></tr></tfoot>
     </table>
     <p className="cost-groups__note">Резерв — часть плана. Смешанные статьи пока не распределены.</p>
     {!compact && <p className="muted">Строительство — материалы, монтаж и работы на объекте. Накладные — административные расходы. План берётся из статей сметы, оплачено — из реестра платежей.</p>}

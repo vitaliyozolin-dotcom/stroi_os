@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router';
 import App from './App';
 import './styles.css';
 import './dashboard-refinement.css';
+import './mobile-app.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

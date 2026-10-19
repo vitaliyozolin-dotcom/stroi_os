@@ -30,6 +30,7 @@ import {
   WalletCards,
   X,
 } from 'lucide-react';
+import { AppInstall } from './components/AppInstall';
 import { HelpCenter } from './components/HelpCenter';
 import { QuestionRegistry } from './components/QuestionRegistry';
 import { Field, Modal, StatusBadge } from './components/Ui';
@@ -273,6 +274,7 @@ function App() {
         </nav>
 
         {role === 'management' && <div className="sidebar__footer"><Link to={workspacePath(state.project.id, 'settings')} data-tour="nav-settings" title="Настройки" className={page === 'settings' ? 'active' : ''} aria-current={page === 'settings' ? 'page' : undefined}><Settings2 size={18} /><span>Настройки</span></Link></div>}
+        <AppInstall />
         <button type="button" className="sidebar-toggle" onClick={() => setSidebarCollapsed((value) => !value)} aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'}><PanelLeftClose size={18} strokeWidth={1.6} /><span>Свернуть меню</span></button>
       </aside>
 
@@ -280,6 +282,7 @@ function App() {
         <header className="topbar">
           <div className="topbar__left">
             <button type="button" className="mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="Открыть меню"><Menu size={21} /></button>
+            <div className="mobile-app-title"><img src="/brand/ikioma-mark-20261019.png" alt="" width="20" height="24" /><span><strong>ИКИОМА</strong><small>{pageLabels[page]}</small></span></div>
             <div className="breadcrumbs"><span>{state.project.code}</span><i>/</i><strong>{pageLabels[page]}</strong></div>
           </div>
           <div className="topbar__right">
@@ -287,6 +290,7 @@ function App() {
               type="button"
               className={`sync-chip sync-chip--${sync.phase}`}
               onClick={sync.phase === 'offline' ? retry : undefined}
+              aria-label={sync.message ?? syncLabels[sync.phase]}
               title={sync.message ?? `${syncLabels[sync.phase]} · ревизия ${sync.revision}`}
             >
               {sync.phase === 'loading' || sync.phase === 'saving'
@@ -341,7 +345,7 @@ function App() {
         </main>
       </div>
 
-      <nav className="mobile-bottom-nav">
+      <nav className="mobile-bottom-nav" aria-label="Разделы приложения">
         {navigation.slice(0, role === 'management' ? 5 : 4).map((item) => {
           const Icon = item.icon;
           return <Link to={workspacePath(state.project.id, item.id)} key={item.id} className={page === item.id ? 'active' : ''} aria-current={page === item.id ? 'page' : undefined}><Icon size={20} /><span>{item.label.split(' ')[0]}</span></Link>;
