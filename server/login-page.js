@@ -47,7 +47,8 @@ export const loginPage = ({ username = '', error = '', blocked = false, notice =
     }
     @media(max-width:360px){.identity{padding-left:20px;padding-right:20px}.entry{padding-left:20px;padding-right:20px}h1{font-size:31px}}
     @media(max-width:760px) and (max-height:700px){.identity{padding-top:max(20px,env(safe-area-inset-top));padding-bottom:20px}.mobile-note{margin-top:12px}.entry{padding-top:26px}.eyebrow{margin-bottom:14px}.intro{margin-bottom:22px}.foot{margin-top:24px}}
-    .brand .mark{background:transparent;border-radius:0}.brand .mark img{display:block;width:auto;height:100%;object-fit:contain}.brand{letter-spacing:0}.brand em{color:#e77c38}
+    .brand .mark{background:transparent;border-radius:0}.brand .mark img{display:block;width:32px;height:38px;object-fit:contain}.brand{letter-spacing:0}.brand em{color:#e77c38}
+    @media(max-width:760px){.brand .mark img{width:28px;height:34px}}
   </style>
 </head>
 <body>
