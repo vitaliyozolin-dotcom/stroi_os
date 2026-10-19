@@ -10,6 +10,7 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   const outbox = source('sites/telegram/outbox.js');
   const inbox = source('sites/telegram/inbox.js');
   const drafts = source('sites/telegram/drafts.js');
+  const attachmentDrafts = source('sites/telegram/attachment-drafts.js');
   const bindings = source('sites/telegram/bindings.js');
   const commands = source('sites/telegram/commands.js');
   const connection = source('sites/telegram/connection.js');
@@ -23,6 +24,7 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.ok(worker.includes("from './telegram/inbox.js'"));
   assert.ok(worker.includes("from './telegram/outbox.js'"));
   assert.ok(worker.includes("from './telegram/drafts.js'"));
+  assert.ok(worker.includes("from './telegram/attachment-drafts.js'"));
   assert.ok(worker.includes("from './telegram/bindings.js'"));
   assert.ok(worker.includes("from './telegram/commands.js'"));
   assert.ok(worker.includes("from './telegram/connection.js'"));
@@ -47,6 +49,8 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.doesNotMatch(worker, /const telegramTaskDraft/);
   assert.doesNotMatch(worker, /const telegramExpenseDraft/);
   assert.doesNotMatch(worker, /const telegramNoteDraft/);
+  assert.doesNotMatch(worker, /const telegramAttachmentDraft = async/);
+  assert.doesNotMatch(worker, /const telegramAttachmentPayload =/);
   assert.doesNotMatch(worker, /INSERT INTO telegram_chat_candidates/);
   assert.doesNotMatch(worker, /UPDATE project_state[\s\S]*updated_role/);
   assert.doesNotMatch(worker, /const applyBattleAutomations/);
@@ -59,6 +63,8 @@ test('Telegram transport, durable outbox, inbox, drafts and bindings are isolate
   assert.match(drafts, /export const readTelegramDraft/);
   assert.match(drafts, /export const claimTelegramDraft/);
   assert.match(drafts, /export const assertTelegramDraftLease/);
+  assert.match(attachmentDrafts, /export const createTelegramAttachmentDrafts/);
+  assert.match(attachmentDrafts, /\['doc', 'report'\]\.includes/);
   assert.match(drafts, /WHERE id = \? AND telegram_user_id = \? AND chat_id = \? AND status = 'draft' AND updated_at = \?/);
   assert.match(bindings, /WHERE telegram_user_id = \? AND chat_id = \?/);
   assert.match(bindings, /ON CONFLICT\(telegram_user_id, chat_id\) DO UPDATE SET/);

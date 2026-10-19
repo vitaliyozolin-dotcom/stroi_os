@@ -82,9 +82,9 @@ import { createTelegramProjectStore } from './telegram/project-store.js';
 import { createTelegramWebhookHandler } from './telegram/webhook.js';
 import { createTelegramReadCommands } from './telegram/read-commands.js';
 import { createTelegramWriteDrafts } from './telegram/write-drafts.js';
+import { createTelegramAttachmentDrafts } from './telegram/attachment-drafts.js';
 import {
   renderExpenseDraft,
-  renderFileDraft,
   renderTaskDraft,
   taskActionMarkup,
   taskStatusLabel,
@@ -547,17 +547,6 @@ const telegramDisplayName = (from) => clean([from?.first_name, from?.last_name].
   || clean(from?.username, 120)
   || `Telegram ${String(from?.id ?? '')}`;
 
-const categoryFromDocument = (name, caption) => {
-  const source = `${clean(name, 240)} ${clean(caption, 500)}`.toLocaleLowerCase('ru');
-  if (source.includes('договор')) return ['contract', 'Договор'];
-  if (source.includes('акт')) return ['act', 'Акт'];
-  if (source.includes('упд')) return ['upd', 'УПД'];
-  if (source.includes('наклад') || /\bтн\b/.test(source)) return ['waybill', 'ТН'];
-  if (source.includes('счёт') || source.includes('счет')) return ['invoice', 'Счёт'];
-  if (source.includes('специф')) return ['specification', 'Спецификация'];
-  return ['other', 'Прочее'];
-};
-
 const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uploadedBy, draftId) => {
   const metadataResponse = await telegramRequest(env.TELEGRAM_BOT_TOKEN, 'getFile', { file_id: fileId });
   const metadataBody = await parseTelegramBody(metadataResponse);
@@ -770,6 +759,11 @@ const telegramWriteDrafts = createTelegramWriteDrafts({
   renderExpenseDraft,
   renderTaskDraft,
 });
+const telegramAttachmentDrafts = createTelegramAttachmentDrafts({
+  createDraft: createTelegramDraft,
+  projectForBinding,
+  telegramBotUsername,
+});
 
 
 const telegramProjectsForBindings = async (env, bindings) => {
@@ -811,47 +805,6 @@ const telegramSelectProject = async (message, binding, env, options = {}) => {
     },
   });
 };
-
-const telegramAttachmentDraft = async (message, binding, env) => {
-  const { snapshot } = await projectForBinding(env, binding);
-  const caption = clean(message.caption, 1200);
-  const captionCommand = commandFromText(caption);
-  const isPrivate = message.chat?.type === 'private';
-  if (!isPrivate && !telegramCommandTargetsBot(captionCommand, await telegramBotUsername(env))) return;
-  if (!isPrivate && !['doc', 'report'].includes(captionCommand?.name)) return;
-  const document = message.document;
-  const photo = Array.isArray(message.photo) ? message.photo.at(-1) : null;
-  const voice = message.voice;
-  const source = document ?? photo ?? voice;
-  if (!source?.file_id) return;
-  const kind = captionCommand?.name === 'doc' || (document && captionCommand?.name !== 'report') ? 'document' : 'field_report';
-  const fallbackName = document?.file_name
-    || (voice ? `Голосовой отчёт ${dateKey()}.ogg` : `Фотоотчёт ${dateKey()}.jpg`);
-  const [category, typeLabel] = categoryFromDocument(fallbackName, caption);
-  const note = clean(captionCommand?.body || caption, 1000);
-  const draft = await createTelegramDraft(env.DB, String(message.from.id), String(message.chat.id), binding.project_id, kind, {
-    projectName: snapshot.state.project?.name ?? snapshot.state.project?.code ?? binding.project_id,
-    telegramFileId: source.file_id,
-    fileName: fallbackName,
-    mimeType: clean(document?.mime_type || voice?.mime_type || (photo ? 'image/jpeg' : ''), 120),
-    fileSize: Number(document?.file_size || voice?.file_size || photo?.file_size) || 0,
-    note,
-    category,
-    typeLabel,
-    telegramMessageId: String(message.message_id ?? ''),
-  }, String(message.message_id ?? ''));
-  const card = renderFileDraft(draft);
-  await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, card.text, { reply_markup: card.replyMarkup });
-};
-
-const telegramAttachmentPayload = (message) => ({
-  message_id: message.message_id,
-  caption: clean(message.caption, 1200),
-  chat: { id: message.chat.id, type: message.chat.type },
-  document: message.document ?? null,
-  photo: message.photo ?? null,
-  voice: message.voice ?? null,
-});
 
 const TELEGRAM_WRITE_COMMANDS = new Set(['task', 'note', 'expense']);
 
@@ -976,12 +929,12 @@ const telegramHandleMessage = async (message, env) => {
     if (bindings.length > 1) {
       await telegramSelectProject(message, binding, env, {
         bindings,
-        pending: { type: 'attachment', message: telegramAttachmentPayload(message) },
+        pending: { type: 'attachment', message: telegramAttachmentDrafts.payload(message) },
         prompt: 'К какому проекту относится этот файл или отчёт?',
       });
       return;
     }
-    await telegramAttachmentDraft(message, binding, env);
+    await telegramAttachmentDrafts.prepare(message, binding, env);
     return;
   }
   if (command) {
@@ -1521,7 +1474,7 @@ const telegramHandleCallback = async (callback, env) => {
           message_id: pending.sourceMessageId || callback.message.message_id,
         }, selectedBinding, pending.command, env, { bindings, projectConfirmed: true });
       } else if (pending?.type === 'attachment' && pending.message) {
-        await telegramAttachmentDraft({ ...pending.message, chat: callback.message.chat, from: callback.from }, selectedBinding, env);
+        await telegramAttachmentDrafts.prepare({ ...pending.message, chat: callback.message.chat, from: callback.from }, selectedBinding, env);
       }
       // Selection remains resumable until the child draft/card is created.
       // If Telegram or storage fails above, runClaimed releases it for retry.
