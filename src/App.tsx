@@ -1,5 +1,7 @@
 import { requestApi } from './infrastructure/api-http';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router';
+import { WorkspacePages } from './presentation/WorkspacePages';
 import {
   AlertTriangle,
   Bell,
@@ -28,22 +30,11 @@ import {
   WalletCards,
   X,
 } from 'lucide-react';
-import { ClientPage } from './pages/ClientPage';
-import { FinancePage } from './pages/FinancePage';
-import { MarketingPage } from './pages/MarketingPage';
-import { OverviewPage } from './pages/OverviewPage';
-import { ProcurementPage } from './pages/ProcurementPage';
-import { QualityPage } from './pages/QualityPage';
-import { SchedulePage } from './pages/SchedulePage';
-import { SettingsPage } from './pages/SettingsPage';
-import { CounterpartiesPage } from './pages/CounterpartiesPage';
-import { TasksPage } from './pages/TasksPage';
-import { ProjectPage } from './pages/ProjectPage';
 import { HelpCenter } from './components/HelpCenter';
 import { QuestionRegistry } from './components/QuestionRegistry';
 import { Field, Modal, StatusBadge } from './components/Ui';
 import type { AuthenticatedUser, UserRole } from './entities/index';
-import type { PageId } from './presentation/navigation';
+import { allowedPages, pageLabels, readWorkspaceRoute, workspacePath, type PageId } from './presentation/navigation';
 import { useProjectState, type SyncPhase } from './useProjectState';
 import { createProjectState } from './seed';
 import { isTaskOverdue, projectProgressTotals } from './domain/index';
@@ -56,20 +47,6 @@ const roleLabels: Record<UserRole, string> = {
   management: 'Управление',
   foreman: 'Прораб',
   client: 'Клиент',
-};
-
-const pageLabels: Record<PageId, string> = {
-  overview: 'Главная',
-  project: 'Карточка проекта',
-  tasks: 'Задачи',
-  marketing: 'Маркетинг',
-  counterparties: 'Подрядчики и поставщики',
-  finance: 'Финансы',
-  schedule: 'График работ',
-  procurement: 'Снабжение',
-  quality: 'Контроль качества',
-  client: 'Кабинет клиента',
-  settings: 'Настройки',
 };
 
 const fullNavigation: Array<{ id: PageId; label: string; icon: typeof LayoutDashboard }> = [
@@ -103,11 +80,14 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((part) 
 function App() {
   const todayKey = new Date().toISOString().slice(0, 10);
   const [role, setRole] = useState<UserRole>('client');
-  const [page, setPage] = useState<PageId>('overview');
+  const location = useLocation();
+  const changeLocation = useNavigate();
+  const route = useMemo(() => readWorkspaceRoute(location.pathname, location.search), [location.pathname, location.search]);
+  const page = route.page ?? (role === 'client' ? 'client' : 'overview');
   const [session, setSession] = useState<AuthenticatedUser | null>(null);
   const [sessionError, setSessionError] = useState('');
-  const [focusEntityId, setFocusEntityId] = useState<string | null>(null);
-  const deepLinkApplied = useRef(false);
+  const focusEntityId = route.entityId;
+  const attemptedProject = useRef<string | null>(null);
   const {
     state,
     updateState,
@@ -140,20 +120,6 @@ function App() {
         if (!active) return;
         setSession(body.user);
         setRole(body.user.role);
-        const params = new URLSearchParams(window.location.search);
-        const requestedPage = params.get('page') as PageId | null;
-        const requestedProject = params.get('projectId');
-        const allowed = body.user.role === 'client'
-          ? ['client']
-          : body.user.role === 'foreman'
-            ? ['overview', 'project', 'tasks', 'schedule', 'procurement', 'quality']
-            : Object.keys(pageLabels).filter((item) => item !== 'client');
-        setPage(requestedPage && allowed.includes(requestedPage) ? requestedPage : body.user.role === 'client' ? 'client' : 'overview');
-        setFocusEntityId(params.get('entity'));
-        if (!deepLinkApplied.current && requestedProject && requestedProject !== 'ikioma-sales' && requestedProject !== state.project.id) {
-          deepLinkApplied.current = true;
-          await switchProject(requestedProject);
-        }
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -166,7 +132,6 @@ function App() {
             isOwner: true,
           });
           setRole('management');
-          setPage('overview');
           return;
         }
         setSessionError(error instanceof Error && error.message === 'access_not_assigned'
@@ -204,6 +169,36 @@ function App() {
     };
   }, [session]);
 
+  useEffect(() => {
+    if (!session || !route.valid) return;
+    if (sync.phase === 'saving' || sync.phase === 'conflict') {
+      attemptedProject.current = null;
+      return;
+    }
+    if (sync.phase === 'loading') return;
+    if (!allowedPages(role).includes(page)) {
+      void changeLocation(workspacePath(route.projectId ?? state.project.id, role === 'client' ? 'client' : 'overview'), { replace: true });
+      return;
+    }
+    if (route.projectId && route.projectId !== state.project.id) {
+      if (attemptedProject.current === route.projectId) return;
+      attemptedProject.current = route.projectId;
+      void switchProject(route.projectId);
+      return;
+    }
+    attemptedProject.current = null;
+    if (location.pathname === '/') {
+      void changeLocation(workspacePath(state.project.id, page, route.entityId), { replace: true });
+    }
+  }, [session, role, page, route, state.project.id, sync.phase, switchProject, changeLocation, location.pathname]);
+
+  useEffect(() => {
+    setMobileMenu(false);
+    setProfileOpen(false);
+    document.title = `${pageLabels[page]} · ИКИОМА ОС`;
+    document.getElementById('workspace-page')?.focus();
+  }, [location.key, page]);
+
   const navigation = useMemo(() => {
     if (role === 'client') return fullNavigation.filter((item) => item.id === 'client');
     if (role === 'foreman') return fullNavigation.filter((item) => ['overview', 'project', 'tasks', 'schedule', 'procurement', 'quality'].includes(item.id));
@@ -221,32 +216,12 @@ function App() {
 
   const navigate = (nextPage: PageId, entityId?: string) => {
     setProfileOpen(false);
-    setPage(nextPage);
-    setFocusEntityId(entityId ?? null);
     setMobileMenu(false);
-    const url = new URL(window.location.href);
-    url.searchParams.set('projectId', state.project.id);
-    url.searchParams.set('page', nextPage);
-    if (entityId) url.searchParams.set('entity', entityId);
-    else url.searchParams.delete('entity');
-    window.history.replaceState({}, '', url);
+    if (allowedPages(role).includes(nextPage)) {
+      void changeLocation(workspacePath(state.project.id, nextPage, entityId));
+    }
   };
 
-  const content = (() => {
-    switch (page) {
-      case 'project': return <ProjectPage state={state} session={session!} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />;
-      case 'tasks': return <TasksPage state={state} role={role} session={session!} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />;
-      case 'marketing': return <MarketingPage state={state} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
-      case 'counterparties': return <CounterpartiesPage state={state} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
-      case 'finance': return <FinancePage onOpenQuestions={() => setQuestionsOpen(true)} state={state} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />;
-      case 'schedule': return <SchedulePage state={state} role={role} actor={session?.name ?? 'Пользователь'} userId={session?.id} focusId={focusEntityId} onChange={updateState} />;
-      case 'procurement': return <ProcurementPage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
-      case 'quality': return <QualityPage state={state} role={role} actor={session?.name ?? 'Пользователь'} focusId={focusEntityId} onChange={updateState} />;
-      case 'client': return <ClientPage state={state} onChange={updateState} />;
-      case 'settings': return <SettingsPage state={state} actor={session?.name ?? 'Владелец'} canManageAccess={Boolean(session?.isOwner)} onChange={updateState} onServerSnapshot={applyServerSnapshot} />;
-      default: return <OverviewPage state={state} role={role} actor={session?.name ?? 'Пользователь'} userId={session?.id} onChange={updateState} onNavigate={navigate} onOpenProjects={() => setCreateProjectOpen(true)} />;
-    }
-  })();
 
   const submitProject = async (event: FormEvent) => {
     event.preventDefault();
@@ -257,7 +232,7 @@ function App() {
     const next = createProjectState(state, { ...projectForm, area, contractValue, targetCost, actor: session?.name ?? 'Виталий Озолин' });
     setCreateProjectOpen(false);
     setProjectOpen(false);
-    setPage('overview');
+    void changeLocation(workspacePath(next.project.id, 'overview'));
     await createProject(next);
   };
 
@@ -288,16 +263,16 @@ function App() {
           {navigation.map((item) => {
             const Icon = item.icon;
             return (
-              <button type="button" key={item.id} data-tour={`nav-${item.id}`} className={page === item.id ? 'active' : ''} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)} title={item.label}>
+              <Link to={workspacePath(state.project.id, item.id)} key={item.id} data-tour={`nav-${item.id}`} className={page === item.id ? 'active' : ''} aria-current={page === item.id ? 'page' : undefined} title={item.label}>
                 <Icon size={19} strokeWidth={1.6} /><span>{item.label}</span>
                 {item.id === 'quality' && state.checkpoints.some((checkpoint) => checkpoint.status === 'rework') && <i className="nav-alert" />}
                 {item.id === 'tasks' && state.tasks.some((task) => isTaskOverdue(task, todayKey)) && <i className="nav-alert" />}
-              </button>
+              </Link>
             );
           })}
         </nav>
 
-        {role === 'management' && <div className="sidebar__footer"><button type="button" data-tour="nav-settings" title="Настройки" className={page === 'settings' ? 'active' : ''} aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} /><span>Настройки</span></button></div>}
+        {role === 'management' && <div className="sidebar__footer"><Link to={workspacePath(state.project.id, 'settings')} data-tour="nav-settings" title="Настройки" className={page === 'settings' ? 'active' : ''} aria-current={page === 'settings' ? 'page' : undefined}><Settings2 size={18} /><span>Настройки</span></Link></div>}
         <button type="button" className="sidebar-toggle" onClick={() => setSidebarCollapsed((value) => !value)} aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'}><PanelLeftClose size={18} strokeWidth={1.6} /><span>Свернуть меню</span></button>
       </aside>
 
@@ -357,13 +332,19 @@ function App() {
             </div>
           </section>
         )}
-        <main className="page-container">{content}</main>
+        <main className="page-container" id="workspace-page" tabIndex={-1}>
+          {!route.valid ? <div className="task-empty" role="alert"><strong>Раздел не найден</strong><button type="button" className="button button--primary" onClick={() => navigate(role === 'client' ? 'client' : 'overview')}>На главную</button></div>
+            : !allowedPages(role).includes(page) ? <div role="status">Открываем доступный раздел…</div>
+            : route.projectId && route.projectId !== state.project.id ? <div className="task-empty" role="status" aria-live="polite"><strong>{sync.phase === 'loading' ? 'Загружаем проект…' : 'Не удалось открыть проект'}</strong>{sync.phase !== 'loading' && <><p>{sync.message || 'Проверьте доступ к проекту или подключение к сети.'}</p><button type="button" className="button button--primary" onClick={() => navigate(role === 'client' ? 'client' : 'overview')}>К текущему проекту</button></>}</div>
+            : location.pathname === '/' ? <div role="status">Открываем раздел…</div>
+            : <WorkspacePages key={`${state.project.id}:${page}`} state={state} session={session} role={role} focusEntityId={focusEntityId} updateState={updateState} navigate={navigate} applyServerSnapshot={applyServerSnapshot} openQuestions={() => setQuestionsOpen(true)} openProjects={() => setCreateProjectOpen(true)} />}
+        </main>
       </div>
 
       <nav className="mobile-bottom-nav">
         {navigation.slice(0, role === 'management' ? 5 : 4).map((item) => {
           const Icon = item.icon;
-          return <button type="button" key={item.id} className={page === item.id ? 'active' : ''} onClick={() => navigate(item.id)}><Icon size={20} /><span>{item.label.split(' ')[0]}</span></button>;
+          return <Link to={workspacePath(state.project.id, item.id)} key={item.id} className={page === item.id ? 'active' : ''} aria-current={page === item.id ? 'page' : undefined}><Icon size={20} /><span>{item.label.split(' ')[0]}</span></Link>;
         })}
       </nav>
 
@@ -383,7 +364,7 @@ function App() {
       {projectOpen && (
         <Modal title="Проекты" subtitle="Переключайтесь между домами или создайте новый проект по стартовому шаблону." onClose={() => setProjectOpen(false)}>
           {role !== 'client' && <button type="button" className="project-picker__open-card" onClick={() => { setProjectOpen(false); navigate('project'); }}><FolderKanban size={18} /><span><strong>Открыть карточку текущего проекта</strong><small>Реквизиты объекта, команда и документы</small></span></button>}
-          <div className="project-picker__list" data-tour="project-list">{projects.map((project) => <button type="button" key={project.id} className={project.id === state.project.id ? 'project-picker__item project-picker__item--active' : 'project-picker__item'} onClick={() => { setProjectOpen(false); void switchProject(project.id); }}><span><House size={20} /></span><div><small>{project.code}{project.id === state.project.id ? ' · активный проект' : ''}</small><strong>{project.name}</strong><p>{project.model} · {project.area} м²</p></div><StatusBadge label={project.id === state.project.id ? 'Выбран' : 'Открыть'} tone={project.id === state.project.id ? 'positive' : 'neutral'} /></button>)}</div>
+          <div className="project-picker__list" data-tour="project-list">{projects.map((project) => <button type="button" key={project.id} className={project.id === state.project.id ? 'project-picker__item project-picker__item--active' : 'project-picker__item'} onClick={() => { setProjectOpen(false); void changeLocation(workspacePath(project.id, page)); }}><span><House size={20} /></span><div><small>{project.code}{project.id === state.project.id ? ' · активный проект' : ''}</small><strong>{project.name}</strong><p>{project.model} · {project.area} м²</p></div><StatusBadge label={project.id === state.project.id ? 'Выбран' : 'Открыть'} tone={project.id === state.project.id ? 'positive' : 'neutral'} /></button>)}</div>
           <button type="button" data-tour="new-project" className="project-picker__add" onClick={() => {
             const realProjectCount = projects.filter((project) => project.id !== 'workspace-initial').length;
             setProjectOpen(false);

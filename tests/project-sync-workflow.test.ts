@@ -116,3 +116,40 @@ test('project switching falls back to the selected cached project when remote lo
   assert.equal(setup.events.at(-1)?.phase, 'offline');
   assert.equal(setup.events.at(-1)?.phase === 'offline' ? setup.events.at(-1)?.context : undefined, 'switch_cached');
 });
+
+test('project switching preserves an unresolved revision conflict and local changes', async () => {
+  const base = structuredClone(seedState);
+  const local = structuredClone(base);
+  local.project.name = 'Локальное имя';
+  const server = structuredClone(base);
+  server.project.name = 'Имя на сервере';
+  let loads = 0;
+  const repository: ProjectRepository = {
+    list: async () => [],
+    load: async () => { loads += 1; return null; },
+    save: async () => { throw new ProjectRevisionConflict(remote(server, 2)); },
+  };
+  const setup = harness(repository, applyLocalChange(createSyncModel({ state: base, revision: 1 }, false, true), local));
+  await switchProjectWorkflow(setup.workflow, 'project-2');
+  assert.equal(loads, 0);
+  assert.equal(setup.model().state.project.name, 'Локальное имя');
+  assert.equal(setup.model().dirty, true);
+  assert.equal(setup.conflict()?.revision, 2);
+  assert.equal(setup.events.at(-1)?.phase, 'conflict');
+});
+
+test('a failed save keeps the source project selected during a route switch', async () => {
+  let loads = 0;
+  const repository: ProjectRepository = {
+    list: async () => [],
+    load: async () => { loads += 1; return null; },
+    save: async () => { throw new Error('network_error'); },
+  };
+  const current = createSyncModel({ state: structuredClone(seedState), revision: 1 }, true, true);
+  const setup = harness(repository, current);
+  await switchProjectWorkflow(setup.workflow, 'project-2');
+  assert.equal(loads, 0);
+  assert.equal(setup.model().state.project.id, current.state.project.id);
+  assert.equal(setup.model().dirty, true);
+  assert.equal(setup.events.at(-1)?.phase, 'offline');
+});

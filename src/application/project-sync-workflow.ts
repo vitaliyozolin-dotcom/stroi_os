@@ -153,9 +153,12 @@ export const keepProjectLocalVersion = async (workflow: ProjectSyncWorkflow) => 
 
 export const switchProjectWorkflow = async (workflow: ProjectSyncWorkflow, projectId: string) => {
   if (projectId === workflow.readModel().state.project.id) return;
+  if (workflow.conflict() || workflow.saving()) return;
   await workflow.cache()?.flush();
   const before = workflow.readModel();
   if (before.dirty && before.ready) await flushProjectChanges(workflow);
+  // Keep the source project and its conflict visible if flushing did not succeed.
+  if (workflow.conflict() || workflow.saving() || workflow.readModel().dirty && workflow.readModel().ready) return;
   workflow.setConflict(null);
   workflow.emit({ phase: 'loading', revision: 0 });
   try {

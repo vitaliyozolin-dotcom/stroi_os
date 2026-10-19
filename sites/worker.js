@@ -1741,12 +1741,14 @@ const handleApi = createApiHandler({
   audit: handleAudit,
 });
 
-const serveSpa = async (request, env) => {
+export const serveSpa = async (request, env) => {
   const assetResponse = await env.ASSETS.fetch(request);
   if (assetResponse.status !== 404 || request.method !== 'GET') return assetResponse;
 
   const url = new URL(request.url);
-  if (url.pathname.includes('.')) return assetResponse;
+  // Project identifiers may contain dots; these are application routes, not assets.
+  const workspaceRoute = /^\/projects\/[a-zA-Z0-9._:-]{1,100}\/[^/.]+\/?$/.test(url.pathname);
+  if (url.pathname.includes('.') && !workspaceRoute) return assetResponse;
 
   url.pathname = '/index.html';
   return env.ASSETS.fetch(new Request(url, request));

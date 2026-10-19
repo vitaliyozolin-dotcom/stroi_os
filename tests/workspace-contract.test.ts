@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { allowedPages } from '../src/presentation/navigation.ts';
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -10,7 +11,7 @@ test('management workspace has a real profile logout and no client-cabinet navig
 
   assert.match(app, /action="\/api\/auth\/logout" method="post"/);
   assert.match(app, /return fullNavigation\.filter\(\(item\) => item\.id !== 'settings' && item\.id !== 'client'\)/);
-  assert.match(app, /Object\.keys\(pageLabels\)\.filter\(\(item\) => item !== 'client'\)/);
+  assert.equal(allowedPages('management').includes('client'), false);
   assert.doesNotMatch(overview, /onNavigate\('client'\)/);
 });
 
