@@ -1,6 +1,7 @@
+import { clientDecisionOptions, clientDecisionSnapshot } from '../domain/client-decisions';
 import { requestApi } from '../infrastructure/api-http';
-import { createClientDecisionCommands } from '../application';
-import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
+import { createClientDecisionUseCases } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
   ArrowRight,
@@ -24,11 +25,13 @@ import {
 } from 'lucide-react';
 import { financeTotals, projectProgressTotals as progressTotals } from '../domain/index';
 import { formatDate, formatDateTime, money } from '../presentation/formatting';
-import type { AppState } from '../entities/index';
+import type { AppState, UserRole } from '../entities/index';
 import { Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 
-export function ClientPage({ state, onChange }: { state: AppState; onChange: (next: AppState) => void }) {
-  const saveChange = createClientDecisionCommands(state, state.project.clientNames, systemClock, runtimeIdGenerator, onChange);
+export function ClientPage({ state, actor, role, onChange }: { state: AppState; actor: string; role: UserRole; onChange: (next: AppState) => void }) {
+  const decisions = createClientDecisionUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const [decisionExpected, setDecisionExpected] = useState('');
+  const [decisionError, setDecisionError] = useState('');
   const progress = progressTotals(state);
   const finance = financeTotals(state);
   const current = state.stages.find((stage) => ['in_progress', 'awaiting_inspection', 'rework', 'blocked'].includes(stage.status)) ?? state.stages[0];
@@ -58,11 +61,8 @@ export function ClientPage({ state, onChange }: { state: AppState; onChange: (ne
 
   const decide = () => {
     if (!activeDecision) return;
-    saveChange({
-      ...state,
-      decisions: state.decisions.map((item) => item.id === activeDecision.id ? { ...item, status: 'decided', choice } : item),
-      activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor: state.project.clientNames, text: `Решение клиента: ${activeDecision.title} — ${choice}`, tone: 'positive' }, ...state.activity],
-    });
+    const result = decisions.confirm({ decisionId: activeDecision.id, expected: decisionExpected, choice });
+    if (!result.ok) { setDecisionError(result.error); return; }
     setDecisionId(null);
   };
 
@@ -119,7 +119,7 @@ export function ClientPage({ state, onChange }: { state: AppState; onChange: (ne
           <div className="client-decisions__intro"><MessageCircle size={22} /><div><span className="eyebrow">Нужен ваш ответ</span><h2>Решения без задержки стройки</h2></div></div>
           <div className="client-decision-list">
             {waitingDecisions.map((decision) => (
-              <button key={decision.id} type="button" onClick={() => { setDecisionId(decision.id); setChoice(decision.id === 'decision-1' ? 'Графит' : 'Вариант B'); }}><span><strong>{decision.title}</strong><small>Нужно до {formatDate(decision.dueDate)}</small></span><span>Выбрать <ArrowRight size={16} /></span></button>
+              <button key={decision.id} type="button" onClick={() => { setDecisionExpected(clientDecisionSnapshot(state, decision.id)); setDecisionError(''); setDecisionId(decision.id); setChoice(decision.id === 'decision-1' ? 'Графит' : 'Вариант B'); }}><span><strong>{decision.title}</strong><small>Нужно до {formatDate(decision.dueDate)}</small></span><span>Выбрать <ArrowRight size={16} /></span></button>
             ))}
           </div>
         </section>
@@ -170,8 +170,8 @@ export function ClientPage({ state, onChange }: { state: AppState; onChange: (ne
 
       {activeDecision && (
         <Modal title={activeDecision.title} subtitle={`Ответ нужен до ${formatDate(activeDecision.dueDate, true)}. Решение попадёт в журнал проекта.`} onClose={() => setDecisionId(null)}>
-          <div className="decision-options">
-            {(activeDecision.id === 'decision-1' ? ['Натуральный дуб', 'Графит', 'Терракота'] : ['Вариант A', 'Вариант B', 'Нужна консультация']).map((option) => <button type="button" className={choice === option ? 'decision-option decision-option--selected' : 'decision-option'} onClick={() => setChoice(option)} key={option}><span>{option}</span>{choice === option && <CheckCircle2 size={18} />}</button>)}
+          {decisionError && <p role="alert" className="form-warning">{decisionError}</p>}<div className="decision-options">
+            {clientDecisionOptions(activeDecision.id).map((option) => <button type="button" className={choice === option ? 'decision-option decision-option--selected' : 'decision-option'} onClick={() => setChoice(option)} key={option}><span>{option}</span>{choice === option && <CheckCircle2 size={18} />}</button>)}
           </div>
           <div className="decision-preview"><Eye size={18} /><span>В рабочей версии здесь будет визуализация выбора на фасаде или плане.</span></div>
           <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setDecisionId(null)}>Отмена</button><button type="button" className="button button--primary" onClick={decide}><Check size={17} /> Подтвердить решение</button></div>
