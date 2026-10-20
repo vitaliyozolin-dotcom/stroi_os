@@ -8,7 +8,7 @@ import { useScheduleToday } from '../components/ProjectScheduleDates';
 import type { StageAction } from '../application/stage-control';
 import { planDays as baselineDays } from '../../sites/lib/plan-baseline.js';
 import { planToday } from '../../sites/lib/plan-baseline.js';
-import { createScheduleCommands, createSchedulePlanningUseCases } from '../application';
+import { createSchedulePlanningUseCases } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
@@ -58,7 +58,6 @@ export function SchedulePage(props: SchedulePageProps) {
 }
 
 function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: SchedulePageProps) {
-  const saveChange = createScheduleCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const planning = createSchedulePlanningUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
   const [planExpected, setPlanExpected] = useState('');
   const [planStageId, setPlanStageId] = useState('');
@@ -135,8 +134,8 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
 
   return (
     <div className="page-stack schedule-workspace">
-      {stageAction && <StageControlModal state={state} stageId={selected.id} action={stageAction} role={role} actor={actor} userId={userId} onChange={saveChange} onClose={() => setStageAction(null)} />}
-      {reviewing && <ScheduleReconciliation state={state} role={role} actor={actor} userId={userId} initialId={selected.id} onChange={saveChange} onClose={() => setReviewing(false)} />}
+      {stageAction && <StageControlModal state={state} stageId={selected.id} action={stageAction} role={role} actor={actor} userId={userId} onChange={onChange} onClose={() => setStageAction(null)} />}
+      {reviewing && <ScheduleReconciliation state={state} role={role} actor={actor} userId={userId} initialId={selected.id} onChange={onChange} onClose={() => setReviewing(false)} />}
       <section className="schedule-heading">
         <div><span className="eyebrow">Производственный план</span><h1>Этапы и график</h1><p>{projectStarted && currentWeek.number > 0 ? `${currentWeek.number}-я неделя · ${formatDate(currentWeek.start)} — ${formatDate(currentWeek.end)}` : `Начало проекта · ${formatDate(state.project.startDate, true)}`}</p></div>
         <div className="schedule-heading__progress"><strong>{progress.physical}%</strong><span>выполнение ППР</span></div>
@@ -150,8 +149,8 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
       {forecast.unmappedWork.length > 0 && <div className="schedule-scope" role="note"><AlertTriangle size={18} /><div><strong>Прогноз сдачи дома пока неполный</strong><p>В сроки ППР ещё не включены: {forecast.unmappedWork.join(', ').toLocaleLowerCase('ru')}.</p></div></div>}
       {!forecast.end && forecast.issues.length > 0 && <div className="schedule-scope" role="note"><AlertTriangle size={18} /><div><strong>Для прогноза нужны уточнения</strong><p>{forecast.issues[0].message}</p></div></div>}
       <ScheduleTimeline state={state} today={todayKey} onSelect={openStage} />
-      <details className="schedule-reference"><summary>Исходный план и настройки ППР</summary><div className="schedule-reference__body"><BaselinePanel state={state} role={role} actor={actor} onChange={saveChange} />{role !== 'client' && <button type="button" className="button button--secondary" onClick={() => setReviewing(true)}>Сверить состав работ и зависимости</button>}<details><summary>Как рассчитан прогноз</summary><p>Прогноз учитывает внесённые этапы, их длительность и зависимости. Без свежего остатка используется полная длительность этапа из ППР; дата может сдвигаться с наступлением нового дня.</p>{forecast.notes.map(note => <p key={note}>{note}</p>)}{forecast.issues.map((issue, index) => <p key={index}>{issue.message}</p>)}</details></div></details>
-      <details className="schedule-reference"><summary>Состояние объекта и история наблюдений</summary><div className="schedule-reference__body"><SiteProgress state={state} role={role} onChange={onChange} /></div></details>
+      <details className="schedule-reference"><summary>Исходный план и настройки ППР</summary><div className="schedule-reference__body"><BaselinePanel state={state} role={role} actor={actor} onChange={onChange} />{role !== 'client' && <button type="button" className="button button--secondary" onClick={() => setReviewing(true)}>Сверить состав работ и зависимости</button>}<details><summary>Как рассчитан прогноз</summary><p>Прогноз учитывает внесённые этапы, их длительность и зависимости. Без свежего остатка используется полная длительность этапа из ППР; дата может сдвигаться с наступлением нового дня.</p>{forecast.notes.map(note => <p key={note}>{note}</p>)}{forecast.issues.map((issue, index) => <p key={index}>{issue.message}</p>)}</details></div></details>
+      <details className="schedule-reference"><summary>Состояние объекта и история наблюдений</summary><div className="schedule-reference__body"><SiteProgress state={state} actor={actor} role={role} onChange={onChange} /></div></details>
       {detailOpen && !stageAction && !reviewing && !editingDates && !counterpartyId && <StageDrawer title={scheduleStageTitle(selected)} onClose={() => setDetailOpen(false)}>
           <article className="panel stage-detail">
             <div className="stage-detail__head">

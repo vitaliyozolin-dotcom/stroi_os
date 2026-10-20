@@ -1,10 +1,12 @@
+import { createScheduleEditUseCases, scheduleEditSnapshot } from '../application/schedule-edits';
+import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
 import { useState, type FormEvent } from 'react';
 import type { AppState, UserRole } from '../entities/index';
 import { planToday } from '../../sites/lib/plan-baseline.js';
 import { formatDate } from '../presentation/formatting';
 import { Field, Modal } from './Ui';
 
-export function SiteProgress({ state, role, onChange }: { state: AppState; role: UserRole; onChange: (state: AppState) => void }) {
+export function SiteProgress({ state, actor, role, onChange }: { state: AppState; actor: string; role: UserRole; onChange: (state: AppState) => void }) {
   const [editing, setEditing] = useState(false);
   const history = state.project.siteProgressHistory ?? [], latest = history.at(-1);
   if (role === 'client') return null;
@@ -14,22 +16,21 @@ export function SiteProgress({ state, role, onChange }: { state: AppState; role:
       <p className="muted">Состояние на {formatDate(latest.asOf)} · {latest.source}. Точные даты выполнения и приёмка отмечаются в этапах отдельно.</p>
       {history.length > 1 && <details><summary>История состояния ({history.length - 1})</summary>{history.slice(0, -1).reverse().map(row => <p key={row.id}><strong>{formatDate(row.asOf)}</strong> · {row.source}<br />Сделано: {row.completed.join('; ')}.<br />Осталось: {row.remaining.join('; ')}.</p>)}</details>}
     </> : <p className="muted">Укажите, что уже сделано и что осталось. Исходный ППР и приёмка сохраняются отдельно.</p>}
-    {editing && <ProgressEditor state={state} onChange={onChange} onClose={() => setEditing(false)} />}
+    {editing && <ProgressEditor state={state} actor={actor} role={role} onChange={onChange} onClose={() => setEditing(false)} />}
   </section>;
 }
-function ProgressEditor({ state, onChange, onClose }: { state: AppState; onChange: (state: AppState) => void; onClose: () => void }) {
+function ProgressEditor({ state, actor, role, onChange, onClose }: { state: AppState; actor: string; role: UserRole; onChange: (state: AppState) => void; onClose: () => void }) {
+  const commands = createScheduleEditUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
   const latest = state.project.siteProgressHistory?.at(-1);
   const [date, setDate] = useState(planToday()), [source, setSource] = useState('');
   const [completed, setCompleted] = useState(latest?.completed.join('\n') ?? ''), [remaining, setRemaining] = useState(latest?.remaining.join('\n') ?? '');
-  const [opened] = useState(() => JSON.stringify(state.project.siteProgressHistory));
+  const [opened] = useState(() => scheduleEditSnapshot(state, 'progress'));
   const [error, setError] = useState('');
   const save = (event: FormEvent) => {
     event.preventDefault();
-    if (opened !== JSON.stringify(state.project.siteProgressHistory)) { setError('Состояние уже обновилось. Откройте форму заново.'); return; }
-    const split = (value: string) => value.split('\n').map(v => v.trim()).filter(Boolean);
-    const done = split(completed), left = split(remaining);
-    if (!source.trim() || !done.length && !left.length || [...done, ...left].some(v => v.length > 250) || done.length > 50 || left.length > 50) { setError('Укажите источник и работы: до 50 пунктов в каждом списке, до 250 символов на пункт.'); return; }
-    onChange({ ...state, project: { ...state.project, siteProgressHistory: [...(state.project.siteProgressHistory ?? []), { id: crypto.randomUUID(), asOf: date, completed: done, remaining: left, source: source.trim() }] } });
+    if (opened !== scheduleEditSnapshot(state, 'progress')) { setError('Состояние уже обновилось. Откройте форму заново.'); return; }
+    const result = commands.execute({ kind: 'progress', expected: opened, date, completed, remaining, source });
+    if (!result.ok) { setError(result.error); return; }
     onClose();
   };
   return <Modal title="Что уже сделано на объекте" subtitle="Сохраняется новая запись состояния; история остаётся." onClose={onClose}><form className="modal-form" onSubmit={save}>

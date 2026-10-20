@@ -1,6 +1,7 @@
+import { settingsSnapshot } from '../domain/settings';
 import { requestApi } from '../infrastructure/api-http';
-import { createSettingsCommands } from '../application';
-import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
+import { createSettingsUseCases } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useState, type FormEvent } from 'react';
 import {
   BellRing,
@@ -89,8 +90,10 @@ function Toggle({ checked, onChange, label, disabled = false }: { checked: boole
   return <button type="button" role="switch" disabled={disabled} aria-checked={checked} aria-label={label} className={checked ? 'toggle toggle--on' : 'toggle'} onClick={onChange}><span /></button>;
 }
 
-export function SettingsPage({ state, actor, canManageAccess, onChange, onServerSnapshot }: { state: AppState; actor: string; canManageAccess: boolean; onChange: (next: AppState) => void; onServerSnapshot: (snapshot: RemoteProjectSnapshot) => void }) {
-  const saveChange = createSettingsCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
+export function SettingsPage({ state, actor, role, canManageAccess, onChange, onServerSnapshot }: { state: AppState; actor: string; role: UserRole; canManageAccess: boolean; onChange: (next: AppState) => void; onServerSnapshot: (snapshot: RemoteProjectSnapshot) => void }) {
+  const settingsCommands = createSettingsUseCases(state, { name: actor, role, canManageAccess }, systemClock, runtimeIdGenerator, onChange);
+  const [settingsError, setSettingsError] = useState('');
+  const [rosterExpected, setRosterExpected] = useState('');
   const [tab, setTab] = useState<SettingsTab>('access');
   const [showInvite, setShowInvite] = useState(false);
   const [invite, setInvite] = useState({ name: '', email: '', role: 'foreman' as UserRole, telegram: '' });
@@ -180,27 +183,18 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
     void refreshAccess();
   }, [tab, state.project.id, state.settings.users.length]);
 
-  const saveSettings = (settings: AppState['settings'], text: string) => saveChange({
-    ...state,
-    settings,
-    activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text, tone: 'neutral' }, ...state.activity],
-  });
-
   const toggleWidget = (widget: DashboardWidget) => {
-    const current = state.settings.dashboardWidgets;
-    const dashboardWidgets = current.includes(widget) ? current.filter((item) => item !== widget) : [...current, widget];
-    saveSettings({ ...state.settings, dashboardWidgets }, `Настроен главный дашборд: ${widgetLabels[widget].title}`);
+    const result = settingsCommands.execute({ kind: 'widget', expected: settingsSnapshot(state), widget, enabled: !state.settings.dashboardWidgets.includes(widget) });
+    setSettingsError(result.ok ? '' : result.error);
   };
-
-  const toggleChannel = (channel: keyof NotificationSettings['channels']) => saveSettings({
-    ...state.settings,
-    notifications: { ...state.settings.notifications, channels: { ...state.settings.notifications.channels, [channel]: !state.settings.notifications.channels[channel] } },
-  }, `Канал уведомлений «${channel}» ${state.settings.notifications.channels[channel] ? 'выключен' : 'включён'}`);
-
-  const toggleEvent = (event: keyof NotificationSettings['events']) => saveSettings({
-    ...state.settings,
-    notifications: { ...state.settings.notifications, events: { ...state.settings.notifications.events, [event]: !state.settings.notifications.events[event] } },
-  }, `Правило уведомлений «${eventLabels[event].title}» обновлено`);
+  const toggleChannel = (key: keyof NotificationSettings['channels']) => {
+    const result = settingsCommands.execute({ kind: 'channel', expected: settingsSnapshot(state), key, enabled: !state.settings.notifications.channels[key] });
+    setSettingsError(result.ok ? '' : result.error);
+  };
+  const toggleEvent = (key: keyof NotificationSettings['events']) => {
+    const result = settingsCommands.execute({ kind: 'event', expected: settingsSnapshot(state), key, enabled: !state.settings.notifications.events[key] });
+    setSettingsError(result.ok ? '' : result.error);
+  };
 
   const inviteUser = async (event: FormEvent) => {
     event.preventDefault();
@@ -238,8 +232,8 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
         setAccessBusy(null);
       }
     }
-    const user: SystemUser = { id: uid('user'), name: invite.name.trim(), email: invite.email.trim(), role: invite.role, telegram: invite.telegram.trim() || undefined, status: 'active', invitedAt: new Date().toISOString(), inviteDelivery: 'draft' };
-    saveSettings({ ...state.settings, users: [...state.settings.users, user] }, `Добавлен участник ${user.name} · ${roleLabels[user.role]}. Доступ ещё не отправлен`);
+    const result = settingsCommands.execute({ kind: 'user', expected: rosterExpected, ...invite });
+    if (!result.ok) { setAccessErrors(current => ({ ...current, new: result.error })); return; }
     setShowInvite(false);
     setInvite({ name: '', email: '', role: 'foreman', telegram: '' });
     setAccessErrors((current) => ({ ...current, new: '' }));
@@ -279,7 +273,8 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
         setAccessBusy(null);
       }
     }
-    saveSettings({ ...state.settings, users: state.settings.users.map((user) => user.id === editingUser.id ? { ...editingUser, name: editingUser.name.trim(), email: editingUser.email.trim(), telegram: editingUser.telegram?.trim() || undefined } : user) }, `Обновлены роль и доступ пользователя ${editingUser.name}`);
+    const result = settingsCommands.execute({ kind: 'user', expected: rosterExpected, id: editingUser.id, name: editingUser.name, email: editingUser.email, role: editingUser.role, telegram: editingUser.telegram ?? '' });
+    if (!result.ok) { setAccessErrors(current => ({ ...current, [editingUser.id]: result.error })); return; }
     setEditingUser(null);
     window.setTimeout(() => void refreshAccess(), 1_000);
   };
@@ -541,6 +536,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
 
   return (
     <div className="page-stack">
+      {settingsError && <p role="alert" className="form-warning">{settingsError}</p>}
       <section className="page-title-row">
         <div><span className="eyebrow">Администрирование</span><h1>Настройки системы</h1><p>Роли и доступы, состав главного экрана, правила уведомлений и внешние подключения.</p></div>
       </section>
@@ -550,7 +546,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
         <div className="settings-content">
           {tab === 'access' && (
             <>
-              <section className="panel settings-panel"><SectionHeader eyebrow="Команда" title="Пользователи и роли" action={<button type="button" className="button button--primary button--compact" disabled={!canManageAccess} title={canManageAccess ? '' : 'Добавлять пользователей может только владелец'} onClick={() => setShowInvite(true)}><Plus size={16} /> Добавить</button>} />
+              <section className="panel settings-panel"><SectionHeader eyebrow="Команда" title="Пользователи и роли" action={<button type="button" className="button button--primary button--compact" disabled={!canManageAccess} title={canManageAccess ? '' : 'Добавлять пользователей может только владелец'} onClick={() => { setRosterExpected(settingsSnapshot(state)); setShowInvite(true); }}><Plus size={16} /> Добавить</button>} />
                 <div className="user-list">
                   <div className="user-list__head"><span>Пользователь</span><span>Роль</span><span>Веб-доступ</span><span>Telegram</span><span>Последний вход</span><span>Действия</span></div>
                   {state.settings.users.map((user) => {
@@ -576,7 +572,7 @@ export function SettingsPage({ state, actor, canManageAccess, onChange, onServer
                         {localAccess && web.status === 'blocked' && <button type="button" disabled={busy} onClick={() => void changeWebAccess(user, 'unblock')}>Разблокировать</button>}
                         {canManageAccess && telegram.status === 'not_connected' && <button type="button" disabled={busy || user.status === 'disabled'} onClick={() => void createTelegramLink(user)}>Подключить Telegram</button>}
                         {canManageAccess && telegram.status === 'connected' && <button type="button" className="danger" disabled={busy} onClick={() => void disconnectTelegram(user)}>Отключить Telegram</button>}
-                        <button type="button" aria-label={`Редактировать ${user.name}`} disabled={!canManageAccess || busy || user.id === 'user-owner'} onClick={() => setEditingUser({ ...user })}><Pencil size={15} /></button>
+                        <button type="button" aria-label={`Редактировать ${user.name}`} disabled={!canManageAccess || busy || user.id === 'user-owner'} onClick={() => { setRosterExpected(settingsSnapshot(state)); setEditingUser({ ...user }); }}><Pencil size={15} /></button>
                       </span>
                       {accessErrors[user.id] && <small className="access-inline-error" role="status" aria-live="polite">{accessErrors[user.id]}</small>}
                     </article>;

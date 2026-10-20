@@ -24,7 +24,7 @@ export function ConstructionNow({ state, role, actor, userId, onChange, onNaviga
         {hasPhoto && view.photo && <span className="construction-now__caption">{view.photoStage?.shortName || 'Последнее фото объекта'} · отчёт {formatDate(view.photo.report.createdAt.slice(0, 10))}</span>}
       </button>
       <div className="construction-now__focus">
-        <SiteProgress state={state} role={role} onChange={onChange} />
+        <SiteProgress state={state} actor={actor} role={role} onChange={onChange} />
         {!hasSiteProgress && <>
         <span className="construction-now__eyebrow">{view.current ? view.active.length > 1 ? `Активных этапов: ${view.active.length}` : stageStatusLabel[view.current.status] : allAccepted ? 'Все этапы приняты' : 'Текущий этап не отмечен'}</span>
         <h3>{view.current?.name || (allAccepted ? 'Работы приняты' : view.next ? `Далее: ${view.next.shortName}` : 'Добавьте этапы работ')}</h3>

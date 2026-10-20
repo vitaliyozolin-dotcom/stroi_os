@@ -87,7 +87,7 @@ test('business pages persist project changes through StateChange sinks', () => {
   for (const page of pages) {
     const contents = source(`src/pages/${page}`);
     assert.doesNotMatch(contents, /\bonChange\(\{\s*\.\.\.state/, `${page} writes AppState directly`);
-    assert.match(contents, /commitStateChange|create[A-Z][A-Za-z0-9_]+Commands|createFinanceUseCases|createCounterpartyUseCases|createProcurementUseCases|createMarketingUseCases|createClientDecisionUseCases/, `${page} bypasses StateChange metadata`);
+    assert.match(contents, /commitStateChange|create[A-Z][A-Za-z0-9_]+(?:Commands|UseCases)|uploadProjectDocument/, `${page} bypasses StateChange metadata`);
   }
 });
 
@@ -120,4 +120,12 @@ test('App composes project adapters while the synchronization hook depends only 
   assert.match(hook, /cacheFactory\.create/);
   assert.match(source('src/application/project-sync-workflow.ts'), /flushProjectChanges/);
   assert.doesNotMatch(hook, /from ['"].*infrastructure|fetchRemoteProject|fetchRemoteProjects|saveRemoteProject|RevisionConflictError|createProjectCache|ProjectCacheWriter/);
+});
+
+test('completed page extraction has no generic whole-page command facade', () => {
+  assert.equal(existsSync(new URL('../src/application/page-commands.ts', import.meta.url)), false);
+  assert.doesNotMatch(source('src/application/state-change.ts'), /createPageStateSink/);
+  for (const page of ['ProjectPage', 'SettingsPage', 'SchedulePage', 'MarketingPage', 'ProcurementPage', 'ClientPage', 'CounterpartiesPage']) {
+    assert.doesNotMatch(source(`src/pages/${page}.tsx`), /saveChange\(|saveSettings\(|create[A-Z][A-Za-z]+Commands/);
+  }
 });

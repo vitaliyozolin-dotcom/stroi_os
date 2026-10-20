@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { seedState } from '../src/seed.ts';
 import { counterpartySnapshot } from '../src/domain/counterparties.ts';
 import type { CounterpartyDocumentDraft } from '../src/domain/counterparty-documents.ts';
@@ -117,5 +117,5 @@ test('counterparty page only submits commands and has no generic whole-state wri
   assert.match(page, /counterparties\.addDocument\(/);
   assert.match(page, /documentError && <p role="alert"/);
   assert.doesNotMatch(page, /createCounterpartyCommands|saveChange\(|documents:|activity:|uid\(/);
-  assert.doesNotMatch(read('src/application/page-commands.ts'), /createCounterpartyCommands/);
+  assert.equal(existsSync(new URL('../src/application/page-commands.ts', import.meta.url)), false);
 });

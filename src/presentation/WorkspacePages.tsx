@@ -42,7 +42,7 @@ export function WorkspacePages({ state, session, role, focusEntityId, updateStat
           <Route path="/projects/:projectId/procurement" element={<ProcurementPage state={state} role={role} actor={session.name} focusId={focusEntityId} onChange={updateState} />} />
           <Route path="/projects/:projectId/quality" element={<QualityPage state={state} role={role} actor={session.name} focusId={focusEntityId} onChange={updateState} />} />
           <Route path="/projects/:projectId/client" element={<ClientPage state={state} actor={session.name} role={session.role} onChange={updateState} />} />
-          <Route path="/projects/:projectId/settings" element={<SettingsPage state={state} actor={session.name} canManageAccess={Boolean(session.isOwner)} onChange={updateState} onServerSnapshot={applyServerSnapshot} />} />
+          <Route path="/projects/:projectId/settings" element={<SettingsPage state={state} actor={session.name} role={session.role} canManageAccess={Boolean(session.isOwner)} onChange={updateState} onServerSnapshot={applyServerSnapshot} />} />
           <Route path="/projects/:projectId/overview" element={<OverviewPage state={state} role={role} actor={session.name} userId={session.id} onChange={updateState} onNavigate={navigate} onOpenProjects={openProjects} />} />
         </Routes>
       </Suspense>

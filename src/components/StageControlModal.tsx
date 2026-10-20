@@ -1,9 +1,10 @@
+import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
 import { useState, type FormEvent } from 'react';
 import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
-import { applyStageControl, type StageAction } from '../application/stage-control';
+import { commitStageControl, stageCommandSnapshot, type StageAction } from '../application/stage-control';
 import { planToday } from '../../sites/lib/plan-baseline.js';
-import { stageCanStart, stageGaps, stageControlFingerprint } from '../../sites/lib/stage-control.js';
+import { stageCanStart, stageGaps } from '../../sites/lib/stage-control.js';
 import { Field, Modal } from './Ui';
 import { money } from '../presentation/formatting';
 
@@ -20,14 +21,14 @@ function OwnerAcceptanceForm({ state, stageId, actor, role, userId, onChange, on
   const [exactDate, setExactDate] = useState(Boolean(stage.completedOn));
   const [date, setDate] = useState(stage.completedOn || stage.completionObservedOn || planToday());
   const [note, setNote] = useState('');
-  const [openedState, setOpenedState] = useState(() => stageControlFingerprint(stage));
+  const [openedState, setOpenedState] = useState(() => stageCommandSnapshot(state, stageId));
   const [error, setError] = useState('');
-  const changed = stageControlFingerprint(stage) !== openedState;
+  const changed = stageCommandSnapshot(state, stageId) !== openedState;
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (changed) { setError('Сведения об этапе изменились. Проверьте обновление перед подтверждением.'); return; }
     try {
-      onChange(applyStageControl(state, stageId, 'owner_accept', { date: exactDate ? date : planToday(), note, tasks: [], completionDateUnknown: !exactDate }, actor, role, userId));
+      commitStageControl(state, stageId, 'owner_accept', { date: exactDate ? date : planToday(), note, tasks: [], completionDateUnknown: !exactDate }, actor, role, userId, openedState, systemClock, runtimeIdGenerator, onChange);
       onClose();
     } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); }
   };
@@ -41,7 +42,7 @@ function OwnerAcceptanceForm({ state, stageId, actor, role, userId, onChange, on
       <Field label="Комментарий · необязательно"><textarea rows={2} maxLength={2000} value={note} onChange={e => setNote(e.target.value)} placeholder="Что проверил или что важно сохранить" /></Field>
       <p className="muted">Фото и отчёт прораба не нужны для этого подтверждения. Задачи, контроль качества и оплаты сохраняют свои записи.</p>
       {error && <p className="danger-text" role="alert">{error}</p>}
-      {changed && <div className="stage-control-list"><p>Текущий результат: {stage.completionNote || 'пока не указан'}{stage.blocker ? ` · ${stage.blocker}` : ''}</p><button className="text-button" type="button" onClick={() => { setOpenedState(stageControlFingerprint(stage)); setExactDate(Boolean(stage.completedOn)); setDate(stage.completedOn || stage.completionObservedOn || planToday()); setError(''); }}>Обновить сведения, сохранив комментарий</button></div>}
+      {changed && <div className="stage-control-list"><p>Текущий результат: {stage.completionNote || 'пока не указан'}{stage.blocker ? ` · ${stage.blocker}` : ''}</p><button className="text-button" type="button" onClick={() => { setOpenedState(stageCommandSnapshot(state, stageId)); setExactDate(Boolean(stage.completedOn)); setDate(stage.completedOn || stage.completionObservedOn || planToday()); setError(''); }}>Обновить сведения, сохранив комментарий</button></div>}
       <div className="modal__actions"><button type="button" className="button button--ghost" onClick={onClose}>Отмена</button><button type="submit" className="button button--primary">Подтверждаю, этап выполнен</button></div>
     </form>
   </Modal>;
@@ -56,14 +57,14 @@ function StageForm({ state, stageId, action, actor, role, userId, onChange, onCl
   const [readyOn, setReadyOn] = useState(planToday());
   const [nextAction, setNextAction] = useState('');
   const [issueOwner, setIssueOwner] = useState(stage.responsible || '');
-  const [openedState] = useState(() => stageControlFingerprint(stage));
+  const [openedState] = useState(() => stageCommandSnapshot(state, stageId));
   const hasRemaining = Boolean(stage.schedule && ['start', 'delay'].includes(action));
   const gaps = stageGaps(state, stageId);
   const expenses = state.financeEntries.filter((e) => e.stageId === stageId && e.kind === 'expense');
   const labels = { start: 'Работы начались', not_started: 'Работы ещё не начались', complete: 'Этап выполнен?', accept: 'Приёмка этапа', owner_accept: 'Подтвердить выполнение', delay: 'Что задерживает этап?', rework: 'Вернуть на доработку' };
   const submit = (event: FormEvent) => { event.preventDefault(); try {
-    if (stageControlFingerprint(stage) !== openedState) throw new Error('Этап обновился, пока форма была открыта. Откройте его заново перед сохранением.');
-    onChange(applyStageControl(state, stageId, action, { date, note, tasks: unknownDate ? [] : tasks, completionDateUnknown: unknownDate, blockerResolved: resolved, ...(hasRemaining ? { remainingDays: Number(remaining), readyOn, nextAction, issueOwner } : {}) }, actor, role, userId)); onClose();
+    if (stageCommandSnapshot(state, stageId) !== openedState) throw new Error('Этап обновился, пока форма была открыта. Откройте его заново перед сохранением.');
+    commitStageControl(state, stageId, action, { date, note, tasks: unknownDate ? [] : tasks, completionDateUnknown: unknownDate, blockerResolved: resolved, ...(hasRemaining ? { remainingDays: Number(remaining), readyOn, nextAction, issueOwner } : {}) }, actor, role, userId, openedState, systemClock, runtimeIdGenerator, onChange); onClose();
   } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); } };
   const open = (p: PageId) => { onClose(); onNavigate?.(p); };
   return <Modal title={labels[action]} subtitle={stage.name} onClose={onClose}><form className="modal-form stage-control-form" onSubmit={submit}>

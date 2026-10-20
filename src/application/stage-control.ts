@@ -1,17 +1,23 @@
+import type { Clock, IdGenerator } from './ports';
+import { commitStateChange, type StateChangeSink } from './state-change.ts';
+import { stageControlFingerprint } from '../../sites/lib/stage-control.js';
 import type { AppState, UserRole } from '../entities/index';
 import { planToday, validPlanDate } from '../../sites/lib/plan-baseline.js';
 import { stageCanStart, stageGaps } from '../../sites/lib/stage-control.js';
 import { addScheduleDays } from '../../sites/lib/schedule-forecast.js';
 
 export type StageAction = 'start' | 'not_started' | 'complete' | 'accept' | 'owner_accept' | 'delay' | 'rework';
-export function applyStageControl(state: AppState, id: string, action: StageAction, input: { date: string; note: string; tasks: string[]; completionDateUnknown?: boolean; blockerResolved?: boolean; remainingDays?: number; readyOn?: string; nextAction?: string; issueOwner?: string }, actor: string, role: UserRole, userId?: string): AppState {
+export function applyStageControl(state: AppState, id: string, action: StageAction, input: { date: string; note: string; tasks: string[]; completionDateUnknown?: boolean; blockerResolved?: boolean; remainingDays?: number; readyOn?: string; nextAction?: string; issueOwner?: string }, actor: string, role: UserRole, userId?: string, runtime?: { clock: Clock; ids: IdGenerator }): AppState {
+  const timestamp = runtime?.clock.now() ?? new Date().toISOString();
+  const todayKey = planToday(new Date(timestamp));
+  const nextId = (prefix: string) => runtime?.ids.next(prefix) ?? crypto.randomUUID();
   if (role === 'client') throw new Error('Нет прав на изменение этапа.');
   const next = structuredClone(state), stage = next.stages.find((s) => s.id === id);
   if (!stage || stage.status === 'accepted') throw new Error('Этап уже принят или не найден.');
   if (action === 'owner_accept') {
     if (role !== 'management' || userId !== 'owner') throw new Error('Подтверждение по факту доступно владельцу.');
     if (stage.schedule?.kind === 'summary') throw new Error('Подтвердите вложенные работы по отдельности.');
-    const today = planToday(), now = new Date().toISOString();
+    const today = todayKey, now = timestamp;
     if (!validPlanDate(input.date) || input.date > today) throw new Error('Укажите дату выполнения не позже сегодня.');
     if (stage.actualStart && (input.completionDateUnknown ? today : input.date) < stage.actualStart) throw new Error('Выполнение не может быть раньше начала.');
     if (input.completionDateUnknown && stage.completedOn) throw new Error('Известная дата выполнения сохраняется.');
@@ -30,7 +36,7 @@ export function applyStageControl(state: AppState, id: string, action: StageActi
     const tracking = next.tasks.find(t => t.id === `auto-stage-${id}`);
     if (tracking) { tracking.status = 'done'; tracking.completedAt = now; tracking.completionNote = note; }
     for (const candidate of next.stages) if (!candidate.schedule && candidate.status === 'not_ready' && (candidate.dependencyId || candidate.dependency) && stageCanStart(next, candidate)) candidate.status = 'ready';
-    next.activity.unshift({ id: crypto.randomUUID(), timestamp: now, actor, text: `Владелец подтвердил этап «${stage.name}»: ${note}`, tone: 'positive' });
+    next.activity.unshift({ id: nextId('activity'), timestamp: now, actor, text: `Владелец подтвердил этап «${stage.name}»: ${note}`, tone: 'positive' });
     return next;
   }
   if (role !== 'management' && stage.schedule && (!userId || userId !== stage.schedule.reporterId)) throw new Error('Состояние этой работы подтверждает назначенный сотрудник или управление.');
@@ -39,7 +45,7 @@ export function applyStageControl(state: AppState, id: string, action: StageActi
   if (!validPlanDate(input.date)) throw new Error('Укажите дату.');
   if (input.completionDateUnknown && (action !== 'complete' || role !== 'management' || stage.completedOn || input.tasks.length || stage.schedule?.kind === 'summary')) throw new Error('Наблюдение без точной даты фиксирует управление отдельно от закрытия задач и сводных этапов.');
   if (action === 'accept' && !validPlanDate(stage.completedOn || stage.actualEnd)) throw new Error('Сначала подтвердите или уточните фактическую дату выполнения. Дата приёмки её не заменяет.');
-  const today = planToday(), now = new Date().toISOString();
+  const today = todayKey, now = timestamp;
   if (action !== 'delay' && input.date > today) throw new Error('Дата факта не может быть в будущем.');
   if (action === 'delay' && (input.date < today || input.date < stage.planStart)) throw new Error('Ожидаемое окончание должно быть сегодня или позже начала этапа.');
   stage.statusNote = input.note.trim();
@@ -61,7 +67,7 @@ export function applyStageControl(state: AppState, id: string, action: StageActi
       task.status = role === 'management' || !task.reviewerId ? 'done' : 'review';
       task.completedAt = task.status === 'done' ? `${input.date}T12:00:00+03:00` : undefined;
       task.completionNote = input.note.trim(); task.updatedAt = now;
-      task.history.unshift({ id: crypto.randomUUID(), timestamp: now, actor, kind: 'completed', text: `Отмечено при выполнении этапа: ${input.note.trim()}` });
+      task.history.unshift({ id: nextId('task-history'), timestamp: now, actor, kind: 'completed', text: `Отмечено при выполнении этапа: ${input.note.trim()}` });
     }
     if (input.completionDateUnknown) stage.completionObservedOn = input.date;
     else stage.completedOn = action === 'accept' ? stage.completedOn || stage.actualEnd! : input.date;
@@ -80,9 +86,18 @@ export function applyStageControl(state: AppState, id: string, action: StageActi
     if (!Number.isInteger(input.remainingDays) || input.remainingDays < 1 || input.remainingDays > 730) throw new Error('Остаток — от 1 до 730 рабочих дней.');
     if (!validPlanDate(input.readyOn)) throw new Error('Укажите дату доступности работ.');
     if (action === 'delay' && (!input.nextAction?.trim() || !input.issueOwner?.trim())) throw new Error('Укажите ближайшее действие и ответственного за задержку.');
-    stage.siteUpdate = { asOf: today, reviewOn: addScheduleDays(today, 7), remainingDays: input.remainingDays, readyOn: input.readyOn!, acceptanceOn: '', note: input.note.trim(), nextAction: input.nextAction?.trim() || '', issueOwner: input.issueOwner?.trim() || '', requestId: crypto.randomUUID() };
+    stage.siteUpdate = { asOf: today, reviewOn: addScheduleDays(today, 7), remainingDays: input.remainingDays, readyOn: input.readyOn!, acceptanceOn: '', note: input.note.trim(), nextAction: input.nextAction?.trim() || '', issueOwner: input.issueOwner?.trim() || '', requestId: nextId('schedule-review') };
   }
   for (const candidate of next.stages) if (!candidate.schedule && candidate.status === 'not_ready' && (candidate.dependencyId || candidate.dependency) && stageCanStart(next, candidate)) candidate.status = 'ready';
-  next.activity.unshift({ id: crypto.randomUUID(), timestamp: now, actor, text: `Этап «${stage.name}»: ${input.note.trim()}`, tone: action === 'delay' || action === 'rework' ? 'warning' : 'positive' });
+  next.activity.unshift({ id: nextId('activity'), timestamp: now, actor, text: `Этап «${stage.name}»: ${input.note.trim()}`, tone: action === 'delay' || action === 'rework' ? 'warning' : 'positive' });
   return next;
 }
+
+export const stageCommandSnapshot = (state: AppState, stageId: string) => { const stage = state.stages.find(row => row.id === stageId); return JSON.stringify([state.project.id, stage ? stageControlFingerprint(stage) : null]); };
+export const commitStageControl = (state: AppState, stageId: string, action: StageAction, input: Parameters<typeof applyStageControl>[3], actor: string, role: UserRole, userId: string | undefined, expected: string, clock: Clock, ids: IdGenerator, sink: StateChangeSink) => {
+ if (expected !== stageCommandSnapshot(state, stageId)) throw new Error('Этап обновился. Откройте форму заново.');
+ const next = applyStageControl(state, stageId, action, input, actor, role, userId, { clock, ids });
+ const summary = next.activity[0].text;
+ commitStateChange({ state: next, action: 'schedule_updated', summary }, sink);
+ return next;
+};

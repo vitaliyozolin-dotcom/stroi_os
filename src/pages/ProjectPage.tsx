@@ -2,8 +2,10 @@ import { requestApi } from '../infrastructure/api-http';
 import { FieldReportUpload } from '../components/FieldReportUpload';
 import { automaticSchedule } from '../../sites/lib/automatic-schedule.js';
 import { useScheduleToday } from '../components/ProjectScheduleDates';
-import { createProjectDocumentCommands } from '../application';
-import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
+import { uploadProjectDocument } from '../application/project-documents';
+import { documentUploader } from '../infrastructure/document-upload';
+import { projectDocumentCategories as categoryLabels } from '../domain/project-documents';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Building2,
@@ -28,16 +30,6 @@ import { formatDate, formatDateTime } from '../presentation/formatting';
 import type { AppState, AuthenticatedUser, ProjectDocument } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
-
-const categoryLabels: Record<NonNullable<ProjectDocument['category']>, string> = {
-  contract: 'Договор',
-  act: 'Акт',
-  invoice: 'Счёт',
-  upd: 'УПД',
-  waybill: 'ТН',
-  specification: 'Спецификация',
-  other: 'Прочее',
-};
 
 const statusLabels: Record<ProjectDocument['status'], string> = {
   draft: 'Черновик',
@@ -78,7 +70,9 @@ export function ProjectPage({
   onChange: (next: AppState) => void;
   onNavigate: (page: PageId, entityId?: string) => void;
 }) {
-  const saveChange = createProjectDocumentCommands(state, session.name, systemClock, runtimeIdGenerator, onChange);
+  const latestState = useRef(state); latestState.current = state;
+  const uploadAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => { uploadAbort.current?.abort(); }, [state.project.id]);
   const [search, setSearch] = useState('');
   const [showPhotoUpload, setShowPhotoUpload] = useState(false);
   const today = useScheduleToday();
@@ -132,51 +126,9 @@ export function ProjectPage({
     setUploading(true);
     setUploadError('');
     try {
-      const payload = new FormData();
-      payload.append('file', file);
-      const response = await requestApi(`/api/documents/upload?projectId=${encodeURIComponent(state.project.id)}`, {
-        method: 'POST',
-        body: payload,
-      });
-      const body = await response.json() as {
-        file?: { key: string; name: string; type: string; size: number; uploadedAt: string };
-        error?: string;
-      };
-      if (!response.ok || !body.file) throw new Error(body.error ?? 'upload_failed');
-      const timestamp = new Date().toISOString();
-      const document: ProjectDocument = {
-        id: uid('document'),
-        name: form.name.trim() || file.name.replace(/\.[^.]+$/, ''),
-        type: categoryLabels[form.category],
-        category: form.category,
-        number: form.number.trim() || undefined,
-        documentDate: form.documentDate,
-        status: form.status,
-        direction: form.direction,
-        counterpartyId: form.counterpartyId || undefined,
-        stageId: form.stageId || undefined,
-        clientVisible: form.clientVisible,
-        signedAt: form.status === 'signed' ? timestamp : undefined,
-        updatedAt: timestamp,
-        storageLocation: `ИКИОМА ОС / ${state.project.code} / Документы`,
-        fileKey: body.file.key,
-        fileName: body.file.name,
-        mimeType: body.file.type,
-        sizeBytes: body.file.size,
-        uploadedAt: body.file.uploadedAt,
-        uploadedBy: session.name,
-      };
-      saveChange({
-        ...state,
-        documents: [document, ...state.documents],
-        activity: [{
-          id: uid('activity'),
-          timestamp,
-          actor: session.name,
-          text: `Загружен документ «${document.name}»`,
-          tone: 'neutral',
-        }, ...state.activity],
-      });
+      const controller = new AbortController(); uploadAbort.current = controller;
+      const result = await uploadProjectDocument(() => latestState.current, { projectId: state.project.id, draft: { ...form }, file }, session, systemClock, runtimeIdGenerator, documentUploader, onChange, controller.signal);
+      if (!result.ok) throw new Error(result.error);
       setShowUpload(false);
       setForm(emptyDocumentForm());
       setFile(null);
@@ -186,7 +138,7 @@ export function ProjectPage({
         ? 'Файловое хранилище ещё не подключено к публикации.'
         : code === 'unsupported_file'
           ? 'Этот формат не поддерживается. Используйте PDF, изображение, Word или Excel.'
-          : 'Не удалось загрузить файл. Проверьте связь и повторите.');
+          : code || 'Не удалось загрузить файл. Проверьте связь и повторите.');
     } finally {
       setUploading(false);
     }
@@ -230,7 +182,7 @@ export function ProjectPage({
         </article>
       </section>
 
-      {showPhotoUpload && <FieldReportUpload state={state} actor={session.name} onChange={onChange} onClose={() => setShowPhotoUpload(false)} />}
+      {showPhotoUpload && <FieldReportUpload state={state} actor={session.name} role={session.role} onChange={onChange} onClose={() => setShowPhotoUpload(false)} />}
       <section className="panel field-reports-panel">
         <SectionHeader
           eyebrow="С объекта"
@@ -303,7 +255,7 @@ export function ProjectPage({
       </section>
 
       {showUpload && (
-        <Modal wide title="Загрузить документ" subtitle="Файл сохранится в защищённом хранилище проекта. Метаданные помогут потом найти его по этапу, контрагенту и статусу." onClose={() => setShowUpload(false)}>
+        <Modal wide title="Загрузить документ" subtitle="Файл сохранится в защищённом хранилище проекта. Метаданные помогут потом найти его по этапу, контрагенту и статусу." onClose={() => { uploadAbort.current?.abort(); setShowUpload(false); }}>
           <form className="modal-form" onSubmit={submitUpload}>
             <button type="button" className={file ? 'document-dropzone document-dropzone--selected' : 'document-dropzone'} onClick={() => fileInputRef.current?.click()}>
               <UploadCloud size={25} />
@@ -324,8 +276,8 @@ export function ProjectPage({
               <Field label="Этап"><select value={form.stageId} onChange={(event) => setForm({ ...form, stageId: event.target.value })}><option value="">Без этапа</option>{state.stages.map((item) => <option value={item.id} key={item.id}>{item.order}. {item.name}</option>)}</select></Field>
             </div>
             <label className="document-visibility"><input type="checkbox" checked={form.clientVisible} onChange={(event) => setForm({ ...form, clientVisible: event.target.checked })} /><span><strong>Показывать клиенту</strong><small>Документ появится в кабинете клиента после сохранения.</small></span></label>
-            {uploadError && <div className="entity-alert"><FileText size={18} /><span><strong>Файл не загружен</strong>{uploadError}</span></div>}
-            <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowUpload(false)}>Отмена</button><button type="submit" className="button button--primary" disabled={!file || uploading}>{uploading ? 'Загружаем…' : 'Загрузить и сохранить'}</button></div>
+            {uploadError && <div role="alert" className="entity-alert"><FileText size={18} /><span><strong>Файл не загружен</strong>{uploadError}</span></div>}
+            <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => { uploadAbort.current?.abort(); setShowUpload(false); }}>Отмена</button><button type="submit" className="button button--primary" disabled={!file || uploading}>{uploading ? 'Загружаем…' : 'Загрузить и сохранить'}</button></div>
           </form>
         </Modal>
       )}

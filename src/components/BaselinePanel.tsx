@@ -1,3 +1,5 @@
+import { createScheduleEditUseCases, scheduleEditSnapshot } from '../application/schedule-edits';
+import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
 import { useEffect, useState, type FormEvent } from 'react';
 import { CalendarDays, LockKeyhole } from 'lucide-react';
 import type { AppState, UserRole } from '../entities/index';
@@ -10,6 +12,8 @@ export const planShiftLabel = (days: number | null) => days === null ? 'Нет �
 export function BaselinePanel({ state, role, actor, onChange, compact = false }: {
   state: AppState; role: UserRole; actor: string; onChange: (state: AppState) => void; compact?: boolean;
 }) {
+  const commands = createScheduleEditUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const [expected, setExpected] = useState('');
   const summary = baselineOverview(state);
   const records = recordedScheduleStatus(state);
   const [editing, setEditing] = useState(false);
@@ -17,6 +21,7 @@ export function BaselinePanel({ state, role, actor, onChange, compact = false }:
   const [error, setError] = useState('');
   useEffect(() => { setEditing(false); }, [state.project.id]);
   const open = () => {
+    setExpected(scheduleEditSnapshot(state, 'baseline'));
     setForm({ source: 'document', note: '', start: state.project.baseline?.start || '', end: state.project.baseline?.end || '', targetDate: state.project.targetDate, reason: '',
       stages: state.stages.map((stage) => ({ id: stage.id, start: stage.baseline?.start || '', end: stage.baseline?.end || '' })) });
     setError(''); setEditing(true);
@@ -26,21 +31,9 @@ export function BaselinePanel({ state, role, actor, onChange, compact = false }:
     stages: state.stages.map((stage) => ({ id: stage.id, start: stage.baseline?.start || stage.planStart, end: stage.baseline?.end || stage.planEnd })) });
   const save = (event: FormEvent) => {
     event.preventDefault();
-    const next = structuredClone(state), now = new Date().toISOString();
-    let additions = 0;
-    const baseline = (start: string, end: string) => ({ start: start || undefined, end, source: form.source as 'document' | 'snapshot', note: form.note.trim(), recordedAt: now, recordedBy: actor });
-    if (!next.project.baseline && form.end) { next.project.baseline = baseline(form.start, form.end); additions++; }
-    for (const stage of next.stages) {
-      const dates = form.stages.find((row) => row.id === stage.id);
-      if (!stage.baseline && dates?.end) { stage.baseline = baseline(dates.start, dates.end); additions++; }
-    }
-    if (additions && !form.note.trim()) { setError('Укажите источник исходных дат: документ или договорённость.'); return; }
-    if (form.targetDate !== state.project.targetDate && !form.reason.trim()) { setError('Укажите причину переноса действующего срока.'); return; }
-    if (!additions && form.targetDate === state.project.targetDate) { setEditing(false); return; }
-    next.project.targetDate = form.targetDate;
-    next.project.planChangeReason = form.reason.trim();
-    next.activity.unshift({ id: crypto.randomUUID(), timestamp: now, actor, text: `План 0: зафиксировано исходных сроков — ${additions}.${form.reason.trim() ? ` Действующая сдача: ${form.targetDate}. ${form.reason.trim()}` : ''}`, tone: 'neutral' });
-    onChange(next); setEditing(false);
+    const result = commands.execute({ kind: 'baseline', expected, draft: form });
+    if (!result.ok) { setError(result.error); return; }
+    setEditing(false);
   };
   const handover = <div className="baseline-metrics baseline-metrics--handover">
     <div><small>Сдача клиенту · План 0</small><strong>{state.project.baseline ? formatDate(state.project.baseline.end, true) : 'Не зафиксирована'}</strong><span>{state.project.baseline?.source === 'snapshot' ? 'Версия на дату фиксации' : state.project.baseline?.note || 'Не подменяется датой окончания ППР'}</span></div>

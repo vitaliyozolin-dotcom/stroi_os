@@ -1,3 +1,5 @@
+import { createScheduleEditUseCases, scheduleEditSnapshot } from '../application/schedule-edits';
+import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
 import { useEffect, useState, type FormEvent } from 'react';
 import type { AppState, Stage, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
@@ -11,6 +13,8 @@ import { StageControlModal } from './StageControlModal';
 import { Field, Modal, SectionHeader, StatusBadge } from './Ui';
 
 export function StageRadar({ state, role, actor, userId, onChange, onNavigate }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (s: AppState) => void; onNavigate: (p: PageId) => void }) {
+  const commands = createScheduleEditUseCases(state, { name: actor, role, id: userId }, systemClock, runtimeIdGenerator, onChange);
+  const [forecastExpected, setForecastExpected] = useState('');
   const view = stageRadar(state), baseline = baselineOverview(state), today = planToday();
   const records = recordedScheduleStatus(state, today);
   const [action, setAction] = useState<{ id: string; action: StageAction } | null>(null);
@@ -23,11 +27,9 @@ export function StageRadar({ state, role, actor, userId, onChange, onNavigate }:
   const open = (s: Stage, type: StageAction) => setAction({ id: s.id, action: type });
   const saveForecast = (event: FormEvent) => {
     event.preventDefault();
-    if (!note.trim()) { setError('Укажите основание прогноза.'); return; }
-    const next = structuredClone(state), now = new Date().toISOString();
-    next.project = { ...next.project, workForecastDate: forecast, workForecastNote: note.trim(), workForecastUpdatedAt: now };
-    next.activity.unshift({ id: crypto.randomUUID(), timestamp: now, actor, text: `Прогноз окончания работ: ${forecast}. ${note.trim()}`, tone: 'neutral' });
-    onChange(next); setForecastForm(false);
+    const result = commands.execute({ kind: 'forecast', expected: forecastExpected, date: forecast, note });
+    if (!result.ok) { setError(result.error); return; }
+    setForecastForm(false);
   };
   const renderStage = (s: Stage) => {
       const due = view.due.some((d) => d.id === s.id), overdue = overdueById.get(s.id) || 0;
@@ -42,7 +44,7 @@ export function StageRadar({ state, role, actor, userId, onChange, onNavigate }:
       </article>;
   };
   return <section className="panel stage-radar"><SectionHeader title="Этапы: что требует внимания" action={<button type="button" className="text-button" onClick={() => onNavigate('schedule')}>Весь график</button>} />
-    <div className="stage-radar__forecast"><div><small>Прогноз окончания работ</small><strong>{view.complete ? 'Все этапы приняты' : view.forecast ? formatDate(view.forecast, true) : 'Пока не указан'}</strong><span>{view.complete ? 'Сдача клиенту оформляется отдельно' : view.forecast ? baseline.end ? `Оценка управления: ${planShiftLabel(planDays(view.forecast, baseline.end))} к Плану 0` : 'Нет полного Плана 0 для сравнения' : 'Отставание всего дома ещё не рассчитано'}</span>{view.forecast && <small>{state.project.workForecastNote}<br />Обновлено {formatDate(state.project.workForecastUpdatedAt!.slice(0, 10))} · {state.project.workForecastUpdatedBy || 'автор не указан'}</small>}</div>{role === 'management' && !view.complete && <button className="button button--secondary" type="button" onClick={() => { setForecast(state.project.workForecastDate || ''); setNote(state.project.workForecastNote || ''); setError(''); setForecastForm(true); }}>Уточнить прогноз</button>}</div>
+    <div className="stage-radar__forecast"><div><small>Прогноз окончания работ</small><strong>{view.complete ? 'Все этапы приняты' : view.forecast ? formatDate(view.forecast, true) : 'Пока не указан'}</strong><span>{view.complete ? 'Сдача клиенту оформляется отдельно' : view.forecast ? baseline.end ? `Оценка управления: ${planShiftLabel(planDays(view.forecast, baseline.end))} к Плану 0` : 'Нет полного Плана 0 для сравнения' : 'Отставание всего дома ещё не рассчитано'}</span>{view.forecast && <small>{state.project.workForecastNote}<br />Обновлено {formatDate(state.project.workForecastUpdatedAt!.slice(0, 10))} · {state.project.workForecastUpdatedBy || 'автор не указан'}</small>}</div>{role === 'management' && !view.complete && <button className="button button--secondary" type="button" onClick={() => { setForecast(state.project.workForecastDate || ''); setNote(state.project.workForecastNote || ''); setError(''); setForecastExpected(scheduleEditSnapshot(state, 'forecast')); setForecastForm(true); }}>Уточнить прогноз</button>}</div>
     {(view.stale || view.conflict) && <p className="blocker-note">{view.stale ? 'Прогноз устарел — подтвердите сроки заново. ' : ''}{view.conflict ? `Один из этапов ожидается позже: ${formatDate(view.lowerBound!)}. Прогноз проекта требует пересмотра.` : ''}</p>}
     <div className="stage-radar__grid">{visible.slice(0, 3).map(renderStage)}</div>
     {visible.length > 3 && <details className="stage-radar__more"><summary>Остальные этапы, требующие внимания · {visible.length - 3}</summary><div className="stage-radar__grid">{visible.slice(3).map(renderStage)}</div></details>}
