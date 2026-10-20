@@ -1,4 +1,4 @@
-import { createProcurementCommands } from '../application';
+import { createProcurementCommands, createProcurementUseCases } from '../application';
 import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
@@ -46,6 +46,9 @@ const dateAfterDays = (days: number) => {
 
 export function ProcurementPage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
   const saveChange = createProcurementCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
+  const procurement = createProcurementUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const [requirementProjectId, setRequirementProjectId] = useState(state.project.id);
+  const [requirementError, setRequirementError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState<'active' | 'all' | 'risk'>('active');
   const [statusFilter, setStatusFilter] = useState<ProcurementStatus | null>(null);
@@ -75,16 +78,8 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
 
   const addRequirement = (event: FormEvent) => {
     event.preventDefault();
-    const quantity = Number(form.quantity);
-    const budget = Number(form.budget);
-    if (!form.item.trim() || quantity <= 0) return;
-    const supplier = state.counterparties.find((item) => item.id === form.supplierId);
-    const budgetLine = state.budgetLines.find((item) => item.stageIds.includes(form.stageId));
-    saveChange({
-      ...state,
-      procurement: [{ id: uid('supply'), stageId: form.stageId, budgetLineId: budgetLine?.id, item: form.item.trim(), quantity, unit: form.unit, neededBy: form.neededBy, status: 'need', budget: budget || 0, supplier: supplier?.name ?? 'Не выбран', supplierId: supplier?.id, owner: form.owner.trim() || actor }, ...state.procurement],
-      activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `Создана потребность: ${form.item.trim()}`, tone: 'neutral' }, ...state.activity],
-    });
+    const result = procurement.createRequirement({ projectId: requirementProjectId, draft: { ...form, quantity: Number(form.quantity), budget: Number(form.budget) } });
+    if (!result.ok) { setRequirementError(result.error); return; }
     setShowForm(false);
     setForm({ ...form, item: '', quantity: '', budget: '', supplierId: '' });
   };
@@ -157,7 +152,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
           <h1>Снабжение и материалы</h1>
           <p>Материал появляется в закупке из графика работ и проходит приёмку до выдачи бригаде.</p>
         </div>
-        {role !== 'client' && <button type="button" data-tour="procurement-add" className="button button--primary" onClick={() => setShowForm(true)}><Plus size={18} /> Создать потребность</button>}
+        {role !== 'client' && <button type="button" data-tour="procurement-add" className="button button--primary" onClick={() => { setRequirementProjectId(state.project.id); setRequirementError(''); setShowForm(true); }}><Plus size={18} /> Создать потребность</button>}
       </section>
 
       <section className="supply-metrics">
@@ -218,6 +213,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
       {showForm && (
         <Modal title="Новая потребность" subtitle="Создаётся до запроса цен — с привязкой к этапу и дате потребности." onClose={() => setShowForm(false)}>
           <form className="modal-form" onSubmit={addRequirement}>
+            {requirementError && <p role="alert" className="form-warning">{requirementError}</p>}
             <Field label="Материал или комплект"><input required value={form.item} onChange={(event) => setForm({ ...form, item: event.target.value })} placeholder="Например: пароизоляционная мембрана" /></Field>
             <div className="form-grid form-grid--three">
               <Field label="Количество"><input required min="0.01" step="0.01" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></Field>

@@ -1,4 +1,6 @@
 export { commitStateChange, createMutationContext, createPageStateSink } from './state-change.ts';
+export { createProcurementUseCases, createProjectRequirement } from './procurement.ts';
+export type { CreateRequirementInput, ProcurementCommandResult } from './procurement.ts';
 export { createCounterpartyUseCases, saveProjectCounterparty, addProjectCounterpartyDocument } from './counterparties.ts';
 export type { SaveCounterpartyInput, CounterpartyCommandResult, AddCounterpartyDocumentInput, CounterpartyDocumentResult } from './counterparties.ts';
 export { approveProjectExpense, acceptProjectExpense, recordProjectPayment, recordProjectReceipt, createFinanceUseCases } from './finance.ts';
