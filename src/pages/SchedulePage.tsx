@@ -1,3 +1,4 @@
+import { stagePlanSnapshot } from '../domain/schedule-planning';
 import { BaselinePanel, planShiftLabel } from '../components/BaselinePanel';
 import { StageControlModal } from '../components/StageControlModal';
 import { SiteProgress } from '../components/SiteProgress';
@@ -7,8 +8,8 @@ import { useScheduleToday } from '../components/ProjectScheduleDates';
 import type { StageAction } from '../application/stage-control';
 import { planDays as baselineDays } from '../../sites/lib/plan-baseline.js';
 import { planToday } from '../../sites/lib/plan-baseline.js';
-import { createScheduleCommands } from '../application';
-import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
+import { createScheduleCommands, createSchedulePlanningUseCases } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   AlertTriangle,
@@ -58,6 +59,9 @@ export function SchedulePage(props: SchedulePageProps) {
 
 function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: SchedulePageProps) {
   const saveChange = createScheduleCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
+  const planning = createSchedulePlanningUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const [planExpected, setPlanExpected] = useState('');
+  const [planStageId, setPlanStageId] = useState('');
   const defaultStage = state.stages.find((stage) => ['in_progress', 'rework', 'awaiting_inspection', 'blocked'].includes(stage.status)) ?? state.stages.find((stage) => stage.status !== 'accepted') ?? state.stages[0];
   const [selectedId, setSelectedId] = useState(defaultStage?.id ?? '');
   const [detailOpen, setDetailOpen] = useState(false);
@@ -93,6 +97,8 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
   const openStage = (id: string) => { setSelectedId(id); setDetailOpen(true); };
 
   const openDateEdit = () => {
+    setPlanExpected(stagePlanSnapshot(state, selected.id));
+    setPlanStageId(selected.id);
     const dependencyStage = state.stages.find((stage) => stage.id === selected.dependencyId)
       ?? state.stages.find((stage) => stage.name === selected.dependency || stage.shortName === selected.dependency);
     setDateForm({ planStart: selected.planStart, planEnd: selected.planEnd, forecastEnd: selected.forecastEnd, dependencyId: dependencyStage?.id ?? '', responsibleId: selected.responsibleId ?? '', reason: '' });
@@ -102,26 +108,8 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
 
   const saveDates = (event: FormEvent) => {
     event.preventDefault();
-    if (!dateForm.planStart || dateForm.planEnd < dateForm.planStart || dateForm.forecastEnd < dateForm.planStart) return;
-    if ((dateForm.planStart !== selected.planStart || dateForm.planEnd !== selected.planEnd || dateForm.forecastEnd !== selected.forecastEnd) && !dateForm.reason.trim()) { setDateError('Укажите причину изменения срока.'); return; }
-    const dependency = state.stages.find((stage) => stage.id === dateForm.dependencyId);
-    const responsible = state.counterparties.find((item) => item.id === dateForm.responsibleId);
-    saveChange({
-      ...state,
-      stages: state.stages.map((stage) => stage.id === selected.id ? {
-        ...stage,
-        planChangeReason: dateForm.reason.trim(),
-        forecastReason: dateForm.reason.trim(),
-        planStart: dateForm.planStart,
-        planEnd: dateForm.planEnd,
-        forecastEnd: dateForm.forecastEnd,
-        dependencyId: stage.schedule ? stage.dependencyId : dependency?.id,
-        dependency: stage.schedule ? stage.dependency : dependency?.name,
-        responsibleId: responsible?.id,
-        responsible: responsible?.name ?? 'Не назначен',
-      } : stage),
-      activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `Обновлён график этапа «${selected.name}»`, tone: dateForm.forecastEnd > dateForm.planEnd ? 'warning' : 'neutral' }, ...state.activity],
-    });
+    const result = planning.editPlan({ stageId: planStageId, expected: planExpected, draft: dateForm });
+    if (!result.ok) { setDateError(result.error); return; }
     setEditingDates(false);
   };
 

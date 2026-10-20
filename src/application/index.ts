@@ -1,3 +1,4 @@
+export { createSchedulePlanningUseCases, editProjectStagePlan } from './schedule-planning.ts';
 export { commitStateChange, createMutationContext, createPageStateSink } from './state-change.ts';
 export { createProcurementUseCases, createProjectRequirement } from './procurement.ts';
 export type { CreateRequirementInput, ProcurementCommandResult } from './procurement.ts';
