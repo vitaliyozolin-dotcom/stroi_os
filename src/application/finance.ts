@@ -4,6 +4,8 @@ import {
   approveExpenseEntry, acceptExpenseEntry, recordPaymentEntry, recordReceiptEntry,
   type FinanceActor, type FinanceEntryResult, type FinanceFactInput,
 } from '../domain/finance/index.js';
+import type { FinanceCommandContext } from './finance-context';
+export type { FinanceCommandContext } from './finance-context';
 import type { Clock, IdGenerator } from './ports';
 import { commitStateChange, type StateChangeSink } from './state-change.ts';
 import { createProjectCommitment, type CreateCommitmentInput } from './finance-commitment.js';
@@ -13,7 +15,6 @@ import { importProjectFinanceHistory, type HistoryImportCommand } from './financ
 
 export type FinanceCommandResult = { ok: true; change: StateChange | null } | { ok: false; error: string };
 type FactCommand = FinanceFactInput & { entryId: string };
-export interface FinanceCommandContext { identity: FinanceActor; clock: Clock; ids: IdGenerator }
 const missingEntry = (): FinanceCommandResult => ({ ok: false, error: 'Финансовая операция не найдена. Обновите список.' });
 const money = (value: number) => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
 
