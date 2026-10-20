@@ -87,7 +87,7 @@ test('business pages persist project changes through StateChange sinks', () => {
   for (const page of pages) {
     const contents = source(`src/pages/${page}`);
     assert.doesNotMatch(contents, /\bonChange\(\{\s*\.\.\.state/, `${page} writes AppState directly`);
-    assert.match(contents, /commitStateChange|create[A-Z][A-Za-z0-9_]+Commands|createFinanceUseCases|createCounterpartyUseCases|createProcurementUseCases/, `${page} bypasses StateChange metadata`);
+    assert.match(contents, /commitStateChange|create[A-Z][A-Za-z0-9_]+Commands|createFinanceUseCases|createCounterpartyUseCases|createProcurementUseCases|createMarketingUseCases/, `${page} bypasses StateChange metadata`);
   }
 });
 
