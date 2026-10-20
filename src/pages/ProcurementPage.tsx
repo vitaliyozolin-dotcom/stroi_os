@@ -1,5 +1,6 @@
-import { createProcurementCommands, createProcurementUseCases } from '../application';
-import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
+import { procurementSnapshot } from '../domain/procurement-workflow';
+import { createProcurementUseCases } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
@@ -45,7 +46,6 @@ const dateAfterDays = (days: number) => {
 };
 
 export function ProcurementPage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
-  const saveChange = createProcurementCommands(state, actor, systemClock, runtimeIdGenerator, onChange);
   const procurement = createProcurementUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
   const [requirementProjectId, setRequirementProjectId] = useState(state.project.id);
   const [requirementError, setRequirementError] = useState('');
@@ -55,6 +55,8 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [counterpartyId, setCounterpartyId] = useState<string | null>(null);
+  const [workflowError, setWorkflowError] = useState('');
+  const [quoteExpected, setQuoteExpected] = useState('');
   const [quoteForId, setQuoteForId] = useState<string | null>(null);
   const [quoteForm, setQuoteForm] = useState({ supplierId: '', amount: '', deliveryDays: '', paymentTerms: '', source: 'Коммерческое предложение', comment: '' });
   const [form, setForm] = useState({ stageId: state.stages[0]?.id ?? '', item: '', quantity: '', unit: 'шт', neededBy: dateAfterDays(14), budget: '', supplierId: '', owner: state.project.foreman || actor });
@@ -85,67 +87,28 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
   };
 
   const moveNext = (id: string) => {
-    const current = state.procurement.find((item) => item.id === id);
-    if (!current) return;
-    const nextStatus = statusOrder[Math.min(statusOrder.indexOf(current.status) + 1, statusOrder.length - 1)];
-    const today = new Date().toISOString().slice(0, 10);
-    saveChange({
-      ...state,
-      procurement: state.procurement.map((item) => item.id === id ? {
-        ...item,
-        status: nextStatus,
-        orderedAt: nextStatus === 'ordered' ? item.orderedAt ?? today : item.orderedAt,
-        deliveredAt: ['delivered', 'accepted', 'issued'].includes(nextStatus) ? item.deliveredAt ?? today : item.deliveredAt,
-        risk: nextStatus === 'accepted' || nextStatus === 'issued' ? undefined : item.risk,
-      } : item),
-      activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `${current.item}: ${statusLabels[nextStatus].toLocaleLowerCase('ru')}`, tone: nextStatus === 'accepted' || nextStatus === 'issued' ? 'positive' : 'neutral' }, ...state.activity],
-    });
+    const result = procurement.change({ action: 'advance', itemId: id, expected: procurementSnapshot(state, id) });
+    setWorkflowError(result.ok ? '' : result.error);
   };
-
-  const selected = state.procurement.find((item) => item.id === selectedId) ?? null;
-
+  const selected = state.procurement.find(item => item.id === selectedId) ?? null;
   const selectQuote = (quoteId: string) => {
-    const quote = state.supplierQuotes.find((item) => item.id === quoteId);
-    if (!quote || !selected) return;
-    saveChange({
-      ...state,
-      supplierQuotes: state.supplierQuotes.map((item) => item.procurementItemId === selected.id ? { ...item, status: item.id === quoteId ? 'selected' : 'rejected' } : item),
-      procurement: state.procurement.map((item) => item.id === selected.id ? { ...item, supplier: quote.supplier, supplierId: quote.supplierId ?? state.counterparties.find((profile) => profile.name === quote.supplier)?.id, budget: quote.amount, status: item.status === 'need' ? 'rfq' : item.status } : item),
-      activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `${selected.item}: выбран поставщик ${quote.supplier} за ${money(quote.amount)}`, tone: 'positive' }, ...state.activity],
-    });
+    if (!selected) return;
+    const result = procurement.change({ action: 'select', itemId: selected.id, quoteId, expected: procurementSnapshot(state, selected.id, true) });
+    setWorkflowError(result.ok ? '' : result.error);
   };
-
   const addQuote = (event: FormEvent) => {
     event.preventDefault();
-    const procurementItem = state.procurement.find((item) => item.id === quoteForId);
-    const supplier = state.counterparties.find((item) => item.id === quoteForm.supplierId);
-    const amount = Number(quoteForm.amount);
-    const deliveryDays = Number(quoteForm.deliveryDays);
-    if (!procurementItem || !supplier || amount <= 0 || deliveryDays < 0 || !quoteForm.paymentTerms.trim()) return;
-    saveChange({
-      ...state,
-      supplierQuotes: [{
-        id: uid('quote'),
-        procurementItemId: procurementItem.id,
-        supplier: supplier.name,
-        supplierId: supplier.id,
-        amount,
-        deliveryDays,
-        paymentTerms: quoteForm.paymentTerms.trim(),
-        source: quoteForm.source.trim() || 'Коммерческое предложение',
-        status: 'received',
-        comment: quoteForm.comment.trim() || undefined,
-      }, ...state.supplierQuotes],
-      procurement: state.procurement.map((item) => item.id === procurementItem.id && item.status === 'need' ? { ...item, status: 'rfq' } : item),
-      activity: [{ id: uid('activity'), timestamp: new Date().toISOString(), actor, text: `Получено предложение ${supplier.name}: ${procurementItem.item} за ${money(amount)}`, tone: 'neutral' }, ...state.activity],
-    });
-    setQuoteForId(null);
-    setSelectedId(procurementItem.id);
+    if (!quoteForId) return;
+    const result = procurement.change({ action: 'quote', itemId: quoteForId, expected: quoteExpected, ...quoteForm, amount: Number(quoteForm.amount), deliveryDays: Number(quoteForm.deliveryDays) });
+    if (!result.ok) { setWorkflowError(result.error); return; }
+    setWorkflowError('');
+    setQuoteForId(null); setSelectedId(quoteForId);
     setQuoteForm({ supplierId: '', amount: '', deliveryDays: '', paymentTerms: '', source: 'Коммерческое предложение', comment: '' });
   };
 
   return (
     <div className="page-stack">
+      {workflowError && !quoteForId && !selected && <p role="alert" className="form-warning">{workflowError}</p>}
       <section className="page-title-row">
         <div>
           <span className="eyebrow">От потребности до списания</span>
@@ -233,6 +196,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
 
       {selected && (
         <Modal wide title={selected.item} subtitle={`${statusLabels[selected.status]} · нужно к ${formatDate(selected.neededBy, true)}`} onClose={() => setSelectedId(null)}>
+          {workflowError && <p role="alert" className="form-warning">{workflowError}</p>}
           <div className="entity-detail-grid">
             <section className="entity-detail-card"><small>Потребность</small><strong>{selected.quantity} {selected.unit}</strong><span>{selected.reason ?? 'Основание не заполнено'}</span></section>
             <section className="entity-detail-card"><small>Проект и этап</small><strong>{state.stages.find((item) => item.id === selected.stageId)?.name ?? 'Этап не найден'}</strong><span>{state.budgetLines.find((item) => item.id === selected.budgetLineId)?.name ?? 'Без статьи бюджета'}</span></section>
@@ -240,7 +204,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
             <section className="entity-detail-card"><small>Ответственный</small><strong>{selected.owner}</strong><span>{selected.deliveryAddress ?? `Объект ${state.project.code}`}</span></section>
           </div>
           {selected.risk && <div className="entity-alert"><AlertTriangle size={18} /><span><strong>Риск поставки</strong>{selected.risk}</span></div>}
-          <div className="entity-detail-section"><SectionHeader eyebrow="Сравнение" title="Предложения поставщиков" action={<div className="section-action-row"><span className="count-badge">{state.supplierQuotes.filter((item) => item.procurementItemId === selected.id).length}</span>{role !== 'client' && <button type="button" className="button button--secondary button--compact" onClick={() => { setQuoteForId(selected.id); setSelectedId(null); }}><Plus size={15} /> Добавить КП</button>}</div>} />
+          <div className="entity-detail-section"><SectionHeader eyebrow="Сравнение" title="Предложения поставщиков" action={<div className="section-action-row"><span className="count-badge">{state.supplierQuotes.filter((item) => item.procurementItemId === selected.id).length}</span>{role !== 'client' && <button type="button" className="button button--secondary button--compact" onClick={() => { setQuoteExpected(procurementSnapshot(state, selected.id)); setWorkflowError(''); setQuoteForId(selected.id); setSelectedId(null); }}><Plus size={15} /> Добавить КП</button>}</div>} />
             <div className="quote-list">{state.supplierQuotes.filter((item) => item.procurementItemId === selected.id).map((quote) => <article key={quote.id} className={quote.status === 'selected' ? 'quote-card quote-card--selected' : 'quote-card'}><div><button type="button" className="entity-link entity-link--compact" disabled={!quote.supplierId} onClick={() => { setSelectedId(null); setCounterpartyId(quote.supplierId ?? null); }}>{quote.supplier}</button><small>{quote.source} · {quote.deliveryDays} дн.</small></div><strong>{money(quote.amount)}</strong><p>{quote.paymentTerms}{quote.comment ? ` · ${quote.comment}` : ''}</p>{quote.status === 'selected' ? <StatusBadge label="Выбрано" tone="positive" /> : role !== 'client' ? <button type="button" className="button button--secondary button--compact" onClick={() => selectQuote(quote.id)}>Выбрать</button> : <StatusBadge label="Предложение" />}</article>)}</div>
             {!state.supplierQuotes.some((item) => item.procurementItemId === selected.id) && <div className="table-empty">Предложения ещё не заведены. Они появятся на этапе сбора цен.</div>}
           </div>
@@ -248,7 +212,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
           <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setSelectedId(null)}>Закрыть</button>{role !== 'client' && selected.status !== 'issued' && <button type="button" className="button button--primary" onClick={() => moveNext(selected.id)}>Перевести: {statusLabels[statusOrder[Math.min(statusOrder.indexOf(selected.status) + 1, statusOrder.length - 1)]]} <ArrowRight size={17} /></button>}</div>
         </Modal>
       )}
-      {quoteForId && <Modal title="Добавить коммерческое предложение" subtitle={state.procurement.find((item) => item.id === quoteForId)?.item} onClose={() => setQuoteForId(null)}><form className="modal-form" onSubmit={addQuote}>{!state.counterparties.some((item) => (item.type === 'supplier' || item.type === 'contractor') && item.status !== 'blocked') && <div className="form-warning"><AlertTriangle size={18} /><span>Сначала добавьте поставщика в единый справочник.</span></div>}<Field label="Поставщик"><select required value={quoteForm.supplierId} onChange={(event) => setQuoteForm({ ...quoteForm, supplierId: event.target.value })}><option value="">Выберите поставщика</option>{state.counterparties.filter((item) => (item.type === 'supplier' || item.type === 'contractor') && item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field><div className="form-grid"><Field label="Цена, ₽"><input required min="1" type="number" inputMode="numeric" value={quoteForm.amount} onChange={(event) => setQuoteForm({ ...quoteForm, amount: event.target.value })} /></Field><Field label="Срок поставки, дней"><input required min="0" type="number" inputMode="numeric" value={quoteForm.deliveryDays} onChange={(event) => setQuoteForm({ ...quoteForm, deliveryDays: event.target.value })} /></Field></div><Field label="Условия оплаты"><input required value={quoteForm.paymentTerms} onChange={(event) => setQuoteForm({ ...quoteForm, paymentTerms: event.target.value })} placeholder="Аванс / постоплата / отсрочка" /></Field><div className="form-grid"><Field label="Источник"><input value={quoteForm.source} onChange={(event) => setQuoteForm({ ...quoteForm, source: event.target.value })} /></Field><Field label="Комментарий"><input value={quoteForm.comment} onChange={(event) => setQuoteForm({ ...quoteForm, comment: event.target.value })} /></Field></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setQuoteForId(null)}>Отмена</button><button type="submit" className="button button--primary" disabled={!quoteForm.supplierId}>Сохранить предложение</button></div></form></Modal>}
+      {quoteForId && <Modal title="Добавить коммерческое предложение" subtitle={state.procurement.find((item) => item.id === quoteForId)?.item} onClose={() => setQuoteForId(null)}><form className="modal-form" onSubmit={addQuote}>{workflowError && <p role="alert" className="form-warning">{workflowError}</p>}{!state.counterparties.some((item) => (item.type === 'supplier' || item.type === 'contractor') && item.status !== 'blocked') && <div className="form-warning"><AlertTriangle size={18} /><span>Сначала добавьте поставщика в единый справочник.</span></div>}<Field label="Поставщик"><select required value={quoteForm.supplierId} onChange={(event) => setQuoteForm({ ...quoteForm, supplierId: event.target.value })}><option value="">Выберите поставщика</option>{state.counterparties.filter((item) => (item.type === 'supplier' || item.type === 'contractor') && item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field><div className="form-grid"><Field label="Цена, ₽"><input required min="1" type="number" inputMode="numeric" value={quoteForm.amount} onChange={(event) => setQuoteForm({ ...quoteForm, amount: event.target.value })} /></Field><Field label="Срок поставки, дней"><input required min="0" type="number" inputMode="numeric" value={quoteForm.deliveryDays} onChange={(event) => setQuoteForm({ ...quoteForm, deliveryDays: event.target.value })} /></Field></div><Field label="Условия оплаты"><input required value={quoteForm.paymentTerms} onChange={(event) => setQuoteForm({ ...quoteForm, paymentTerms: event.target.value })} placeholder="Аванс / постоплата / отсрочка" /></Field><div className="form-grid"><Field label="Источник"><input value={quoteForm.source} onChange={(event) => setQuoteForm({ ...quoteForm, source: event.target.value })} /></Field><Field label="Комментарий"><input value={quoteForm.comment} onChange={(event) => setQuoteForm({ ...quoteForm, comment: event.target.value })} /></Field></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setQuoteForId(null)}>Отмена</button><button type="submit" className="button button--primary" disabled={!quoteForm.supplierId}>Сохранить предложение</button></div></form></Modal>}
       {counterpartyId && <CounterpartyModal state={state} counterpartyId={counterpartyId} onClose={() => setCounterpartyId(null)} />}
     </div>
   );

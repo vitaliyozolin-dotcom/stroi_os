@@ -11,7 +11,7 @@ export { importProjectFinanceHistory, historyImportSnapshot } from './finance-hi
 export type { HistoryImportCommand, HistoryImportCommandResult } from './finance-history.ts';
 export { createProjectCommitment } from './finance-commitment.js';
 export type { CreateCommitmentInput, CreateCommitmentResult } from './finance-commitment.js';
-export { createClientDecisionCommands, createMarketingCommands, createProcurementCommands, createProjectDocumentCommands, createScheduleCommands, createSettingsCommands } from './page-commands.ts';
+export { createClientDecisionCommands, createMarketingCommands, createProjectDocumentCommands, createScheduleCommands, createSettingsCommands } from './page-commands.ts';
 export { applyLocalChange, applyRemoteSnapshot, createSyncModel, reconcileRemoteSnapshot, reconcileRevisionConflict, reconcileSavedSnapshot } from './project-sync.ts';
 export type { RemoteReconciliation, SaveReconciliation, SyncModel, SyncSnapshot } from './project-sync.ts';
 export { applyProjectRemote, createProjectWorkflow, flushProjectChanges, hydrateProject, keepProjectLocalVersion, retryProjectSync, switchProjectWorkflow, useProjectServerVersion } from './project-sync-workflow.ts';

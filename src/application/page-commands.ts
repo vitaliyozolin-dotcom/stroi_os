@@ -19,7 +19,6 @@ const pageCommand = (action: string, summary: string): PageCommandFactory =>
   );
 
 export const createScheduleCommands = pageCommand('schedule_updated', 'Обновлён график проекта');
-export const createProcurementCommands = pageCommand('procurement_updated', 'Обновлено снабжение проекта');
 export const createClientDecisionCommands = pageCommand('client_decision_updated', 'Обновлено решение клиента');
 export const createMarketingCommands = pageCommand('lead_updated', 'Обновлена воронка продаж');
 export const createProjectDocumentCommands = pageCommand('document_updated', 'Обновлены документы проекта');
