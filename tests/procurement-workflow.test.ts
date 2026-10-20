@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { seedState } from '../src/seed.ts';
 import { procurementSnapshot, type ProcurementWorkflowInput } from '../src/domain/procurement-workflow.ts';
-import { createProcurementUseCases } from '../src/application/procurement.ts';
+import { createProcurementUseCases } from './support/module-project.ts';
 const clock = { now: () => '2026-10-20T12:00:00Z' }, ids = { next: (prefix: string) => `${prefix}-test` };
 const fixture = () => { const state = structuredClone(seedState); state.counterparties = [{ id: 'vendor', name: 'Поставщик', type: 'supplier', status: 'active' }]; state.procurement = [{ id: 'item', stageId: state.stages[0].id, item: 'Материал', quantity: 1, unit: 'шт', neededBy: '', status: 'need', budget: 0, supplier: 'Не выбран', owner: 'Прораб', risk: 'Риск' }]; state.supplierQuotes = []; return state; };
 const useCases = (state: ReturnType<typeof fixture>, role: 'management' | 'foreman' | 'client' = 'management') => createProcurementUseCases(state, { name: 'Автор', role }, clock, ids, () => {});

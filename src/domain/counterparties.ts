@@ -1,6 +1,7 @@
-import type { AppState, CounterpartyProfile } from '../entities/index';
+import type { ContactsSnapshot } from './contexts';
+import type { CounterpartyProfile } from '../entities/index';
 
-export const counterpartySnapshot = (state: AppState, id: string) => JSON.stringify([
+export const counterpartySnapshot = (state: ContactsSnapshot, id: string) => JSON.stringify([
   state.project.id, id, id ? state.counterparties.find(profile => profile.id === id) : null,
 ]);
 

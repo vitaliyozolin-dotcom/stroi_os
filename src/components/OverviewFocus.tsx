@@ -4,8 +4,8 @@ import { ArrowUpRight, CheckCircle2, ChevronRight } from 'lucide-react';
 import type { AppState, DashboardWidget, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { paidAmountFor, paymentMovements, unallocatedExpenses } from '../domain/finance';
-import { recordedScheduleStatus } from '../../sites/lib/stage-control.js';
-import { planToday } from '../../sites/lib/plan-baseline.js';
+import { recordedScheduleStatus } from '../domain/construction/index.js';
+import { planToday } from '../domain/construction/index.js';
 import { formatDate, money } from '../presentation/formatting';
 
 type Action = { title: string; detail: string; page?: PageId; entityId?: string };

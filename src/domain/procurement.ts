@@ -1,11 +1,12 @@
-import type { AppState, ProcurementItem } from '../entities/index';
+import type { SupplySnapshot } from './contexts';
+import type { ProcurementItem } from '../entities/index';
 
 export interface RequirementDraft {
   stageId: string; item: string; quantity: number; unit: string; neededBy: string;
   budget: number; supplierId: string; owner: string;
 }
 
-export const prepareRequirement = (state: AppState, input: RequirementDraft, id: string, actor: string): { ok: true; item: ProcurementItem } | { ok: false; error: string } => {
+export const prepareRequirement = (state: SupplySnapshot, input: RequirementDraft, id: string, actor: string): { ok: true; item: ProcurementItem } | { ok: false; error: string } => {
   if (!input.item.trim()) return { ok: false, error: 'Укажите материал или комплект.' };
   if (!Number.isFinite(input.quantity) || input.quantity <= 0) return { ok: false, error: 'Количество должно быть положительным числом.' };
   if (!Number.isFinite(input.budget) || input.budget < 0) return { ok: false, error: 'Бюджет должен быть неотрицательным числом.' };

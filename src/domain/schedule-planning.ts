@@ -1,8 +1,8 @@
-import type { AppState } from '../entities/index';
+import type { ConstructionSnapshot } from './contexts';
 export interface StagePlanDraft { planStart: string; planEnd: string; forecastEnd: string; dependencyId: string; responsibleId: string; reason: string }
-export const stagePlanSnapshot = (state: AppState, id: string) => JSON.stringify([state.project.id, state.stages.find(stage => stage.id === id)]);
+export const stagePlanSnapshot = (state: ConstructionSnapshot, id: string) => JSON.stringify([state.project.id, state.stages.find(stage => stage.id === id)]);
 const validDate = (value: string) => { const date = new Date(`${value}T00:00:00.000Z`); return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value; };
-export const planStage = (state: AppState, stageId: string, draft: StagePlanDraft, expected: string) => {
+export const planStage = (state: ConstructionSnapshot, stageId: string, draft: StagePlanDraft, expected: string) => {
   const stage = state.stages.find(row => row.id === stageId);
   if (!stage || expected !== stagePlanSnapshot(state, stageId)) return { ok: false as const, error: 'Этап обновился. Откройте редактирование графика заново.' };
   if (![draft.planStart, draft.planEnd, draft.forecastEnd].every(validDate) || draft.planEnd < draft.planStart || draft.forecastEnd < draft.planStart) return { ok: false as const, error: 'Укажите корректные сроки: окончание не раньше начала.' };

@@ -1,3 +1,5 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createSalesRepository } from '../infrastructure/module-project';
 import { leadSnapshot, marketingStages as stageOrder, marketingStageLabels as stageLabels, marketingSourceLabels as sourceLabels } from '../domain/marketing';
 import { requestApi } from '../infrastructure/api-http';
 import { createMarketingUseCases } from '../application';
@@ -42,7 +44,7 @@ const stageTone = (stage: LeadStage): 'neutral' | 'positive' | 'warning' | 'dang
 };
 
 export function MarketingPage({ state, actor, role, focusId, onChange }: { state: AppState; actor: string; role: UserRole; focusId?: string | null; onChange: (next: AppState) => void }) {
-  const marketing = createMarketingUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const marketing = createMarketingUseCases(useModuleRepository(createSalesRepository, state, onChange), { name: actor, role }, systemClock, runtimeIdGenerator);
   const latest = useRef(marketing); latest.current = marketing;
   const [commandError, setCommandError] = useState('');
   const [importError, setImportError] = useState('');

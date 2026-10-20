@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { automaticSchedule, plannedStageDays } from '../../sites/lib/automatic-schedule.js';
-import { planToday } from '../../sites/lib/plan-baseline.js';
+import { automaticSchedule, plannedStageDays } from '../domain/construction/index.js';
+import { planToday } from '../domain/construction/index.js';
 import type { AppState } from '../entities/index';
 import { formatDate } from '../presentation/formatting';
 import { SectionHeader } from './Ui';

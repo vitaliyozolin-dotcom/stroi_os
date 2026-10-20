@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { seedState } from '../src/seed.ts';
-import { createMarketingUseCases } from '../src/application/marketing.ts';
+import { createMarketingUseCases } from './support/module-project.ts';
 import { leadSnapshot, type LeadDraft } from '../src/domain/marketing.ts';
 import { readFileSync } from 'node:fs';
 const clock = { now: () => '2026-10-20T12:00:00Z' };

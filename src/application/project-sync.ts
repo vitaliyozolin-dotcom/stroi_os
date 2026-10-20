@@ -1,7 +1,7 @@
 import { mergeProjectStates, synchronizeDerivedProgress } from '../domain/index.ts';
 import type { ChangeMetadata } from '../domain/change.ts';
 import type { AppState, StageSchedule, StageSiteUpdate } from '../entities/index.ts';
-import { schedulePayload, sitePayload } from '../../sites/lib/schedule-forecast.js';
+import { schedulePayload, sitePayload } from '../domain/construction/index.js';
 
 export interface SyncSnapshot {
   state: AppState;

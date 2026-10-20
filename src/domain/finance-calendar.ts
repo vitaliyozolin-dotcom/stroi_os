@@ -1,4 +1,4 @@
-import type { AppState, FinanceEntry } from '../entities/index';
+import type { FinanceEntry } from '../entities/index';
 import { paidAmountFor } from './finance.ts';
 
 export type FinanceCalendarGroup = 'overdue' | 'next7' | 'later' | 'undated';
@@ -18,7 +18,7 @@ export const validFinanceDueDate = (value: unknown): value is string => {
 };
 
 // Seven calendar days including today. An invoice/import date is never a due date.
-export function financeCalendarItems(state: Pick<AppState, 'financeEntries'>, today = financeCalendarToday()): FinanceCalendarItem[] {
+export function financeCalendarItems(state: { financeEntries: FinanceEntry[] }, today = financeCalendarToday()): FinanceCalendarItem[] {
   if (!validFinanceDueDate(today)) throw new Error('Invalid calendar date');
   const end = new Date(`${today}T12:00:00Z`);
   end.setUTCDate(end.getUTCDate() + 6);

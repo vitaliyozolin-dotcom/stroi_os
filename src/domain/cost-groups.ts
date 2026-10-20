@@ -1,16 +1,17 @@
-import type { AppState, CostGroup, FinanceEntry } from '../entities/index';
+import type { FinanceOwnedState } from './finance/context';
+import type { CostGroup, FinanceEntry } from '../entities/index';
 import { paidAmountFor } from './finance.ts';
 
 export const costGroupLabels: Record<CostGroup, string> = {
   construction: 'Строительство', overhead: 'Накладные', reserve: 'Резерв', unallocated: 'Нужно распределить',
 };
 export const costGroups = Object.keys(costGroupLabels) as CostGroup[];
-export function expenseCostGroup(state: AppState, entry: FinanceEntry): CostGroup {
+export function expenseCostGroup(state: Pick<FinanceOwnedState, 'budgetLines' | 'financeEntries'>, entry: FinanceEntry): CostGroup {
   const group = entry.costGroup ?? state.budgetLines.find(line => line.id === entry.budgetLineId)?.costGroup;
   // A reserve is a budget allowance, never a type of actual expenditure.
   return group && group !== 'reserve' ? group : 'unallocated';
 }
-export function costGroupTotals(state: AppState) {
+export function costGroupTotals(state: Pick<FinanceOwnedState, 'budgetLines' | 'financeEntries'>) {
   const totals = Object.fromEntries(costGroups.map(group => [group, { plan: 0, paid: 0 }])) as Record<CostGroup, { plan: number; paid: number }>;
   for (const line of state.budgetLines) totals[line.costGroup ?? 'unallocated'].plan += line.plan;
   for (const entry of state.financeEntries) if (entry.kind === 'expense') totals[expenseCostGroup(state, entry)].paid += paidAmountFor(entry);

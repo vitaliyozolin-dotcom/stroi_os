@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { seedState } from '../src/seed.ts';
-import { applyStageControl } from '../src/application/stage-control.ts';
+import { applyStageControl } from './support/module-project.ts';
 import { stageCanStart, stageGaps, stageRadar } from '../sites/lib/stage-control.js';
 import { validateStageControl } from '../sites/projects/stage-control.js';
 import { validateBaselineChanges } from '../sites/projects/baseline.js';

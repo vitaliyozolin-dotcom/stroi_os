@@ -1,15 +1,15 @@
-import type { AppState, LeadStage, UserRole } from '../entities/index';
-import type { StateChange } from '../domain/change';
+import type { LeadStage, UserRole } from '../entities/index';
+import type { SalesSnapshot, SalesPatch } from '../domain/contexts.ts';
+import { moduleChange, executeModule, type ModuleChange, type ModuleRepository } from './module-repository.ts';
 import { leadSnapshot, marketingStages, marketingStageLabels, marketingSourceLabels, prepareLead, prepareWebsiteLeads, validQualification, type LeadDraft, type LeadQualification } from '../domain/marketing.ts';
-import type { Clock, IdGenerator } from './ports';
-import { commitStateChange, type StateChangeSink } from './state-change.ts';
+import type { Clock, IdGenerator } from './ports.ts';
 export type MarketingCommand =
   | { action: 'create'; projectId: string; draft: LeadDraft }
   | { action: 'qualify'; leadId: string; expected: string; patch: LeadQualification }
   | { action: 'stage'; leadId: string; expected: string; stage?: LeadStage }
   | { action: 'import'; projectId: string; response: unknown };
-export type MarketingResult = { ok: true; change: StateChange | null } | { ok: false; error: string };
-export const changeProjectMarketing = (state: AppState, input: MarketingCommand, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator): MarketingResult => {
+export type MarketingResult = { ok: true; change: ModuleChange<SalesPatch> | null } | { ok: false; error: string };
+export const changeProjectMarketing = (state: SalesSnapshot, input: MarketingCommand, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator): MarketingResult => {
   if (identity.role !== 'management') return { ok: false, error: 'Изменение воронки доступно только управлению.' };
   let leads = state.leads, summary = '', tone: 'neutral' | 'positive' = 'neutral', actor = identity.name;
   if (input.action === 'create' || input.action === 'import') {
@@ -39,8 +39,8 @@ export const changeProjectMarketing = (state: AppState, input: MarketingCommand,
       leads = leads.map(lead => lead.id === current.id ? { ...lead, stage } : lead); summary = `${current.name}: этап «${marketingStageLabels[stage]}»`; tone = stage === 'won' ? 'positive' : 'neutral';
     }
   }
-  return { ok: true, change: { action: 'lead_updated', summary, state: { ...state, leads, activity: [{ id: ids.next('activity'), timestamp: clock.now(), actor, text: summary, tone }, ...state.activity] } } };
+  return { ok: true, change: moduleChange(state, { leads }, 'lead_updated', summary, { identity: { name: actor }, clock, ids }, tone) };
 };
-export const createMarketingUseCases = (state: AppState, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator, sink: StateChangeSink) => ({
-  execute: (input: MarketingCommand) => { const result = changeProjectMarketing(state, input, identity, clock, ids); if (result.ok && result.change) commitStateChange(result.change, sink); return result; },
+export const createMarketingUseCases = (repository: ModuleRepository<SalesSnapshot, SalesPatch>, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator) => ({
+ execute: (input: MarketingCommand) => executeModule(repository, state => changeProjectMarketing(state, input, identity, clock, ids)),
 });

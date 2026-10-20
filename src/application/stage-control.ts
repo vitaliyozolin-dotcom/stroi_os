@@ -1,13 +1,14 @@
-import type { Clock, IdGenerator } from './ports';
-import { commitStateChange, type StateChangeSink } from './state-change.ts';
-import { stageControlFingerprint } from '../../sites/lib/stage-control.js';
-import type { AppState, UserRole } from '../entities/index';
-import { planToday, validPlanDate } from '../../sites/lib/plan-baseline.js';
-import { stageCanStart, stageGaps } from '../../sites/lib/stage-control.js';
-import { addScheduleDays } from '../../sites/lib/schedule-forecast.js';
+import type { Clock, IdGenerator } from './ports.ts';
+import type { ConstructionSnapshot, ConstructionPatch } from '../domain/contexts.ts';
+import { moduleChange, executeModule, type ModuleRepository } from './module-repository.ts';
+import { stageControlFingerprint } from '../domain/construction/index.js';
+import type { ActivityEvent, UserRole } from '../entities/index';
+import { planToday, validPlanDate } from '../domain/construction/index.js';
+import { stageCanStart, stageGaps } from '../domain/construction/index.js';
+import { addScheduleDays } from '../domain/construction/index.js';
 
 export type StageAction = 'start' | 'not_started' | 'complete' | 'accept' | 'owner_accept' | 'delay' | 'rework';
-export function applyStageControl(state: AppState, id: string, action: StageAction, input: { date: string; note: string; tasks: string[]; completionDateUnknown?: boolean; blockerResolved?: boolean; remainingDays?: number; readyOn?: string; nextAction?: string; issueOwner?: string }, actor: string, role: UserRole, userId?: string, runtime?: { clock: Clock; ids: IdGenerator }): AppState {
+export function applyStageControl(state: ConstructionSnapshot, id: string, action: StageAction, input: { date: string; note: string; tasks: string[]; completionDateUnknown?: boolean; blockerResolved?: boolean; remainingDays?: number; readyOn?: string; nextAction?: string; issueOwner?: string }, actor: string, role: UserRole, userId?: string, runtime?: { clock: Clock; ids: IdGenerator }): { snapshot: ConstructionSnapshot; event: ActivityEvent } {
   const timestamp = runtime?.clock.now() ?? new Date().toISOString();
   const todayKey = planToday(new Date(timestamp));
   const nextId = (prefix: string) => runtime?.ids.next(prefix) ?? crypto.randomUUID();
@@ -36,8 +37,7 @@ export function applyStageControl(state: AppState, id: string, action: StageActi
     const tracking = next.tasks.find(t => t.id === `auto-stage-${id}`);
     if (tracking) { tracking.status = 'done'; tracking.completedAt = now; tracking.completionNote = note; }
     for (const candidate of next.stages) if (!candidate.schedule && candidate.status === 'not_ready' && (candidate.dependencyId || candidate.dependency) && stageCanStart(next, candidate)) candidate.status = 'ready';
-    next.activity.unshift({ id: nextId('activity'), timestamp: now, actor, text: `Владелец подтвердил этап «${stage.name}»: ${note}`, tone: 'positive' });
-    return next;
+    return { snapshot: next, event: { id: nextId('activity'), timestamp: now, actor, text: `Владелец подтвердил этап «${stage.name}»: ${note}`, tone: 'positive' } };
   }
   if (role !== 'management' && stage.schedule && (!userId || userId !== stage.schedule.reporterId)) throw new Error('Состояние этой работы подтверждает назначенный сотрудник или управление.');
   if (!input.note.trim()) throw new Error('Укажите результат или причину.');
@@ -89,15 +89,18 @@ export function applyStageControl(state: AppState, id: string, action: StageActi
     stage.siteUpdate = { asOf: today, reviewOn: addScheduleDays(today, 7), remainingDays: input.remainingDays, readyOn: input.readyOn!, acceptanceOn: '', note: input.note.trim(), nextAction: input.nextAction?.trim() || '', issueOwner: input.issueOwner?.trim() || '', requestId: nextId('schedule-review') };
   }
   for (const candidate of next.stages) if (!candidate.schedule && candidate.status === 'not_ready' && (candidate.dependencyId || candidate.dependency) && stageCanStart(next, candidate)) candidate.status = 'ready';
-  next.activity.unshift({ id: nextId('activity'), timestamp: now, actor, text: `Этап «${stage.name}»: ${input.note.trim()}`, tone: action === 'delay' || action === 'rework' ? 'warning' : 'positive' });
-  return next;
+  return { snapshot: next, event: { id: nextId('activity'), timestamp: now, actor, text: `Этап «${stage.name}»: ${input.note.trim()}`, tone: action === 'delay' || action === 'rework' ? 'warning' : 'positive' } };
 }
 
-export const stageCommandSnapshot = (state: AppState, stageId: string) => { const stage = state.stages.find(row => row.id === stageId); return JSON.stringify([state.project.id, stage ? stageControlFingerprint(stage) : null]); };
-export const commitStageControl = (state: AppState, stageId: string, action: StageAction, input: Parameters<typeof applyStageControl>[3], actor: string, role: UserRole, userId: string | undefined, expected: string, clock: Clock, ids: IdGenerator, sink: StateChangeSink) => {
- if (expected !== stageCommandSnapshot(state, stageId)) throw new Error('Этап обновился. Откройте форму заново.');
- const next = applyStageControl(state, stageId, action, input, actor, role, userId, { clock, ids });
- const summary = next.activity[0].text;
- commitStateChange({ state: next, action: 'schedule_updated', summary }, sink);
- return next;
-};
+export const stageCommandSnapshot = (state: ConstructionSnapshot, stageId: string) => { const stage = state.stages.find(row => row.id === stageId); return JSON.stringify([state.project.id, stage ? stageControlFingerprint(stage) : null]); };
+export interface StageControlInput { stageId: string; action: StageAction; input: Parameters<typeof applyStageControl>[3]; expected: string }
+export const createStageControlUseCases = (repository: ModuleRepository<ConstructionSnapshot, ConstructionPatch>, identity: { name: string; role: UserRole; id?: string }, clock: Clock, ids: IdGenerator) => ({
+ control: (command: StageControlInput) => executeModule(repository, state => {
+  try {
+   if (command.expected !== stageCommandSnapshot(state, command.stageId)) throw new Error('Этап обновился. Откройте форму заново.');
+   const result = applyStageControl(state, command.stageId, command.action, command.input, identity.name, identity.role, identity.id, { clock, ids });
+   const change = moduleChange(state, { stages: result.snapshot.stages, tasks: result.snapshot.tasks }, 'schedule_updated', result.event.text, { identity, clock, ids }, result.event.tone, false);
+   return { ok: true as const, change: { ...change, event: result.event } };
+  } catch (failure) { return { ok: false as const, error: failure instanceof Error ? failure.message : 'Не удалось изменить этап.' }; }
+ }),
+});

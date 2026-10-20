@@ -1,20 +1,16 @@
-import type { AppState, UserRole } from '../entities/index';
+import type { UserRole } from '../entities/index';
 import { planStage, type StagePlanDraft } from '../domain/schedule-planning.ts';
-import type { Clock, IdGenerator } from './ports';
-import type { StateChange } from '../domain/change';
-import { commitStateChange, type StateChangeSink } from './state-change.ts';
+import type { Clock, IdGenerator } from './ports.ts';
+import type { ConstructionSnapshot, ConstructionPatch } from '../domain/contexts.ts';
+import { moduleChange, executeModule, type ModuleChange, type ModuleRepository } from './module-repository.ts';
 export interface EditStagePlanInput { stageId: string; expected: string; draft: StagePlanDraft }
-export const editProjectStagePlan = (state: AppState, input: EditStagePlanInput, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator): { ok: true; change: StateChange | null } | { ok: false; error: string } => {
+export const editProjectStagePlan = (state: ConstructionSnapshot, input: EditStagePlanInput, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator): { ok: true; change: ModuleChange<ConstructionPatch> | null } | { ok: false; error: string } => {
   if (identity.role !== 'management') return { ok: false, error: 'Изменение графика недоступно для этой роли.' };
   const result = planStage(state, input.stageId, input.draft, input.expected);
   if (!result.ok) return result;
   if (!result.changed) return { ok: true, change: null };
-  return { ok: true, change: { action: 'schedule_updated', summary: result.summary, state: { ...state, stages: result.stages, activity: [{ id: ids.next('activity'), timestamp: clock.now(), actor: identity.name, text: result.summary, tone: result.tone }, ...state.activity] } } };
+  return { ok: true, change: moduleChange(state, { stages: result.stages }, 'schedule_updated', result.summary, { identity, clock, ids }, result.tone) };
 };
-export const createSchedulePlanningUseCases = (state: AppState, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator, sink: StateChangeSink) => ({
-  editPlan: (input: EditStagePlanInput) => {
-    const result = editProjectStagePlan(state, input, identity, clock, ids);
-    if (result.ok && result.change) commitStateChange(result.change, sink);
-    return result;
-  },
+export const createSchedulePlanningUseCases = (repository: ModuleRepository<ConstructionSnapshot, ConstructionPatch>, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator) => ({
+ editPlan: (input: EditStagePlanInput) => executeModule(repository, state => editProjectStagePlan(state, input, identity, clock, ids)),
 });

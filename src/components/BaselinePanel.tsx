@@ -1,10 +1,12 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createConstructionRepository } from '../infrastructure/module-project';
 import { createScheduleEditUseCases, scheduleEditSnapshot } from '../application/schedule-edits';
 import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
 import { useEffect, useState, type FormEvent } from 'react';
 import { CalendarDays, LockKeyhole } from 'lucide-react';
 import type { AppState, UserRole } from '../entities/index';
-import { baselineOverview, planDays } from '../../sites/lib/plan-baseline.js';
-import { recordedScheduleStatus } from '../../sites/lib/stage-control.js';
+import { baselineOverview, planDays } from '../domain/construction/index.js';
+import { recordedScheduleStatus } from '../domain/construction/index.js';
 import { formatDate } from '../presentation/formatting';
 import { Field, Modal, SectionHeader } from './Ui';
 
@@ -12,7 +14,7 @@ export const planShiftLabel = (days: number | null) => days === null ? 'Нет �
 export function BaselinePanel({ state, role, actor, onChange, compact = false }: {
   state: AppState; role: UserRole; actor: string; onChange: (state: AppState) => void; compact?: boolean;
 }) {
-  const commands = createScheduleEditUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const commands = createScheduleEditUseCases(useModuleRepository(createConstructionRepository, state, onChange), { name: actor, role }, systemClock, runtimeIdGenerator);
   const [expected, setExpected] = useState('');
   const summary = baselineOverview(state);
   const records = recordedScheduleStatus(state);

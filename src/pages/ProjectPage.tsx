@@ -1,6 +1,8 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createDocumentsRepository } from '../infrastructure/module-project';
 import { requestApi } from '../infrastructure/api-http';
 import { FieldReportUpload } from '../components/FieldReportUpload';
-import { automaticSchedule } from '../../sites/lib/automatic-schedule.js';
+import { automaticSchedule } from '../domain/construction/index.js';
 import { useScheduleToday } from '../components/ProjectScheduleDates';
 import { uploadProjectDocument } from '../application/project-documents';
 import { documentUploader } from '../infrastructure/document-upload';
@@ -70,7 +72,7 @@ export function ProjectPage({
   onChange: (next: AppState) => void;
   onNavigate: (page: PageId, entityId?: string) => void;
 }) {
-  const latestState = useRef(state); latestState.current = state;
+  const documentsRepository = useModuleRepository(createDocumentsRepository, state, onChange);
   const uploadAbort = useRef<AbortController | null>(null);
   useEffect(() => () => { uploadAbort.current?.abort(); }, [state.project.id]);
   const [search, setSearch] = useState('');
@@ -127,7 +129,7 @@ export function ProjectPage({
     setUploadError('');
     try {
       const controller = new AbortController(); uploadAbort.current = controller;
-      const result = await uploadProjectDocument(() => latestState.current, { projectId: state.project.id, draft: { ...form }, file }, session, systemClock, runtimeIdGenerator, documentUploader, onChange, controller.signal);
+      const result = await uploadProjectDocument(documentsRepository, { projectId: state.project.id, draft: { ...form }, file }, session, systemClock, runtimeIdGenerator, documentUploader, controller.signal);
       if (!result.ok) throw new Error(result.error);
       setShowUpload(false);
       setForm(emptyDocumentForm());

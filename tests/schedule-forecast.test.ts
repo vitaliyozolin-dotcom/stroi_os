@@ -7,7 +7,7 @@ import { validateScheduleReview } from '../sites/projects/schedule-review.js';
 import { validateStageControl } from '../sites/projects/stage-control.js';
 import { validateBaselineChanges } from '../sites/projects/baseline.js';
 import { createSyncModel, reconcileSavedSnapshot } from '../src/application/project-sync.ts';
-import { applyStageControl } from '../src/application/stage-control.ts';
+import { applyStageControl } from './support/module-project.ts';
 import { stageCanStart } from '../sites/lib/stage-control.js';
 import { createProjectWriteHandler } from '../sites/projects/write.js';
 import { createTelegramProjectStore } from '../sites/telegram/project-store.js';

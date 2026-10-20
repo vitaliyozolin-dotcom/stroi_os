@@ -1,13 +1,15 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createConstructionRepository } from '../infrastructure/module-project';
 import { stagePlanSnapshot } from '../domain/schedule-planning';
 import { BaselinePanel, planShiftLabel } from '../components/BaselinePanel';
 import { StageControlModal } from '../components/StageControlModal';
 import { SiteProgress } from '../components/SiteProgress';
 import { ScheduleReconciliation } from '../components/ScheduleReconciliation';
-import { automaticSchedule } from '../../sites/lib/automatic-schedule.js';
+import { automaticSchedule } from '../domain/construction/index.js';
 import { useScheduleToday } from '../components/ProjectScheduleDates';
 import type { StageAction } from '../application/stage-control';
-import { planDays as baselineDays } from '../../sites/lib/plan-baseline.js';
-import { planToday } from '../../sites/lib/plan-baseline.js';
+import { planDays as baselineDays } from '../domain/construction/index.js';
+import { planToday } from '../domain/construction/index.js';
 import { createSchedulePlanningUseCases } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -58,7 +60,7 @@ export function SchedulePage(props: SchedulePageProps) {
 }
 
 function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: SchedulePageProps) {
-  const planning = createSchedulePlanningUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const planning = createSchedulePlanningUseCases(useModuleRepository(createConstructionRepository, state, onChange), { name: actor, role }, systemClock, runtimeIdGenerator);
   const [planExpected, setPlanExpected] = useState('');
   const [planStageId, setPlanStageId] = useState('');
   const defaultStage = state.stages.find((stage) => ['in_progress', 'rework', 'awaiting_inspection', 'blocked'].includes(stage.status)) ?? state.stages.find((stage) => stage.status !== 'accepted') ?? state.stages[0];

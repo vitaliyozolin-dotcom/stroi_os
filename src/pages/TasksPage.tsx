@@ -1,4 +1,4 @@
-import { planDays, taskBaselineDelay, taskBaselineEnd } from '../../sites/lib/plan-baseline.js';
+import { planDays, taskBaselineDelay, taskBaselineEnd } from '../domain/construction/index.js';
 import { planShiftLabel } from '../components/BaselinePanel';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
@@ -23,11 +23,14 @@ import {
   UserRound,
   UsersRound,
 } from 'lucide-react';
-import { addTaskComment, changeTaskStatus, isTaskClosed, isTaskOverdue, saveTask as saveTaskChange } from '../domain/index';
+import { isTaskClosed, isTaskOverdue } from '../domain/index';
+import { createTaskUseCases, taskSnapshot } from '../application/tasks';
+import { useModuleRepository } from '../useModuleRepository';
+import { createConstructionRepository } from '../infrastructure/module-project';
 import { formatDate, formatDateTime } from '../presentation/formatting';
 import { taskPriorityLabel, taskStatusLabel } from '../presentation/status-labels';
-import { commitStateChange, createMutationContext, type StateChangeSink } from '../application';
-import { runtimeIdGenerator, systemClock, uid } from '../infrastructure/runtime';
+import type { StateChangeSink } from '../application';
+import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import type {
   AppState,
   AuthenticatedUser,
@@ -98,6 +101,9 @@ export function TasksPage({
   onChange: StateChangeSink;
   onNavigate: (page: PageId, entityId?: string) => void;
 }) {
+  const taskCommands = createTaskUseCases(useModuleRepository(createConstructionRepository, state, onChange), { identity: { name: session.name, role, id: session.id }, clock: systemClock, ids: runtimeIdGenerator });
+  const [openedTask, setOpenedTask] = useState('');
+  const [taskError, setTaskError] = useState('');
   const internalUsers = state.settings.users.filter((user) => user.role !== 'client' && user.status !== 'disabled');
   const currentUser = internalUsers.find((user) => user.id === session.id)
     ?? internalUsers.find((user) => user.name === session.name)
@@ -113,6 +119,7 @@ export function TasksPage({
   const [search, setSearch] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => { setTaskError(''); }, [selectedId]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(() => emptyForm(currentUser?.id));
@@ -166,6 +173,7 @@ export function TasksPage({
   const openCreate = () => {
     if (role !== 'management') return;
     setEditingId(null);
+    setOpenedTask(taskSnapshot(state));
     setFormError('');
     setForm(emptyForm(currentUser?.id ?? internalUsers[0]?.id));
     setShowForm(true);
@@ -175,6 +183,7 @@ export function TasksPage({
     if (role !== 'management') return;
     setSelectedId(null);
     setEditingId(task.id);
+    setOpenedTask(taskSnapshot(state, task.id));
     setFormError('');
     setForm({
       title: task.title,
@@ -197,82 +206,16 @@ export function TasksPage({
 
   const saveTask = (event: FormEvent) => {
     event.preventDefault();
-    if (role !== 'management') return;
-    const assignee = internalUsers.find((user) => user.id === form.assigneeId);
-    if (!form.title.trim() || !assignee || !form.dueDate) return;
-    const reviewer = internalUsers.find((user) => user.id === form.reviewerId);
-    const timestamp = new Date().toISOString();
-
-    if (!editingId) {
-      const task: ProjectTask = {
-        id: uid('task'),
-        title: form.title.trim(),
-        description: form.description.trim() || undefined,
-        status: 'todo',
-        priority: form.priority,
-        assigneeId: assignee.id,
-        assigneeName: assignee.name,
-        reviewerId: reviewer?.id,
-        reviewerName: reviewer?.name,
-        createdBy: actor,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        dueDate: form.dueDate,
-        plannedStart: form.plannedStart || undefined,
-        planChangeReason: form.reason.trim(),
-        originalDueDate: form.dueDate,
-        baseline: { start: form.plannedStart || undefined, end: form.dueDate, source: 'initial', note: 'Первоначальный срок при постановке задачи', recordedAt: timestamp, recordedBy: actor },
-        stageId: form.stageId || undefined,
-        counterpartyId: form.counterpartyId || undefined,
-        procurementItemId: form.procurementItemId || undefined,
-        checkpointId: form.checkpointId || undefined,
-        rescheduleCount: 0,
-        history: [{ id: uid('task-history'), timestamp, actor, kind: 'created', text: `Создал задачу и назначил ${assignee.name}` }],
-      };
-      commitStateChange(saveTaskChange(state, { task, isNew: true }, createMutationContext(actor, systemClock, runtimeIdGenerator)), onChange);
-    } else {
-      const previous = state.tasks.find((task) => task.id === editingId);
-      if (!previous) return;
-      if ((previous.dueDate !== form.dueDate || (previous.plannedStart || '') !== form.plannedStart) && !form.reason.trim()) { setFormError('Укажите причину изменения срока.'); return; }
-      if (!taskBaselineEnd(previous) && form.baselineEnd && !form.baselineNote.trim()) { setFormError('Укажите источник первоначального срока.'); return; }
-      const changes = [];
-      if (previous.assigneeId !== assignee.id) changes.push({ id: uid('task-history'), timestamp, actor, kind: 'assignee' as const, text: `Ответственный изменён: ${previous.assigneeName} → ${assignee.name}` });
-      if (previous.dueDate !== form.dueDate) changes.push({ id: uid('task-history'), timestamp, actor, kind: 'due_date' as const, text: `Срок изменён: ${formatDate(previous.dueDate, true)} → ${formatDate(form.dueDate, true)} · ${form.reason.trim()}` });
-      if (previous.title !== form.title.trim() || previous.description !== (form.description.trim() || undefined) || previous.priority !== form.priority) changes.push({ id: uid('task-history'), timestamp, actor, kind: 'edited' as const, text: 'Обновлены содержание или приоритет задачи' });
-      const task: ProjectTask = {
-        ...previous,
-        originalDueDate: previous.originalDueDate || form.baselineEnd,
-        baseline: previous.baseline || (!previous.originalDueDate && form.baselineEnd ? { end: form.baselineEnd, source: 'document' as const, note: form.baselineNote.trim(), recordedAt: timestamp, recordedBy: actor } : undefined),
-        title: form.title.trim(),
-        description: form.description.trim() || undefined,
-        priority: form.priority,
-        assigneeId: assignee.id,
-        assigneeName: assignee.name,
-        reviewerId: reviewer?.id,
-        reviewerName: reviewer?.name,
-        dueDate: form.dueDate,
-        plannedStart: form.plannedStart,
-        planChangeReason: form.reason.trim(),
-        stageId: form.stageId || undefined,
-        counterpartyId: form.counterpartyId || undefined,
-        procurementItemId: form.procurementItemId || undefined,
-        checkpointId: form.checkpointId || undefined,
-        updatedAt: timestamp,
-        rescheduleCount: previous.rescheduleCount + (previous.dueDate !== form.dueDate ? 1 : 0),
-        history: [...changes, ...previous.history],
-      };
-      commitStateChange(saveTaskChange(state, { task, isNew: false }, createMutationContext(actor, systemClock, runtimeIdGenerator)), onChange);
-    }
+    const result = taskCommands.save({ taskId: editingId ?? undefined, expected: openedTask, draft: form });
+    if (!result.ok) { setFormError(result.error); return; }
     setShowForm(false);
     setEditingId(null);
   };
 
   const changeStatus = (task: ProjectTask, status: TaskStatus, text: string, extra: Partial<ProjectTask> = {}) => {
-    commitStateChange(changeTaskStatus(
-      state,
-      { taskId: task.id, status, text, extra },
-      createMutationContext(actor, systemClock, runtimeIdGenerator),
-    ), onChange);
+    const result = taskCommands.status({ taskId: task.id, expected: taskSnapshot(state, task.id), status, text, extra });
+    if (!result.ok) { setTaskError(result.error); return; }
+    setTaskError('');
     setComment('');
     setCompletionNote('');
   };
@@ -280,7 +223,9 @@ export function TasksPage({
   const addComment = (event: FormEvent) => {
     event.preventDefault();
     if (!selected || !comment.trim()) return;
-    commitStateChange(addTaskComment(state, { taskId: selected.id, text: comment.trim() }, createMutationContext(actor, systemClock, runtimeIdGenerator)), onChange);
+    const result = taskCommands.comment({ taskId: selected.id, expected: taskSnapshot(state, selected.id), text: comment.trim() });
+    if (!result.ok) { setTaskError(result.error); return; }
+    setTaskError('');
     setComment('');
   };
 
@@ -406,6 +351,7 @@ export function TasksPage({
       {selected && (
         <Modal wide title={selected.title} subtitle={`${state.project.code} · создана ${formatDateTime(selected.createdAt)}`} onClose={() => setSelectedId(null)}>
           <div className="task-detail">
+            {taskError && <p role="alert" className="danger-text">{taskError}</p>}
             <div className="task-detail__summary">
               <div><small>Статус</small><StatusBadge label={taskStatusLabel[selected.status]} tone={statusTone(selected.status)} /></div>
               <div><small>Ответственный</small><strong>{selected.assigneeName}</strong></div>

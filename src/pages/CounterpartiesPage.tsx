@@ -1,3 +1,5 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createContactsRepository } from '../infrastructure/module-project';
 import { counterpartySnapshot } from '../domain/counterparties';
 import { createCounterpartyUseCases } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
@@ -12,7 +14,7 @@ const typeLabels: Record<CounterpartyType, string> = { contractor: 'Подряд
 const emptyProfile = (): CounterpartyProfile => ({ id: '', name: '', type: 'contractor', status: 'probation', specialty: '', contactName: '', phone: '', email: '', inn: '', kpp: '', ogrn: '', legalName: '', legalAddress: '', bankName: '', bik: '', settlementAccount: '', correspondentAccount: '', internalOwner: '', paymentTerms: '', warrantyTerms: '', serviceRegion: '', notes: '', tags: [] });
 
 export function CounterpartiesPage({ state, actor, focusId, onChange }: { state: AppState; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
-  const counterparties = createCounterpartyUseCases(state, actor, systemClock, runtimeIdGenerator, onChange);
+  const counterparties = createCounterpartyUseCases(useModuleRepository(createContactsRepository, state, onChange), actor, systemClock, runtimeIdGenerator);
   const [profileExpected, setProfileExpected] = useState('');
   const [profileError, setProfileError] = useState('');
   const openProfile = (profile: CounterpartyProfile) => {

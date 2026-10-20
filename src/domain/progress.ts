@@ -1,4 +1,5 @@
-import type { AppState, ProjectTask } from '../entities/index';
+import type { ConstructionSnapshot } from './contexts';
+import type { ProjectTask, Stage } from '../entities/index';
 
 type RuntimeProgressTask = ProjectTask & {
   progressWeight?: number;
@@ -39,7 +40,7 @@ const tasksByStage = (tasks: ProjectTask[]) => {
   return grouped;
 };
 
-const progressForStage = (stage: AppState['stages'][number], tasks: ProjectTask[]) => {
+const progressForStage = (stage: Stage, tasks: ProjectTask[]) => {
   if (stage.status === 'accepted' && stage.ownerAcceptance) return { physical: 100, accepted: 100 };
   if (!tasks.length) {
     const accepted = stage.status === 'accepted' ? 100 : 0;
@@ -53,14 +54,14 @@ const progressForStage = (stage: AppState['stages'][number], tasks: ProjectTask[
   };
 };
 
-export const stageProgressTotals = (state: AppState, stageId: string) => {
+export const stageProgressTotals = (state: Pick<ConstructionSnapshot, 'stages' | 'tasks'>, stageId: string) => {
   const stage = state.stages.find((item) => item.id === stageId);
   if (!stage) return { physical: 0, accepted: 0 };
   const tasks = state.tasks.filter((task) => task.stageId === stageId && task.status !== 'canceled' && task.id !== `auto-stage-${stageId}`);
   return progressForStage(stage, tasks);
 };
 
-export const projectProgressTotals = (state: AppState) => {
+export const projectProgressTotals = (state: Pick<ConstructionSnapshot, 'stages' | 'tasks'>) => {
   const totalWeight = state.stages.reduce((sum, stage) => sum + Math.max(0, Number(stage.weight) || 0), 0);
   if (!totalWeight) return { physical: 0, accepted: 0 };
   const groupedTasks = tasksByStage(state.tasks);
@@ -77,7 +78,7 @@ export const projectProgressTotals = (state: AppState) => {
   };
 };
 
-export const synchronizeDerivedProgress = (state: AppState): AppState => {
+export const synchronizeDerivedProgress = <T extends Pick<ConstructionSnapshot, 'stages' | 'tasks'>>(state: T): T => {
   let changed = false;
   const groupedTasks = tasksByStage(state.tasks);
   const stages = state.stages.map((stage) => {

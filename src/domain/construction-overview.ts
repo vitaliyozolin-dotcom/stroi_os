@@ -1,6 +1,7 @@
-import type { AppState, UserRole } from '../entities/index';
+import type { ConstructionSnapshot, DocumentsSnapshot } from './contexts';
+import type { UserRole } from '../entities/index';
 
-export function constructionOverview(state: AppState, role: UserRole) {
+export function constructionOverview(state: Pick<ConstructionSnapshot, 'stages' | 'tasks'> & Pick<DocumentsSnapshot, 'fieldReports'>, role: UserRole) {
   const stages = state.stages.filter((stage) => stage.schedule?.kind !== 'summary')
     .slice().sort((a, b) => a.order - b.order);
   const active = stages.filter((stage) => ['in_progress', 'blocked', 'rework', 'awaiting_inspection'].includes(stage.status));

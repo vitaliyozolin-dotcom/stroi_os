@@ -1,3 +1,5 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createDecisionsRepository } from '../infrastructure/module-project';
 import { clientDecisionOptions, clientDecisionSnapshot } from '../domain/client-decisions';
 import { requestApi } from '../infrastructure/api-http';
 import { createClientDecisionUseCases } from '../application';
@@ -29,7 +31,7 @@ import type { AppState, UserRole } from '../entities/index';
 import { Modal, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 
 export function ClientPage({ state, actor, role, onChange }: { state: AppState; actor: string; role: UserRole; onChange: (next: AppState) => void }) {
-  const decisions = createClientDecisionUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const decisions = createClientDecisionUseCases(useModuleRepository(createDecisionsRepository, state, onChange), { name: actor, role }, systemClock, runtimeIdGenerator);
   const [decisionExpected, setDecisionExpected] = useState('');
   const [decisionError, setDecisionError] = useState('');
   const progress = progressTotals(state);

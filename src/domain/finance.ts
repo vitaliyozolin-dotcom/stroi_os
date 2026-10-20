@@ -1,17 +1,17 @@
-import type { AppState, BudgetLine } from '../entities/index';
+import type { FinanceEntry, BudgetLine } from '../entities/index';
 import { paidAmountFor, roundMoney } from './finance-totals.js';
 export { acceptedAmountFor, paidAmountFor, financeTotals, lineTotals, lineForecast,
   unallocatedExpenses, unallocatedExpenseTotals, stageFinanceTotals } from './finance-totals.js';
 
 // Unknown payment dates must never inherit document/import dates.
-export const paymentDate = (entry: AppState['financeEntries'][number]) => {
+export const paymentDate = (entry: FinanceEntry) => {
   const date = entry.paidAt?.slice(0, 10);
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const parsed = new Date(`${date}T12:00:00Z`);
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date ? date : null;
 };
 
-export const paymentMovements = (entry: AppState['financeEntries'][number]) => {
+export const paymentMovements = (entry: FinanceEntry) => {
   if (!entry.payments?.length) return [{ amount: paidAmountFor(entry), date: paymentDate(entry), legacy: true }];
   const movements = entry.payments.map(payment => ({ amount: payment.amount, date: payment.date, legacy: false }));
   const legacy = roundMoney(paidAmountFor(entry) - movements.reduce((sum, payment) => sum + payment.amount, 0));
@@ -19,7 +19,7 @@ export const paymentMovements = (entry: AppState['financeEntries'][number]) => {
   return [...(legacy > 0 ? [{ amount: legacy, date: null, legacy: true }] : []), ...movements];
 };
 
-export const undatedPayments = (state: AppState) => {
+export const undatedPayments = (state: { financeEntries: FinanceEntry[] }) => {
   const result = { expense: 0, income: 0 };
   for (const entry of state.financeEntries) {
     for (const movement of paymentMovements(entry)) if (!movement.date) result[entry.kind] += movement.amount;

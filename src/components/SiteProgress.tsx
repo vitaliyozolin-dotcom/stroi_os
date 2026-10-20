@@ -1,8 +1,10 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createConstructionRepository } from '../infrastructure/module-project';
 import { createScheduleEditUseCases, scheduleEditSnapshot } from '../application/schedule-edits';
 import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
 import { useState, type FormEvent } from 'react';
 import type { AppState, UserRole } from '../entities/index';
-import { planToday } from '../../sites/lib/plan-baseline.js';
+import { planToday } from '../domain/construction/index.js';
 import { formatDate } from '../presentation/formatting';
 import { Field, Modal } from './Ui';
 
@@ -20,7 +22,7 @@ export function SiteProgress({ state, actor, role, onChange }: { state: AppState
   </section>;
 }
 function ProgressEditor({ state, actor, role, onChange, onClose }: { state: AppState; actor: string; role: UserRole; onChange: (state: AppState) => void; onClose: () => void }) {
-  const commands = createScheduleEditUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const commands = createScheduleEditUseCases(useModuleRepository(createConstructionRepository, state, onChange), { name: actor, role }, systemClock, runtimeIdGenerator);
   const latest = state.project.siteProgressHistory?.at(-1);
   const [date, setDate] = useState(planToday()), [source, setSource] = useState('');
   const [completed, setCompleted] = useState(latest?.completed.join('\n') ?? ''), [remaining, setRemaining] = useState(latest?.remaining.join('\n') ?? '');

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { seedState } from '../src/seed.ts';
-import { uploadFieldReport } from '../src/application/field-reports.ts';
+import { uploadFieldReport } from './support/module-project.ts';
 const now = '2026-10-20T12:00:00Z', clock = { now: () => now }, identity = { name: 'Прораб', role: 'foreman' as const };
 const ids = () => { let index = 0; return { next: (prefix: string) => `${prefix}-${++index}` }; };
 const input = (projectId: string) => ({ projectId, files: [new File(['test'], 'photo.jpg', {type: 'image/jpeg'})], date: '2026-10-20', note: 'Факт на объекте', stageId: '', sourceLink: 'https://t.me/project/1' });

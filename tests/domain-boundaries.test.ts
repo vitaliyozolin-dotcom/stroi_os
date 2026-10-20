@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { addTaskComment, changeCheckpoint, changeProjectState, isTaskClosed, isTaskOverdue, normalizeAppStateWithFallback } from '../src/domain/index.ts';
+import { addTaskComment, changeCheckpoint, isTaskClosed, isTaskOverdue, normalizeAppStateWithFallback } from '../src/domain/index.ts';
 import type { AppState } from '../src/entities/index.ts';
 import { seedState } from '../src/seed.ts';
 
@@ -48,25 +48,12 @@ test('task mutations produce auditable StateChange without mutating the source s
 
   assert.deepEqual(state, before);
   assert.equal(comment.action, 'task_comment_added');
-  assert.equal(comment.state.tasks[0].history[0].text, 'Проверить узел');
-  assert.equal(comment.state.activity[0].actor, 'Проверяющий');
+  assert.equal(comment.patch.tasks![0].history[0].text, 'Проверить узел');
+  assert.equal(comment.event!.actor, 'Проверяющий');
 });
 
-test('generic project changes preserve supplied payload and expose audit metadata', () => {
-  const state = structuredClone(seedState);
-  const context = { actor: 'Менеджер', timestamp: '2026-08-20T12:00:00.000Z', nextId: (prefix: string) => `${prefix}-test` };
-  const settings = { ...state.settings, dashboardWidgets: [] };
-
-  const change = changeProjectState(state, {
-    patch: { settings },
-    action: 'settings_updated',
-    summary: 'Обновлены настройки',
-  }, context);
-
-  assert.equal(change.action, 'settings_updated');
-  assert.deepEqual(change.state.settings.dashboardWidgets, []);
-  assert.equal(change.state.activity[0].text, 'Обновлены настройки');
-  assert.notEqual(change.state, state);
+test('generic whole-project mutation facade stays removed', () => {
+  assert.doesNotMatch(source('src/domain/mutations.ts'), /changeProjectState|\bAppState\b|Partial<AppState>/);
 });
 
 test('checkpoint draft changes can remain quiet while still carrying save metadata', () => {
@@ -83,6 +70,6 @@ test('checkpoint draft changes can remain quiet while still carrying save metada
   }, context);
 
   assert.equal(change.summary, 'Обновлена контрольная точка');
-  assert.deepEqual(change.state.activity, state.activity);
-  assert.equal(change.state.checkpoints[0].note, 'Черновик замера');
+  assert.equal(change.event, undefined);
+  assert.equal(change.patch.checkpoints![0].note, 'Черновик замера');
 });

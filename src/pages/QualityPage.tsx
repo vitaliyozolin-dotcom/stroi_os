@@ -1,4 +1,7 @@
-import { requestApi } from '../infrastructure/api-http';
+import { qualityUploader } from '../infrastructure/quality-upload';
+import { createQualityUseCases, checkpointSnapshot } from '../application/quality';
+import { createConstructionRepository } from '../infrastructure/module-project';
+import { useModuleRepository } from '../useModuleRepository';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -22,8 +25,7 @@ import {
   ZoomIn,
 } from 'lucide-react';
 import { formatDateTime } from '../presentation/formatting';
-import { changeCheckpoint } from '../domain/index';
-import { commitStateChange, createMutationContext, type StateChangeSink } from '../application';
+import type { StateChangeSink } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
 import { photoStandard } from '../seed';
 import type { AppState, CheckpointStatus, EvidencePhoto, UserRole } from '../entities/index';
@@ -46,6 +48,9 @@ const checkpointTone = (status: CheckpointStatus): 'neutral' | 'positive' | 'dan
 const standardIcons = [Camera, ScanLine, ZoomIn, Ruler, Tag, FlaskConical, RotateCcw];
 
 export function QualityPage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: StateChangeSink }) {
+  const quality = createQualityUseCases(useModuleRepository(createConstructionRepository, state, onChange), { identity: { name: actor, role }, clock: systemClock, ids: runtimeIdGenerator });
+  const uploadAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => { uploadAbort.current?.abort(); }, [state.project.id]);
   const defaultCheckpoint = state.checkpoints.find((item) => item.status === 'in_review') ?? state.checkpoints[0];
   const [selectedId, setSelectedId] = useState(defaultCheckpoint?.id ?? '');
   const [filter, setFilter] = useState<'all' | CheckpointStatus>('all');
@@ -90,19 +95,8 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
   const selectedStage = state.stages.find((stage) => stage.id === selected.stageId);
 
   const updateCheckpoint = (patch: Partial<typeof selected>, activityText?: string, tone: 'neutral' | 'positive' | 'warning' = 'neutral') => {
-    if (!activityText) {
-      commitStateChange(changeCheckpoint(
-        state,
-        { checkpointId: selected.id, patch, summary: `Обновлена контрольная точка «${selected.title}»`, recordActivity: false },
-        createMutationContext(actor, systemClock, runtimeIdGenerator),
-      ), onChange);
-      return;
-    }
-    commitStateChange(changeCheckpoint(
-      state,
-      { checkpointId: selected.id, patch, summary: activityText, tone },
-      createMutationContext(actor, systemClock, runtimeIdGenerator),
-    ), onChange);
+    const result = quality.update({ checkpointId: selected.id, expected: checkpointSnapshot(state, selected.id), patch, summary: activityText, tone });
+    if (!result.ok) setUploadMessage(result.error);
   };
 
   const uploadFiles = async (files: FileList | null) => {
@@ -114,22 +108,13 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
     const slots = replacingRework ? selected.requiredShots.length : remaining;
     const selectedFiles = Array.from(files).filter((file) => ['image/jpeg', 'image/png', 'image/webp'].includes(file.type)).slice(0, slots);
     try {
-      const photos: EvidencePhoto[] = [];
-      const nextPreviews: Record<string, string> = {};
-      for (const file of selectedFiles) {
-        const body = new FormData();
-        body.append('file', file);
-        const response = await requestApi(`/api/quality/upload?projectId=${encodeURIComponent(state.project.id)}&checkpointId=${encodeURIComponent(selected.id)}`, {
-          method: 'POST',
-          body,
-        });
-        const payload = await response.json().catch(() => null) as { ok?: boolean; photo?: EvidencePhoto; error?: string } | null;
-        if (!response.ok || !payload?.ok || !payload.photo) throw new Error(payload?.error || 'upload_failed');
-        photos.push(payload.photo);
-        nextPreviews[payload.photo.id] = URL.createObjectURL(file);
-      }
+      if (!selectedFiles.length) { setUploadMessage('Все обязательные кадры уже загружены'); return; }
+      const controller = new AbortController(); uploadAbort.current = controller;
+      const result = await quality.upload({ checkpointId: selected.id, expected: checkpointSnapshot(state, selected.id), files: selectedFiles }, qualityUploader, controller.signal);
+      if (!result.ok) { setUploadMessage(result.error); return; }
+      const photos = result.photos;
+      const nextPreviews = Object.fromEntries(photos.map((photo, index) => [photo.id, URL.createObjectURL(selectedFiles[index])]));
       setPreviewUrls((current) => ({ ...current, ...nextPreviews }));
-      updateCheckpoint({ photos: replacingRework ? photos : [...selected.photos, ...photos] }, photos.length ? `${replacingRework ? 'Начата повторная фиксация' : `Добавлено ${photos.length} фото`}: ${selected.title}` : undefined);
       setUploadMessage(photos.length ? (replacingRework ? 'Предыдущий комплект заменён повторной фиксацией' : `Добавлено фото: ${photos.length}`) : 'Все обязательные кадры уже загружены');
     } catch {
       setUploadMessage('Не удалось загрузить фото. Допустимы JPG, PNG или WebP до 12 МБ.');
@@ -242,7 +227,7 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
           {role !== 'client' && selected.status !== 'accepted' && (
             <div className="quality-actions">
               <label className={`button button--secondary ${uploading ? 'button--disabled' : ''}`}><Images size={17} /> {uploading ? 'Загружаем…' : 'Добавить фото'}<input hidden disabled={uploading} type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => { void uploadFiles(event.target.files); event.target.value = ''; }} /></label>
-              {uploadMessage && <span className="upload-message">{uploadMessage}</span>}
+              {uploadMessage && <span className="upload-message" role="status" aria-live="polite">{uploadMessage}</span>}
               {role === 'foreman' && <button className="button button--primary" type="button" disabled={!canSubmit || selected.status === 'in_review'} onClick={submitForReview}><Send size={17} /> {selected.status === 'in_review' ? 'Отчёт на проверке' : 'Отправить на проверку'}</button>}
               {role === 'management' && selected.status === 'in_review' && <div className="action-pair"><button className="button button--danger-soft" type="button" onClick={returnForRework}><RotateCcw size={17} /> Вернуть</button><button className="button button--primary" type="button" disabled={!canSubmit} onClick={accept}><Check size={17} /> Принять</button></div>}
               {role === 'management' && selected.status !== 'in_review' && <button className="button button--primary" type="button" disabled={!canSubmit} onClick={submitForReview}><Send size={17} /> Отправить на проверку</button>}

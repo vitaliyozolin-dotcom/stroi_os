@@ -1,10 +1,12 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createConstructionRepository } from '../infrastructure/module-project';
 import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
 import { useState, type FormEvent } from 'react';
 import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
-import { commitStageControl, stageCommandSnapshot, type StageAction } from '../application/stage-control';
-import { planToday } from '../../sites/lib/plan-baseline.js';
-import { stageCanStart, stageGaps } from '../../sites/lib/stage-control.js';
+import { createStageControlUseCases, stageCommandSnapshot, type StageAction } from '../application/stage-control';
+import { planToday } from '../domain/construction/index.js';
+import { stageCanStart, stageGaps } from '../domain/construction/index.js';
 import { Field, Modal } from './Ui';
 import { money } from '../presentation/formatting';
 
@@ -17,6 +19,7 @@ export function StageControlModal(props: { state: AppState; stageId: string; act
 }
 
 function OwnerAcceptanceForm({ state, stageId, actor, role, userId, onChange, onClose }: Parameters<typeof StageControlModal>[0]) {
+  const commands = createStageControlUseCases(useModuleRepository(createConstructionRepository, state, onChange), { name: actor, role, id: userId }, systemClock, runtimeIdGenerator);
   const stage = state.stages.find(s => s.id === stageId)!;
   const [exactDate, setExactDate] = useState(Boolean(stage.completedOn));
   const [date, setDate] = useState(stage.completedOn || stage.completionObservedOn || planToday());
@@ -28,7 +31,8 @@ function OwnerAcceptanceForm({ state, stageId, actor, role, userId, onChange, on
     event.preventDefault();
     if (changed) { setError('Сведения об этапе изменились. Проверьте обновление перед подтверждением.'); return; }
     try {
-      commitStageControl(state, stageId, 'owner_accept', { date: exactDate ? date : planToday(), note, tasks: [], completionDateUnknown: !exactDate }, actor, role, userId, openedState, systemClock, runtimeIdGenerator, onChange);
+      const result = commands.control({ stageId, action: 'owner_accept', input: { date: exactDate ? date : planToday(), note, tasks: [], completionDateUnknown: !exactDate }, expected: openedState });
+      if (!result.ok) throw new Error(result.error);
       onClose();
     } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); }
   };
@@ -48,6 +52,7 @@ function OwnerAcceptanceForm({ state, stageId, actor, role, userId, onChange, on
   </Modal>;
 }
 function StageForm({ state, stageId, action, actor, role, userId, onChange, onClose, onNavigate }: Parameters<typeof StageControlModal>[0]) {
+  const commands = createStageControlUseCases(useModuleRepository(createConstructionRepository, state, onChange), { name: actor, role, id: userId }, systemClock, runtimeIdGenerator);
   const stage = state.stages.find((s) => s.id === stageId)!;
   const [date, setDate] = useState(action === 'delay' ? (stage.forecastEnd >= planToday() ? stage.forecastEnd : '') : action === 'complete' ? stage.completedOn || planToday() : action === 'start' ? stage.actualStart || planToday() : planToday());
   const [note, setNote] = useState(action === 'accept' ? stage.completionNote || '' : '');
@@ -64,7 +69,9 @@ function StageForm({ state, stageId, action, actor, role, userId, onChange, onCl
   const labels = { start: 'Работы начались', not_started: 'Работы ещё не начались', complete: 'Этап выполнен?', accept: 'Приёмка этапа', owner_accept: 'Подтвердить выполнение', delay: 'Что задерживает этап?', rework: 'Вернуть на доработку' };
   const submit = (event: FormEvent) => { event.preventDefault(); try {
     if (stageCommandSnapshot(state, stageId) !== openedState) throw new Error('Этап обновился, пока форма была открыта. Откройте его заново перед сохранением.');
-    commitStageControl(state, stageId, action, { date, note, tasks: unknownDate ? [] : tasks, completionDateUnknown: unknownDate, blockerResolved: resolved, ...(hasRemaining ? { remainingDays: Number(remaining), readyOn, nextAction, issueOwner } : {}) }, actor, role, userId, openedState, systemClock, runtimeIdGenerator, onChange); onClose();
+    const result = commands.control({ stageId, action, input: { date, note, tasks: unknownDate ? [] : tasks, completionDateUnknown: unknownDate, blockerResolved: resolved, ...(hasRemaining ? { remainingDays: Number(remaining), readyOn, nextAction, issueOwner } : {}) }, expected: openedState });
+    if (!result.ok) throw new Error(result.error);
+    onClose();
   } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); } };
   const open = (p: PageId) => { onClose(); onNavigate?.(p); };
   return <Modal title={labels[action]} subtitle={stage.name} onClose={onClose}><form className="modal-form stage-control-form" onSubmit={submit}>

@@ -1,10 +1,12 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createConstructionRepository } from '../infrastructure/module-project';
 import { createScheduleEditUseCases, scheduleEditSnapshot } from '../application/schedule-edits';
 import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
 import { useState, type FormEvent } from 'react';
 import type { AppState, Stage, StageSchedule, StageSiteUpdate, UserRole } from '../entities/index';
 import type { StageAction } from '../application/stage-control';
-import { addScheduleDays, confirmedSiteUpdate, forecastSchedule, schedulePayload, sitePayload } from '../../sites/lib/schedule-forecast.js';
-import { planToday, validPlanDate } from '../../sites/lib/plan-baseline.js';
+import { addScheduleDays, confirmedSiteUpdate, forecastSchedule, schedulePayload, sitePayload } from '../domain/construction/index.js';
+import { planToday, validPlanDate } from '../domain/construction/index.js';
 import { formatDate } from '../presentation/formatting';
 import { stageStatusLabel } from '../presentation/status-labels';
 import { Field, Modal } from './Ui';
@@ -26,7 +28,8 @@ export function ScheduleReconciliation(props: Props) {
 }
 
 function RowReview({ state, stage, role, actor, userId, onChange, onAction }: Props & { stage: Stage; onAction: (action: StageAction) => void }) {
-  const commands = createScheduleEditUseCases(state, { name: actor, role, id: userId }, systemClock, runtimeIdGenerator, onChange);
+  const repository = useModuleRepository(createConstructionRepository, state, onChange);
+  const commands = createScheduleEditUseCases(repository, { name: actor, role, id: userId }, systemClock, runtimeIdGenerator);
   const previous = state.stages.find((s) => s.id === stage.dependencyId || !stage.dependencyId && [s.name, s.shortName].includes(stage.dependency || ''));
   const [structure, setStructure] = useState<StageSchedule>(() => stage.schedule ? structuredClone(stage.schedule) : {
     kind: 'work', phase: '', summaryOf: [], dependencies: previous ? [{ stageId: previous.id, gate: 'accepted', lagDays: 0 }] : [],
@@ -52,7 +55,8 @@ function RowReview({ state, stage, role, actor, userId, onChange, onAction }: Pr
     if (structureBase !== scheduleEditSnapshot(state, 'structure', stage.id)) { setMessage('Структура изменилась, пока форма была открыта. Загрузите свежую запись перед сохранением.'); return; }
     const result = commands.execute({ kind: 'structure', stageId: stage.id, expected: structureBase, structure, daysOff, checked });
     if (!result.ok) { setMessage(result.error); return; }
-    const next = result.change?.state ?? state;
+    const refreshed = repository.read();
+    const next = refreshed.ok ? refreshed.snapshot : state;
     setStructureBase(scheduleEditSnapshot(next, 'structure', stage.id));
     if (reviewBase === scheduleEditSnapshot(state, 'review', stage.id)) setReviewBase(scheduleEditSnapshot(next, 'review', stage.id));
     setChecked(false); setMessage('Структура передана на сохранение. Затем подтвердите состояние и остаток.');
@@ -63,7 +67,8 @@ function RowReview({ state, stage, role, actor, userId, onChange, onAction }: Pr
     if (reviewBase !== scheduleEditSnapshot(state, 'review', stage.id)) { setMessage('Состояние работы изменилось, пока форма была открыта. Загрузите свежую запись и проверьте остаток.'); return; }
     const result = commands.execute({ kind: 'review', stageId: stage.id, expected: reviewBase, form });
     if (!result.ok) { setMessage(result.error); return; }
-    setReviewBase(scheduleEditSnapshot(result.change?.state ?? state, 'review', stage.id));
+    const refreshed = repository.read();
+    setReviewBase(scheduleEditSnapshot(refreshed.ok ? refreshed.snapshot : state, 'review', stage.id));
     setMessage('Сверка передана на сохранение. Подтверждение и автор появятся после ответа сервера.');
   };
   const dependency = (id: string, selected: boolean) => patchStructure({ dependencies: selected ? [...structure.dependencies, { stageId: id, gate: 'completed', lagDays: 0 }] : structure.dependencies.filter((d) => d.stageId !== id) });
@@ -127,7 +132,8 @@ function RowReview({ state, stage, role, actor, userId, onChange, onAction }: Pr
 }
 
 function FactRecovery({ state, stage, actor, role, userId, onChange }: { state: AppState; stage: Stage; actor: string; role: UserRole; userId?: string; onChange: (state: AppState) => void }) {
-  const commands = createScheduleEditUseCases(state, { name: actor, role, id: userId }, systemClock, runtimeIdGenerator, onChange);
+  const repository = useModuleRepository(createConstructionRepository, state, onChange);
+  const commands = createScheduleEditUseCases(repository, { name: actor, role, id: userId }, systemClock, runtimeIdGenerator);
   const [expected] = useState(() => scheduleEditSnapshot(state, 'facts', stage.id));
   const knownEnd = stage.completedOn || stage.actualEnd;
   const [end, setEnd] = useState(knownEnd || ''), [accepted, setAccepted] = useState(''), [note, setNote] = useState(''), [message, setMessage] = useState('');

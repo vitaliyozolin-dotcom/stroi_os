@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { seedState } from '../src/seed.ts';
 import { stagePlanSnapshot } from '../src/domain/schedule-planning.ts';
-import { editProjectStagePlan } from '../src/application/schedule-planning.ts';
+import { editProjectStagePlan } from './support/module-project.ts';
 const identity = { name: 'Управляющий', role: 'management' as const }, clock = { now: () => '2026-10-20T12:00:00Z' }, ids = { next: () => 'audit-test' };
 const fixture = () => { const state = structuredClone(seedState); state.stages[0] = { ...state.stages[0], planStart: '2026-10-01', planEnd: '2026-10-30', forecastEnd: '2026-10-30', responsible: 'Не назначен', responsibleId: undefined, dependencyId: undefined, dependency: undefined }; return state; };
 const input = (state: ReturnType<typeof fixture>) => ({ stageId: state.stages[0].id, expected: stagePlanSnapshot(state, state.stages[0].id), draft: { planStart: '2026-10-01', planEnd: '2026-11-01', forecastEnd: '2026-11-02', responsibleId: '', dependencyId: '', reason: 'Изменение поставки' } });

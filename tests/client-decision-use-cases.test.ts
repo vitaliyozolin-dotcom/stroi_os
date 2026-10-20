@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { seedState } from '../src/seed.ts';
 import { clientDecisionOptions, clientDecisionSnapshot } from '../src/domain/client-decisions.ts';
-import { createClientDecisionUseCases } from '../src/application/client-decisions.ts';
+import { createClientDecisionUseCases } from './support/module-project.ts';
 const now = '2026-10-20T12:00:00Z', clock = { now: () => now }, ids = { next: (prefix: string) => `${prefix}-test` };
 const fixture = () => { const state = structuredClone(seedState); state.decisions = [{ id: 'decision-1', title: 'Цвет фасада', status: 'waiting', dueDate: '2026-11-01' }, { id: 'other', title: 'Другой вопрос', status: 'waiting', dueDate: '2026-11-02' }]; return state; };
 const input = (state: ReturnType<typeof fixture>) => ({ decisionId: 'decision-1', expected: clientDecisionSnapshot(state, 'decision-1'), choice: 'Терракота' });

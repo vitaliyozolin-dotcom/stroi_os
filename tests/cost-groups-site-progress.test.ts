@@ -4,7 +4,7 @@ import { seedState } from '../src/seed.ts';
 import { costGroupTotals, expenseCostGroup } from '../src/domain/cost-groups.ts';
 import { validateFinanceChanges } from '../sites/projects/finance.js';
 import { validateStageControl } from '../sites/projects/stage-control.js';
-import { applyStageControl } from '../src/application/stage-control.ts';
+import { applyStageControl } from './support/module-project.ts';
 import { stateForRole } from '../sites/access-control.js';
 const owner = { role: 'management', name: 'Owner' }, now = '2026-09-09T12:00:00Z';
 

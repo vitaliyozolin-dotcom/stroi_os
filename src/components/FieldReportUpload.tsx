@@ -1,13 +1,15 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createDocumentsRepository } from '../infrastructure/module-project';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { AppState, UserRole } from '../entities/index';
 import { uploadFieldReport } from '../application/field-reports';
 import { documentUploader } from '../infrastructure/document-upload';
 import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
-import { planToday } from '../../sites/lib/plan-baseline.js';
+import { planToday } from '../domain/construction/index.js';
 import { Field, Modal } from './Ui';
 
 export function FieldReportUpload({ state, actor, role, onChange, onClose }: { state: AppState; actor: string; role: UserRole; onChange: (state: AppState) => void; onClose: () => void }) {
-  const latest = useRef(state); latest.current = state;
+  const documentsRepository = useModuleRepository(createDocumentsRepository, state, onChange);
   const uploadAbort = useRef<AbortController | null>(null);
   useEffect(() => () => { uploadAbort.current?.abort(); }, [state.project.id]);
   const [files, setFiles] = useState<File[]>([]);
@@ -23,7 +25,7 @@ export function FieldReportUpload({ state, actor, role, onChange, onClose }: { s
     setBusy(true);
     try {
       const controller = new AbortController(); uploadAbort.current = controller;
-      const result = await uploadFieldReport(() => latest.current, { projectId: state.project.id, files, date, note, stageId, sourceLink }, { name: actor, role }, systemClock, runtimeIdGenerator, documentUploader, onChange, controller.signal);
+      const result = await uploadFieldReport(documentsRepository, { projectId: state.project.id, files, date, note, stageId, sourceLink }, { name: actor, role }, systemClock, runtimeIdGenerator, documentUploader, controller.signal);
       if (!result.ok) throw new Error(result.error);
       onClose();
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось сохранить отчёт'); } finally { setBusy(false); }

@@ -1,3 +1,7 @@
+export type { ModuleRepository, ModuleChange, ModuleResult, ModuleFailure, ModuleContext } from './module-repository.ts';
+export { createTaskUseCases, taskSnapshot } from './tasks.ts';
+export { createQualityUseCases, checkpointSnapshot } from './quality.ts';
+export type { QualityUploadPort } from './quality.ts';
 export { createSettingsUseCases, changeProjectSettings } from './settings.ts';
 export { createClientDecisionUseCases, confirmProjectClientDecision } from './client-decisions.ts';
 export { createMarketingUseCases, changeProjectMarketing } from './marketing.ts';

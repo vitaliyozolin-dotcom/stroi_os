@@ -1,12 +1,13 @@
-import type { AppState, AppSettings, DashboardWidget, NotificationSettings, UserRole } from '../entities/index';
-export const settingsSnapshot = (state: AppState) => JSON.stringify([state.project.id, state.settings]);
+import type { SettingsSnapshot } from './contexts';
+import type { AppSettings, DashboardWidget, NotificationSettings, UserRole } from '../entities/index';
+export const settingsSnapshot = (state: SettingsSnapshot) => JSON.stringify([state.project.id, state.settings]);
 export type SettingsInput = { expected: string } & (
  | { kind: 'widget'; widget: DashboardWidget; enabled: boolean }
  | { kind: 'channel'; key: keyof NotificationSettings['channels']; enabled: boolean }
  | { kind: 'event'; key: keyof NotificationSettings['events']; enabled: boolean }
  | { kind: 'user'; id?: string; name: string; email: string; role: UserRole; telegram: string }
 );
-export const prepareSettings = (state: AppState, input: SettingsInput, canManageAccess: boolean, newId: string, now: string): { ok: true; settings: AppSettings; summary: string; changed: boolean } | { ok: false; error: string } => {
+export const prepareSettings = (state: SettingsSnapshot, input: SettingsInput, canManageAccess: boolean, newId: string, now: string): { ok: true; settings: AppSettings; summary: string; changed: boolean } | { ok: false; error: string } => {
  if (input.expected !== settingsSnapshot(state)) return { ok: false, error: 'Настройки обновились. Откройте форму заново.' };
  if (input.kind !== 'user' && typeof input.enabled !== 'boolean') return { ok: false, error: 'Укажите состояние настройки.' };
  const settings = structuredClone(state.settings); let summary = '';

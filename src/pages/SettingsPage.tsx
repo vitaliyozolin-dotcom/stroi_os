@@ -1,3 +1,5 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createSettingsRepository } from '../infrastructure/module-project';
 import { settingsSnapshot } from '../domain/settings';
 import { requestApi } from '../infrastructure/api-http';
 import { createSettingsUseCases } from '../application';
@@ -91,7 +93,7 @@ function Toggle({ checked, onChange, label, disabled = false }: { checked: boole
 }
 
 export function SettingsPage({ state, actor, role, canManageAccess, onChange, onServerSnapshot }: { state: AppState; actor: string; role: UserRole; canManageAccess: boolean; onChange: (next: AppState) => void; onServerSnapshot: (snapshot: RemoteProjectSnapshot) => void }) {
-  const settingsCommands = createSettingsUseCases(state, { name: actor, role, canManageAccess }, systemClock, runtimeIdGenerator, onChange);
+  const settingsCommands = createSettingsUseCases(useModuleRepository(createSettingsRepository, state, onChange), { name: actor, role, canManageAccess }, systemClock, runtimeIdGenerator);
   const [settingsError, setSettingsError] = useState('');
   const [rosterExpected, setRosterExpected] = useState('');
   const [tab, setTab] = useState<SettingsTab>('access');

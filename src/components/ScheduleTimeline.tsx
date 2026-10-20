@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Check, ChevronRight, GanttChart, List, LocateFixed } from 'lucide-react';
-import { automaticSchedule, plannedStageDays, type AutomaticSchedule } from '../../sites/lib/automatic-schedule.js';
+import { automaticSchedule, plannedStageDays, type AutomaticSchedule } from '../domain/construction/index.js';
 import type { AppState, Stage } from '../entities/index';
 import { addDaysKey, mondayOf } from '../projectWeek';
 import { formatDate } from '../presentation/formatting';

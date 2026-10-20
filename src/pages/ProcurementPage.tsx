@@ -1,3 +1,5 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createSupplyRepository } from '../infrastructure/module-project';
 import { procurementSnapshot } from '../domain/procurement-workflow';
 import { createProcurementUseCases } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
@@ -46,7 +48,7 @@ const dateAfterDays = (days: number) => {
 };
 
 export function ProcurementPage({ state, role, actor, focusId, onChange }: { state: AppState; role: UserRole; actor: string; focusId?: string | null; onChange: (next: AppState) => void }) {
-  const procurement = createProcurementUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+  const procurement = createProcurementUseCases(useModuleRepository(createSupplyRepository, state, onChange), { name: actor, role }, systemClock, runtimeIdGenerator);
   const [requirementProjectId, setRequirementProjectId] = useState(state.project.id);
   const [requirementError, setRequirementError] = useState('');
   const [showForm, setShowForm] = useState(false);

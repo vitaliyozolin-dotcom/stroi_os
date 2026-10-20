@@ -1,11 +1,13 @@
+import { useModuleRepository } from '../useModuleRepository';
+import { createConstructionRepository } from '../infrastructure/module-project';
 import { createScheduleEditUseCases, scheduleEditSnapshot } from '../application/schedule-edits';
 import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
 import { useEffect, useState, type FormEvent } from 'react';
 import type { AppState, Stage, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import type { StageAction } from '../application/stage-control';
-import { recordedScheduleStatus, stageRadar } from '../../sites/lib/stage-control.js';
-import { baselineOverview, planDays, planToday, validPlanDate } from '../../sites/lib/plan-baseline.js';
+import { recordedScheduleStatus, stageRadar } from '../domain/construction/index.js';
+import { baselineOverview, planDays, planToday, validPlanDate } from '../domain/construction/index.js';
 import { formatDate } from '../presentation/formatting';
 import { stageStatusLabel } from '../presentation/status-labels';
 import { planShiftLabel } from './BaselinePanel';
@@ -13,7 +15,7 @@ import { StageControlModal } from './StageControlModal';
 import { Field, Modal, SectionHeader, StatusBadge } from './Ui';
 
 export function StageRadar({ state, role, actor, userId, onChange, onNavigate }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (s: AppState) => void; onNavigate: (p: PageId) => void }) {
-  const commands = createScheduleEditUseCases(state, { name: actor, role, id: userId }, systemClock, runtimeIdGenerator, onChange);
+  const commands = createScheduleEditUseCases(useModuleRepository(createConstructionRepository, state, onChange), { name: actor, role, id: userId }, systemClock, runtimeIdGenerator);
   const [forecastExpected, setForecastExpected] = useState('');
   const view = stageRadar(state), baseline = baselineOverview(state), today = planToday();
   const records = recordedScheduleStatus(state, today);

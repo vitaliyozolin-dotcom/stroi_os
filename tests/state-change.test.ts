@@ -18,11 +18,11 @@ test('task status change returns immutable state and auditable metadata', () => 
   const change = changeTaskStatus(state, { taskId: task.id, status: 'done', text: 'Задача выполнена', extra: { completionNote: 'Готово' } }, context());
 
   assert.equal(state.tasks[0].status, task.status);
-  assert.equal(change.state.tasks[0].status, 'done');
-  assert.equal(change.state.tasks[0].completedAt, '2026-08-20T10:00:00.000Z');
+  assert.equal(change.patch.tasks![0].status, 'done');
+  assert.equal(change.patch.tasks![0].completedAt, '2026-08-20T10:00:00.000Z');
   assert.equal(change.action, 'task_status_changed');
   assert.equal(change.summary, `Задача выполнена: «${task.title}»`);
-  assert.equal(change.state.activity[0].id, 'activity-fixed');
+  assert.equal(change.event!.id, 'activity-fixed');
 });
 
 test('checkpoint change and application sink preserve action and summary', () => {
@@ -32,8 +32,8 @@ test('checkpoint change and application sink preserve action and summary', () =>
   const change = changeCheckpoint(state, { checkpointId: checkpoint.id, patch: { status: 'accepted', acceptedAt: '2026-08-20T10:00:00.000Z', clientVisible: true }, summary: 'Контрольная точка принята', tone: 'positive' }, context());
   let received: unknown;
 
-  commitStateChange(change, (next, metadata) => { received = { next, metadata }; });
+  commitStateChange({ state: { ...state, ...change.patch, activity: change.event ? [change.event, ...state.activity] : state.activity }, action: change.action, summary: change.summary }, (next, metadata) => { received = { next, metadata }; });
 
   assert.deepEqual((received as { metadata: unknown }).metadata, { action: 'checkpoint_accepted', summary: 'Контрольная точка принята' });
-  assert.equal(change.state.checkpoints[0].clientVisible, true);
+  assert.equal(change.patch.checkpoints![0].clientVisible, true);
 });

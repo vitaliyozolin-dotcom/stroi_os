@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { seedState } from '../src/seed.ts';
-import { createProjectRequirement, createProcurementUseCases } from '../src/application/procurement.ts';
+import { createProjectRequirement, createProcurementUseCases } from './support/module-project.ts';
 import type { CreateRequirementInput } from '../src/application/procurement.ts';
 import { readFileSync } from 'node:fs';
 const clock = { now: () => '2026-10-20T12:00:00Z' };

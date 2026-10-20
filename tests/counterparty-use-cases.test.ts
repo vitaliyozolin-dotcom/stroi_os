@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { seedState } from '../src/seed.ts';
 import type { CounterpartyProfile } from '../src/entities/index.ts';
 import { counterpartySnapshot, normalizeCounterparty } from '../src/domain/counterparties.ts';
-import { createCounterpartyUseCases, saveProjectCounterparty } from '../src/application/counterparties.ts';
+import { createCounterpartyUseCases, saveProjectCounterparty } from './support/module-project.ts';
 
 const now = '2026-10-19T12:00:00Z';
 const clock = { now: () => now };

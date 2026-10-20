@@ -7,8 +7,8 @@ import { ScheduleReconciliation } from './ScheduleReconciliation';
 import { Modal } from './Ui';
 import { formatDate } from '../presentation/formatting';
 import { stageStatusLabel } from '../presentation/status-labels';
-import { confirmedSiteUpdate } from '../../sites/lib/schedule-forecast.js';
-import { planToday } from '../../sites/lib/plan-baseline.js';
+import { confirmedSiteUpdate } from '../domain/construction/index.js';
+import { planToday } from '../domain/construction/index.js';
 
 export function StageQuickUpdate({ state, stageId, role, actor, userId, onChange, onClose, onNavigate }: {
   state: AppState; stageId: string; role: UserRole; actor: string; userId?: string;

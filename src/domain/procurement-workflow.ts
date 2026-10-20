@@ -1,14 +1,15 @@
-import type { AppState, ProcurementStatus, SupplierQuote } from '../entities/index';
-export const procurementSnapshot = (state: AppState, id: string, quotes = false) => JSON.stringify([state.project.id, state.procurement.find(item => item.id === id), quotes ? state.supplierQuotes.filter(quote => quote.procurementItemId === id) : null]);
+import type { SupplySnapshot } from './contexts';
+import type { ProcurementStatus, SupplierQuote } from '../entities/index';
+export const procurementSnapshot = (state: SupplySnapshot, id: string, quotes = false) => JSON.stringify([state.project.id, state.procurement.find(item => item.id === id), quotes ? state.supplierQuotes.filter(quote => quote.procurementItemId === id) : null]);
 export type ProcurementWorkflowInput = { itemId: string; expected: string } & (
   { action: 'advance' } | { action: 'select'; quoteId: string } |
   { action: 'quote'; supplierId: string; amount: number; deliveryDays: number; paymentTerms: string; source: string; comment: string }
 );
-export type ProcurementTransition = { ok: true; changed: boolean; patch: Partial<Pick<AppState, 'procurement' | 'supplierQuotes'>>; summary: string; tone: 'neutral' | 'positive' } | { ok: false; error: string };
+export type ProcurementTransition = { ok: true; changed: boolean; patch: Partial<Pick<SupplySnapshot, 'procurement' | 'supplierQuotes'>>; summary: string; tone: 'neutral' | 'positive' } | { ok: false; error: string };
 const statuses: ProcurementStatus[] = ['need', 'rfq', 'ordered', 'in_transit', 'delivered', 'accepted', 'issued'];
 const labels = ['потребность', 'сбор цен', 'заказано', 'в пути', 'доставлено', 'принято', 'выдано в работу'];
 const money = (amount: number) => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 }).format(amount);
-export const transitionProcurement = (state: AppState, input: ProcurementWorkflowInput, timestamp: string, quoteId: string): ProcurementTransition => {
+export const transitionProcurement = (state: SupplySnapshot, input: ProcurementWorkflowInput, timestamp: string, quoteId: string): ProcurementTransition => {
   const item = state.procurement.find(item => item.id === input.itemId);
   if (!item) return { ok: false, error: 'Потребность не найдена. Обновите список.' };
   if (input.expected !== procurementSnapshot(state, item.id, input.action === 'select')) return { ok: false, error: 'Данные снабжения обновились. Откройте форму или карточку заново.' };

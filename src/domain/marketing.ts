@@ -1,8 +1,9 @@
-import type { AppState, Lead, LeadSource, LeadStage } from '../entities/index';
+import type { SalesSnapshot } from './contexts';
+import type { Lead, LeadSource, LeadStage } from '../entities/index';
 export const marketingStages: LeadStage[] = ['new', 'qualified', 'site_visit', 'estimate', 'negotiation', 'won', 'lost'];
 export const marketingStageLabels: Record<LeadStage, string> = { new: 'Новая', qualified: 'Квалификация', site_visit: 'Выезд', estimate: 'Смета', negotiation: 'Переговоры', won: 'Договор', lost: 'Отказ' };
 export const marketingSourceLabels: Record<LeadSource, string> = { website: 'Сайт', avito: 'Авито', domclick: 'Домклик', referral: 'Рекомендация', telegram: 'Telegram', manual: 'Вручную' };
-export const leadSnapshot = (state: AppState, id: string) => JSON.stringify([state.project.id, state.leads.find(lead => lead.id === id)]);
+export const leadSnapshot = (state: SalesSnapshot, id: string) => JSON.stringify([state.project.id, state.leads.find(lead => lead.id === id)]);
 export type LeadDraft = Omit<Lead, 'id' | 'createdAt' | 'stage' | 'projectId' | 'lostReason'>;
 export type LeadQualification = Pick<Lead, 'landStatus' | 'mortgageStatus'>;
 const validTimestamp = (value: string) => { const date = value.slice(0, 10), parsed = new Date(`${date}T00:00:00.000Z`); return /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date && Number.isFinite(Date.parse(value)); };

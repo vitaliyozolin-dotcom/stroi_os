@@ -1,13 +1,13 @@
-import type { AppState, StageSchedule, StageSiteUpdate, UserRole } from '../entities/index';
-import type { Clock, IdGenerator } from './ports';
-import type { StateChange } from '../domain/change';
-import { schedulePayload, sitePayload } from '../../sites/lib/schedule-forecast.js';
-import { validateStageControl } from '../../sites/projects/stage-control.js';
-import { validateBaselineChanges } from '../../sites/projects/baseline.js';
-import { commitStateChange, type StateChangeSink } from './state-change.ts';
+import type { StageSchedule, StageSiteUpdate, UserRole } from '../entities/index';
+import type { Clock, IdGenerator } from './ports.ts';
+import type { ConstructionSnapshot, ConstructionPatch } from '../domain/contexts.ts';
+import { moduleChange, executeModule, type ModuleChange, type ModuleRepository } from './module-repository.ts';
+import { schedulePayload, sitePayload } from '../domain/construction/index.js';
+import { validateStageControl } from '../domain/construction/index.js';
+import { validateBaselineChanges } from '../domain/construction/index.js';
 export interface BaselineDraft { source: string; note: string; start: string; end: string; targetDate: string; reason: string; stages: { id: string; start: string; end: string }[] }
-export const scheduleReviewSource = (stage: AppState['stages'][number]) => JSON.stringify([sitePayload(stage.siteUpdate), schedulePayload(stage.schedule), stage.status, stage.blocker, stage.actualStart, stage.completedOn, stage.actualEnd, stage.acceptedAt]);
-export const scheduleEditSnapshot = (state: AppState, kind: 'baseline' | 'structure' | 'review' | 'facts' | 'progress' | 'forecast', id = '') => {
+export const scheduleReviewSource = (stage: ConstructionSnapshot['stages'][number]) => JSON.stringify([sitePayload(stage.siteUpdate), schedulePayload(stage.schedule), stage.status, stage.blocker, stage.actualStart, stage.completedOn, stage.actualEnd, stage.acceptedAt]);
+export const scheduleEditSnapshot = (state: ConstructionSnapshot, kind: 'baseline' | 'structure' | 'review' | 'facts' | 'progress' | 'forecast', id = '') => {
  const stage = state.stages.find(row => row.id === id);
  return JSON.stringify([state.project.id, kind === 'forecast' ? [state.project.workForecastDate, state.project.workForecastNote, state.project.workForecastUpdatedAt] : kind === 'progress' ? state.project.siteProgressHistory : kind === 'baseline' ? [state.project.baseline, state.project.targetDate, state.stages.map(row => [row.id, row.baseline])] : kind === 'structure' ? schedulePayload(stage?.schedule) : kind === 'review' ? stage && scheduleReviewSource(stage) : stage]);
 };
@@ -19,7 +19,7 @@ export type ScheduleEditInput = { expected: string } & (
  | { kind: 'review'; stageId: string; form: StageSiteUpdate }
  | { kind: 'facts'; stageId: string; end: string; accepted: string; note: string }
 );
-export const editProjectSchedule = (state: AppState, input: ScheduleEditInput, identity: { name: string; role: UserRole; id?: string }, clock: Clock, ids: IdGenerator): { ok: true; change: StateChange | null } | { ok: false; error: string } => {
+export const editProjectSchedule = (state: ConstructionSnapshot, input: ScheduleEditInput, identity: { name: string; role: UserRole; id?: string }, clock: Clock, ids: IdGenerator): { ok: true; change: ModuleChange<ConstructionPatch> | null } | { ok: false; error: string } => {
  try {
   const stageId = input.kind === 'baseline' || input.kind === 'progress' || input.kind === 'forecast' ? '' : input.stageId;
   if (input.expected !== scheduleEditSnapshot(state, input.kind, stageId)) throw new Error('Запись обновилась. Загрузите свежие сведения перед сохранением.');
@@ -69,8 +69,8 @@ export const editProjectSchedule = (state: AppState, input: ScheduleEditInput, i
   // Shared policies validate a disposable copy. Only the server authors trusted stamps/history.
   const error = input.kind === 'baseline' ? validateBaselineChanges(state, structuredClone(next), identity, now) : validateStageControl(state, structuredClone(next), identity, now);
   if (error) throw new Error(error);
-  const change: StateChange = { action: 'schedule_updated', summary, state: { ...next, activity: [{ id: ids.next('activity'), timestamp: now, actor: identity.name, text: summary, tone: 'neutral' }, ...next.activity] } };
+  const change = moduleChange(state, { project: next.project, stages: next.stages }, 'schedule_updated', summary, { identity, clock: { now: () => now }, ids });
   return { ok: true, change };
  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : 'Не удалось сохранить график.' }; }
 };
-export const createScheduleEditUseCases = (state: AppState, identity: { name: string; role: UserRole; id?: string }, clock: Clock, ids: IdGenerator, sink: StateChangeSink) => ({ execute: (input: ScheduleEditInput) => { const result = editProjectSchedule(state, input, identity, clock, ids); if (result.ok && result.change) commitStateChange(result.change, sink); return result; } });
+export const createScheduleEditUseCases = (repository: ModuleRepository<ConstructionSnapshot, ConstructionPatch>, identity: { name: string; role: UserRole; id?: string }, clock: Clock, ids: IdGenerator) => ({ execute: (input: ScheduleEditInput) => executeModule(repository, state => editProjectSchedule(state, input, identity, clock, ids)) });
