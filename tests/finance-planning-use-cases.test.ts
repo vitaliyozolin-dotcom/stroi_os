@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createFinanceUseCases } from '../src/application/finance.ts';
-import { editProjectBudgetLine, classifyProjectCosts, setProjectPaymentDueDate } from '../src/application/finance-planning.ts';
+import { createFinanceUseCases } from './support/finance-project.ts';
+import { editProjectBudgetLine, classifyProjectCosts, setProjectPaymentDueDate } from './support/finance-project.ts';
 import { budgetLineSnapshot, classificationSnapshot, validateFinanceChanges } from '../src/domain/finance/index.js';
 import { lineForecast } from '../src/domain/finance-totals.js';
 import { seedState } from '../src/seed.ts';
 import type { AppState } from '../src/entities/index.ts';
-import type { FinanceCommandResult } from '../src/application/finance.ts';
+import type { FinanceCommandResult } from './support/finance-project.ts';
 
 const now = '2026-10-19T12:00:00.000Z';
 const identity = { name: 'Управляющий', role: 'management' as const };

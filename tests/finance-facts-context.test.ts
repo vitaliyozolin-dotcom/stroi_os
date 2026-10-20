@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { seedState } from '../src/seed.ts';
 import { approveFinanceExpense, acceptFinanceExpense, recordFinancePayment, recordFinanceReceipt } from '../src/application/finance-context-facts.ts';
-import { financeFactsSnapshot, applyFinanceFactsResult } from '../src/application/finance-facts.ts';
-import { approveProjectExpense, acceptProjectExpense } from '../src/application/finance.ts';
+import { financeFactsSnapshot, applyFinanceFactsResult } from '../src/infrastructure/finance-project.ts';
+import { approveProjectExpense, acceptProjectExpense } from './support/finance-project.ts';
 const context = () => { let id = 0; return { identity: { name: 'Управляющий', role: 'management' as const }, clock: { now: () => '2026-10-20T12:00:00Z' }, ids: { next: (prefix: string) => `${prefix}-${++id}` } }; };
 const fixture = () => {
  const state = structuredClone(seedState);

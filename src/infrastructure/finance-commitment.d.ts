@@ -1,8 +1,8 @@
 import type { AppState } from '../entities/index';
 import type { StateChange } from '../domain/change';
-import type { FinanceCommandContext } from './finance-context';
-import type { CreateCommitmentInput, FinanceCommitmentSnapshot, FinanceCommitmentCommandResult } from './finance-context-commitment.js';
-export type { CreateCommitmentInput } from './finance-context-commitment.js';
+import type { FinanceCommandContext } from '../application/finance-context';
+import type { CreateCommitmentInput, FinanceCommitmentSnapshot, FinanceCommitmentCommandResult } from '../application/finance-context-commitment.js';
+export type { CreateCommitmentInput } from '../application/finance-context-commitment.js';
 
 export type CreateCommitmentResult = { ok: true; entryId: string; change: StateChange | null } | { ok: false; error: string };
 export function financeCommitmentSnapshot(state: AppState): FinanceCommitmentSnapshot;

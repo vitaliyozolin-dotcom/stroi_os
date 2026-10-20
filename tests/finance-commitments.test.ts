@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createProjectCommitment } from '../src/application/finance-commitment.js';
-import { createFinanceUseCases } from '../src/application/finance.ts';
+import { createProjectCommitment } from '../src/infrastructure/finance-commitment.js';
+import { createFinanceUseCases } from './support/finance-project.ts';
 import { validateFinanceChanges } from '../src/domain/finance/index.js';
 import { createTelegramProjectStore } from '../sites/telegram/project-store.js';
 import { buildStages, seedState } from '../src/seed.ts';

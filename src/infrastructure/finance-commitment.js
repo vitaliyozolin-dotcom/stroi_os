@@ -1,4 +1,4 @@
-import { createFinanceCommitment, financeCommitmentFingerprint } from './finance-context-commitment.js';
+import { createFinanceCommitment, financeCommitmentFingerprint } from '../application/finance-context-commitment.js';
 
 export const financeCommitmentSnapshot = (state) => ({
   projectId: state.project.id, budgetLines: state.budgetLines, budgetMeta: state.budgetMeta,

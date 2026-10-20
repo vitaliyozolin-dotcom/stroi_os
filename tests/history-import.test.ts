@@ -1,9 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { seedState } from '../src/seed.ts';
-import { parseHistoryRegister, prepareHistoryImport, type HistoryRegister } from '../src/domain/history-import.ts';
+import { parseHistoryRegister, prepareFinanceHistoryImport, type HistoryRegister } from '../src/domain/finance/history-import.ts';
 import { validateFinanceChanges } from '../sites/projects/finance.js';
 import { financeTotals } from '../src/domain/finance.ts';
+
+// Materialize the domain result solely for these whole-project characterization assertions.
+const prepareHistoryImport = (current: typeof seedState, input: HistoryRegister, actor: string, now: string, includeBudget: boolean) => {
+  const result = prepareFinanceHistoryImport(current, input, actor, now, includeBudget);
+  const state = structuredClone(current);
+  Object.assign(state, result.patch);
+  state.project.targetCost = result.targetCost;
+  state.documents = result.documents;
+  state.counterparties = result.counterparties;
+  if (result.event) state.activity.unshift(result.event);
+  return { state, added: result.added, updated: result.updated, skipped: result.skipped };
+};
 
 const now = '2026-09-30T00:00:00.000Z';
 const identity = { role: 'management', name: 'Владелец' };

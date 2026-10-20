@@ -1,4 +1,4 @@
-import { createProjectCommitment } from '../src/application/finance-commitment.js';
+import { createProjectCommitment } from '../src/infrastructure/finance-commitment.js';
 import {
   authenticatedIdentity,
   projectIdentity,

@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { seedState, buildStages } from '../src/seed.ts';
 import { createFinanceCommitment } from '../src/application/finance-context-commitment.js';
-import { financeCommitmentSnapshot, applyFinanceCommitmentResult, createProjectCommitment } from '../src/application/finance-commitment.js';
+import { financeCommitmentSnapshot, applyFinanceCommitmentResult, createProjectCommitment } from '../src/infrastructure/finance-commitment.js';
 import { financeHistoryState, type HistoryRegister } from '../src/domain/finance/history-import.ts';
 import { financeHistoryFingerprint, importFinanceHistory } from '../src/application/finance-context-history.ts';
-import { historyImportSnapshot, applyFinanceHistoryResult, importProjectFinanceHistory } from '../src/application/finance-history.ts';
+import { historyImportSnapshot, applyFinanceHistoryResult } from '../src/infrastructure/finance-project.ts';
+import { importProjectFinanceHistory } from './support/finance-project.ts';
 import { validateFinanceChanges } from '../src/domain/finance/index.js';
 
 const now = '2026-10-20T12:00:00.000Z';

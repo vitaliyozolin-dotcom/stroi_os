@@ -15,12 +15,13 @@ await mkdir(`${projectRoot}dist/server/lib`, { recursive: true });
 await mkdir(`${projectRoot}dist/src/domain`, { recursive: true });
 await mkdir(`${projectRoot}dist/src/domain/finance`, { recursive: true });
 await mkdir(`${projectRoot}dist/src/application`, { recursive: true });
+await mkdir(`${projectRoot}dist/src/infrastructure`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/projects`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/routes`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
 
 await Promise.all([
-  copyFile(`${projectRoot}src/application/finance-commitment.js`, `${projectRoot}dist/src/application/finance-commitment.js`),
+  copyFile(`${projectRoot}src/infrastructure/finance-commitment.js`, `${projectRoot}dist/src/infrastructure/finance-commitment.js`),
   copyFile(`${projectRoot}src/application/finance-context-commitment.js`, `${projectRoot}dist/src/application/finance-context-commitment.js`),
   ...['index', 'policy', 'planning', 'state-validation', 'transitions'].map((name) => copyFile(`${projectRoot}src/domain/finance/${name}.js`, `${projectRoot}dist/src/domain/finance/${name}.js`)),
   copyFile(`${projectRoot}src/domain/finance-totals.js`, `${projectRoot}dist/src/domain/finance-totals.js`),

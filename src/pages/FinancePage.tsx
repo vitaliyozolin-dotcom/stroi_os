@@ -1,7 +1,7 @@
 import { budgetLineSnapshot } from '../domain/finance/index.js';
 import { CashflowPanel } from '../components/CashflowPanel';
-import { createFinanceUseCases } from '../application';
-import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
+import type { StateChangeSink } from '../application';
+import { useFinance } from '../useFinance';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   ArrowUpRight,
@@ -27,8 +27,8 @@ import { FinanceDrawer } from '../components/FinanceDrawer';
 import { financeEntryTitle, financeToday } from '../presentation/finance-view';
 import './finance-page.css';
 
-export function FinancePage({ state, actor, role, focusId, onChange, onNavigate, onOpenQuestions }: { state: AppState; actor: string; role: UserRole; focusId?: string | null; onChange: (next: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenQuestions: () => void }) {
-  const finance = createFinanceUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+export function FinancePage({ state, actor, role, focusId, onChange, onNavigate, onOpenQuestions }: { state: AppState; actor: string; role: UserRole; focusId?: string | null; onChange: StateChangeSink; onNavigate: (page: PageId, entityId?: string) => void; onOpenQuestions: () => void }) {
+  const finance = useFinance(state, { name: actor, role }, onChange);
   const [approvalError, setApprovalError] = useState('');
   const totals = financeTotals(state);
   const margin = state.project.contractValue - totals.forecast;

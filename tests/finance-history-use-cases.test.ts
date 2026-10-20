@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { seedState } from '../src/seed.ts';
-import { createFinanceUseCases } from '../src/application/finance.ts';
-import { historyImportSnapshot, importProjectFinanceHistory } from '../src/application/finance-history.ts';
+import { createFinanceUseCases } from './support/finance-project.ts';
+import { historyImportSnapshot } from '../src/infrastructure/finance-project.ts';
+import { importProjectFinanceHistory } from './support/finance-project.ts';
 import { parseHistoryRegister, type HistoryRegister } from '../src/domain/finance/history-import.ts';
 import { validateFinanceChanges } from '../src/domain/finance/index.js';
 

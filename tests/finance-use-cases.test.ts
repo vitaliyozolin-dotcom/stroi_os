@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createFinanceUseCases, approveProjectExpense, acceptProjectExpense, recordProjectPayment, recordProjectReceipt, type FinanceCommandResult } from '../src/application/finance.ts';
+import { createFinanceUseCases, approveProjectExpense, acceptProjectExpense, recordProjectPayment, recordProjectReceipt, type FinanceCommandResult } from './support/finance-project.ts';
 import { validateFinanceChanges } from '../src/domain/finance/index.js';
 import { seedState } from '../src/seed.ts';
 import type { AppState, FinanceEntry } from '../src/entities/index.ts';

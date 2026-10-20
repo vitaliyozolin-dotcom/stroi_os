@@ -1,5 +1,5 @@
-import { createFinanceUseCases } from '../application';
-import { systemClock, runtimeIdGenerator } from '../infrastructure/runtime';
+import type { StateChangeSink } from '../application';
+import { useFinance } from '../useFinance';
 import { OverviewFocus } from '../components/OverviewFocus';
 import { ConstructionNow } from '../components/ConstructionNow';
 import { CostGroups } from '../components/CostGroups';
@@ -18,8 +18,8 @@ import type { AppState, DashboardWidget, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { MetricCard, ProgressBar, SectionHeader, StatusBadge } from '../components/Ui';
 
-export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
-  const financeCommands = createFinanceUseCases(state, { name: actor, role }, systemClock, runtimeIdGenerator, onChange);
+export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: StateChangeSink; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
+  const financeCommands = useFinance(state, { name: actor, role }, onChange);
   const finance = financeTotals(state);
   const sourceEstimate = sourceEstimateTotals(state.budgetLines);
   const progress = progressTotals(state);
