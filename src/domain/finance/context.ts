@@ -17,3 +17,7 @@ export interface FinanceState extends FinanceOwnedState {
   stages: Stage[];
   counterparties: CounterpartyProfile[];
 }
+/** Import reads project evidence and may propose explicit updates outside finance ownership. */
+export interface FinanceHistorySnapshot extends FinanceState {
+  project: Pick<HouseProject, 'id' | 'targetCost'>;
+}

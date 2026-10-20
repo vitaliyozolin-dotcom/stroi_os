@@ -1,44 +1,45 @@
 import type { AppState } from '../entities/index';
-import { parseHistoryRegister, prepareHistoryImport } from '../domain/finance/history-import.ts';
-import { validateFinanceChanges } from '../domain/finance/index.js';
-import type { FinanceCommandContext } from './finance.ts';
+import type { FinanceCommandContext } from './finance-context';
 import type { StateChange } from '../domain/change';
+import { financeHistoryState } from '../domain/finance/history-import.ts';
+import { financeHistoryFingerprint, importFinanceHistory, type HistoryImportCommand, type HistoryImportCounts, type FinanceHistoryCommandResult } from './finance-context-history.ts';
 
-export interface HistoryImportCommand {
-  register: unknown;
-  includeBudget: boolean;
-  confirmed: boolean;
-  expected: string;
-}
-export type HistoryImportCommandResult = { ok: true; change: StateChange | null; added: number; updated: number; skipped: number } | { ok: false; error: string };
+export type { HistoryImportCommand } from './finance-context-history.ts';
+export type HistoryImportCommandResult = ({ ok: true; change: StateChange | null } & HistoryImportCounts) | { ok: false; error: string };
+export const historyImportSnapshot = (state: AppState) => financeHistoryFingerprint(financeHistoryState(state));
 
-// Only import-relevant state participates; an unrelated task/comment is preserved.
-export const historyImportSnapshot = (state: AppState) => JSON.stringify([
-  state.project.id, state.project.targetCost, state.budgetLines, state.budgetMeta,
-  state.financeEntries, state.documents, state.counterparties, state.stages.map(stage => stage.id),
-]);
-
-export const importProjectFinanceHistory = (state: AppState, input: HistoryImportCommand, context: FinanceCommandContext): HistoryImportCommandResult => {
-  if (context.identity.role !== 'management') return { ok: false, error: 'Импорт финансов доступен только роли «Управление».' };
-  if (input.confirmed !== true) return { ok: false, error: 'Подтвердите, что перечисленные расходы уже оплачены. Приёмка фиксируется отдельно.' };
-  if (typeof input.includeBudget !== 'boolean') return { ok: false, error: 'Укажите, нужно ли вносить смету.' };
-  if (input.expected !== historyImportSnapshot(state)) return { ok: false, error: 'Данные проекта обновились. Загрузите реестр заново и проверьте предпросмотр.' };
-  try {
-    const now = context.clock.now();
-    // Parsing and immutable preparation use the latest snapshot, never a cached draft.
-    const register = parseHistoryRegister(input.register);
-    const result = prepareHistoryImport(state, register, context.identity.name, now, input.includeBudget);
-    const { added, updated, skipped } = result;
-    if (JSON.stringify(result.state) === JSON.stringify(state)) return { ok: true, change: null, added, updated, skipped };
-    // Validate on a disposable copy: server-owned stamps must still be assigned by the server.
-    const error = validateFinanceChanges(state, structuredClone(result.state), context.identity, now);
-    if (error) return { ok: false, error };
-    const hasImportActivity = result.state.activity[0]?.id !== state.activity[0]?.id;
-    const summary = hasImportActivity ? result.state.activity[0].text : 'Уточнены сведения документов исторического импорта';
-    const event = { id: context.ids.next('history-import'), actor: context.identity.name, timestamp: now, text: summary, tone: 'neutral' as const };
-    result.state.activity = [event, ...(hasImportActivity ? result.state.activity.slice(1) : result.state.activity)];
-    return { ok: true, added, updated, skipped, change: { action: 'finance_history_imported', summary, state: result.state } };
-  } catch (failure) {
-    return { ok: false, error: failure instanceof Error ? failure.message : 'Импорт не выполнен.' };
+/** Translate explicit cross-context intents into the existing revisioned project write. */
+export const applyFinanceHistoryResult = (state: AppState, result: FinanceHistoryCommandResult): HistoryImportCommandResult => {
+  if (!result.ok) return result;
+  const counts = { added: result.added, updated: result.updated, skipped: result.skipped };
+  if (!result.change) return { ok: true, change: null, ...counts };
+  const change = result.change;
+  if (change.projectId !== state.project.id || change.expected !== historyImportSnapshot(state)) {
+    return { ok: false, error: 'Данные проекта обновились. Загрузите реестр заново и проверьте предпросмотр.' };
   }
+  const updates = new Map(change.documentUpdates.map(update => [update.id, update]));
+  const documents = state.documents.map(document => {
+    const update = updates.get(document.id);
+    if (!update) return document;
+    // Import owns only these metadata changes, never file keys, visibility or the registry itself.
+    return { ...document,
+      ...(Object.hasOwn(update, 'documentDate') ? { documentDate: update.documentDate } : {}),
+      ...(Object.hasOwn(update, 'number') ? { number: update.number } : {}),
+      ...(Object.hasOwn(update, 'category') ? { category: update.category } : {}),
+      ...(Object.hasOwn(update, 'counterpartyId') ? { counterpartyId: update.counterpartyId } : {}),
+    };
+  });
+  return { ok: true, ...counts, change: { action: change.action, summary: change.summary, state: {
+    ...state,
+    budgetLines: change.patch.budgetLines ?? state.budgetLines,
+    budgetMeta: change.patch.budgetMeta ?? state.budgetMeta,
+    financeEntries: change.patch.financeEntries ?? state.financeEntries,
+    project: change.targetCost === undefined ? state.project : { ...state.project, targetCost: change.targetCost },
+    documents,
+    counterparties: [...state.counterparties, ...change.counterpartyAdditions],
+    activity: [change.event, ...state.activity],
+  } } };
 };
+
+export const importProjectFinanceHistory = (state: AppState, input: HistoryImportCommand, context: FinanceCommandContext): HistoryImportCommandResult =>
+  applyFinanceHistoryResult(state, importFinanceHistory(financeHistoryState(state), input, context));

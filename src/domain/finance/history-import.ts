@@ -1,4 +1,24 @@
-import type { AppState, BudgetLine, FinanceEntry } from '../../entities/index';
+import type { ActivityEvent, BudgetLine, FinanceEntry, ProjectDocument, CounterpartyProfile } from '../../entities/index';
+import type { FinanceHistorySnapshot, FinanceOwnedState } from './context';
+
+/** Explicit read projection; unrelated project fields never enter the import calculation. */
+export const financeHistoryState = (state: FinanceHistorySnapshot): FinanceHistorySnapshot => ({
+  project: { id: state.project.id, targetCost: state.project.targetCost },
+  budgetLines: state.budgetLines, budgetMeta: state.budgetMeta, financeEntries: state.financeEntries,
+  documents: state.documents, counterparties: state.counterparties, stages: state.stages,
+  procurement: state.procurement, checkpoints: state.checkpoints,
+});
+
+export interface FinanceHistoryPreparation {
+  patch: FinanceOwnedState;
+  targetCost: number;
+  documents: ProjectDocument[];
+  counterparties: CounterpartyProfile[];
+  event?: ActivityEvent;
+  added: number;
+  updated: number;
+  skipped: number;
+}
 
 type SourceLine = { id: string; name: string; sourceRow: number; plan: number | null; sourcePlan?: number; outsideSourceTotal?: boolean; sourceFact?: number | null; stageIds: string[]; participantAmounts?: Record<string, number | null> };
 type RecordInput = { existingOperation?: boolean; vendor: string; vendorInn?: string; number?: string; documentDate?: string; purchaseDate?: string; amount: number; description: string; file: string; dedupKey: string; suggestedBudgetSourceRow?: number | null; suggestedStageId?: string; paymentConfirmation: string; paymentDate?: string | null };
@@ -10,7 +30,7 @@ const dateValid = (value: unknown): value is string => typeof value === 'string'
 const nonnegativeAmount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const text = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 
-function importedBudgetLines(current: AppState, sourceLines: SourceLine[]): BudgetLine[] {
+function importedBudgetLines(current: FinanceHistorySnapshot, sourceLines: SourceLine[]): BudgetLine[] {
   // An unchanged identifier wins even if rows moved in the source workbook.
   const sourceIds = new Set(sourceLines.map(line => line.id));
   const previousById = new Map(current.budgetLines.map(line => [line.id, line]));
@@ -92,9 +112,9 @@ export function parseHistoryRegister(value: unknown): HistoryRegister {
   return input;
 }
 
-export function prepareHistoryImport(current: AppState, input: HistoryRegister, actor: string, now: string, includeBudget: boolean) {
+export function prepareFinanceHistoryImport(current: FinanceHistorySnapshot, input: HistoryRegister, actor: string, now: string, includeBudget: boolean): FinanceHistoryPreparation {
   parseHistoryRegister(input);
-  const next = structuredClone(current);
+  const next = structuredClone(financeHistoryState(current));
   const records = [...input.paidInvoices, ...input.paidLemanaPurchases, ...(input.existingPaidExpenses ?? [])];
   const matchingDocument = (name: string) => next.documents.find((doc) => doc.fileName === safeName(name) && doc.fileKey?.startsWith(`${current.project.id}/`) && !doc.clientVisible);
   const missing = input.sources.filter((source) => !matchingDocument(source.fileName)).map((source) => source.fileName);
@@ -160,6 +180,8 @@ export function prepareHistoryImport(current: AppState, input: HistoryRegister, 
     next.financeEntries.push(entry);
     added++;
   }
-  if (added || updated || budgetChanged || approvalChanged) next.activity.unshift({ id: `history-import-${fingerprint(now)}`, timestamp: now, actor, text: `Импорт исходных документов: ${added} новых оплат, ${updated} существующих расходов подтверждено${budgetChanged ? ' и рабочая смета' : ''}; пропущено дублей: ${skipped}`, tone: 'neutral' });
-  return { state: next, added, updated, skipped };
+  const event: ActivityEvent | undefined = added || updated || budgetChanged || approvalChanged
+    ? { id: `history-import-${fingerprint(now)}`, timestamp: now, actor, text: `Импорт исходных документов: ${added} новых оплат, ${updated} существующих расходов подтверждено${budgetChanged ? ' и рабочая смета' : ''}; пропущено дублей: ${skipped}`, tone: 'neutral' }
+    : undefined;
+  return { patch: { budgetLines: next.budgetLines, budgetMeta: next.budgetMeta, financeEntries: next.financeEntries }, targetCost: next.project.targetCost, documents: next.documents, counterparties: next.counterparties, event, added, updated, skipped };
 }

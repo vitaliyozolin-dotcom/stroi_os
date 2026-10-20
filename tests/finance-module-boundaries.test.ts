@@ -52,12 +52,15 @@ test('both deployment artifacts include every runtime file in the financial modu
   assert.match(prepare, /src\/domain\/finance\/\$\{name\}\.js.*dist\/src\/domain\/finance\/\$\{name\}\.js/);
   assert.match(dockerfile, /COPY --from=build \/app\/src\/application\/finance-commitment\.js \.\/src\/application\/finance-commitment\.js/);
   assert.match(prepare, /src\/application\/finance-commitment\.js.*dist\/src\/application\/finance-commitment\.js/);
+  assert.match(dockerfile, /COPY --from=build \/app\/src\/application\/finance-context-commitment\.js \.\/src\/application\/finance-context-commitment\.js/);
+  assert.match(prepare, /src\/application\/finance-context-commitment\.js.*dist\/src\/application\/finance-context-commitment\.js/);
 });
 
 test('web and Telegram create commitments through the same runtime-neutral application use case', () => {
-  const module = source('src/application/finance-commitment.js');
+  const module = source('src/application/finance-context-commitment.js');
   assert.match(module, /from '..\/domain\/finance\/index\.js'/);
   assert.doesNotMatch(module, /\bfetch\(|\.DB\b|\.prepare\(|from ['"]react|process\.env/);
+  assert.match(source('src/application/finance-commitment.js'), /createFinanceCommitment\(financeCommitmentSnapshot\(state\), input, context\)/);
   assert.match(source('src/application/finance.ts'), /createProjectCommitment\(state, input, context\)/);
   assert.match(source('sites/worker.js'), /createProjectCommitment\(state, \{ \.\.\.entry, sourceDraftId: draft\.id \}/);
 });

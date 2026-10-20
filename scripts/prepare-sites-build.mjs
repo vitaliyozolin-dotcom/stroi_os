@@ -21,6 +21,7 @@ await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
 
 await Promise.all([
   copyFile(`${projectRoot}src/application/finance-commitment.js`, `${projectRoot}dist/src/application/finance-commitment.js`),
+  copyFile(`${projectRoot}src/application/finance-context-commitment.js`, `${projectRoot}dist/src/application/finance-context-commitment.js`),
   ...['index', 'policy', 'planning', 'state-validation', 'transitions'].map((name) => copyFile(`${projectRoot}src/domain/finance/${name}.js`, `${projectRoot}dist/src/domain/finance/${name}.js`)),
   copyFile(`${projectRoot}src/domain/finance-totals.js`, `${projectRoot}dist/src/domain/finance-totals.js`),
   copyFile(`${projectRoot}sites/company-os-export.js`, `${projectRoot}dist/server/company-os-export.js`),

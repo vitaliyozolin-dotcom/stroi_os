@@ -1,5 +1,5 @@
 import type { FinanceState, FinanceOwnedState, FinancePatch } from './context';
-export type { FinanceState, FinanceOwnedState, FinancePatch, FinancePlanningSnapshot } from './context';
+export type { FinanceState, FinanceOwnedState, FinancePatch, FinancePlanningSnapshot, FinanceHistorySnapshot } from './context';
 import type { FinanceEntry, UserRole } from '../../entities/index';
 
 export interface FinanceActor { name: string; role: UserRole }

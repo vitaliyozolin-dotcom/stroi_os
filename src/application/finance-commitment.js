@@ -1,18 +1,27 @@
-import { createCommitment } from '../domain/finance/index.js';
+import { createFinanceCommitment, financeCommitmentFingerprint } from './finance-context-commitment.js';
 
-// Shared by the UI and Telegram; persistence and retry orchestration stay in adapters.
-export const createProjectCommitment = (state, input, context) => {
-  const result = createCommitment(state, { ...input, id: input.id ?? context.ids.next('finance') }, context.identity);
+export const financeCommitmentSnapshot = (state) => ({
+  projectId: state.project.id, budgetLines: state.budgetLines, budgetMeta: state.budgetMeta,
+  financeEntries: state.financeEntries, counterparties: state.counterparties, stages: state.stages,
+});
+
+// Compatibility adapter used by both UI and Telegram; only finance-owned fields can be replaced.
+export const applyFinanceCommitmentResult = (state, result) => {
   if (!result.ok) return result;
-  if (!result.changed) return { ok: true, entryId: result.entry.id, change: null };
-  const timestamp = context.clock.now();
-  const summary = `${result.entry.kind === 'expense' ? 'Добавлен расход' : 'Добавлено поступление'} ${new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(result.entry.amount)} · ${result.entry.description}`;
-  return { ok: true, entryId: result.entry.id, change: {
-    action: result.entry.kind === 'expense' ? 'expense_committed' : 'income_planned', summary,
+  if (!result.change) return { ok: true, entryId: result.entryId, change: null };
+  const change = result.change;
+  if (change.projectId !== state.project.id || change.expected !== financeCommitmentFingerprint(financeCommitmentSnapshot(state))) {
+    return { ok: false, error: 'Финансовые данные или связи проекта обновились. Повторите действие на свежих данных.' };
+  }
+  return { ok: true, entryId: result.entryId, change: {
+    action: change.action, summary: change.summary,
     state: {
-      ...state, budgetLines: result.budgetLines,
-      financeEntries: [result.entry, ...(state.financeEntries ?? [])],
-      activity: [{ id: context.ids.next('activity'), timestamp, actor: context.identity.name, text: summary, tone: 'neutral' }, ...(state.activity ?? [])],
+      ...state, budgetLines: change.patch.budgetLines ?? state.budgetLines,
+      financeEntries: change.patch.financeEntries ?? state.financeEntries,
+      activity: [change.event, ...(state.activity ?? [])],
     },
   } };
 };
+
+export const createProjectCommitment = (state, input, context) =>
+  applyFinanceCommitmentResult(state, createFinanceCommitment(financeCommitmentSnapshot(state), input, context));

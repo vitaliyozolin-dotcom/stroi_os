@@ -18,6 +18,7 @@ COPY --from=build /app/server ./server
 COPY --from=build /app/src/domain/finance-totals.js ./src/domain/finance-totals.js
 COPY --from=build /app/src/domain/finance ./src/domain/finance
 COPY --from=build /app/src/application/finance-commitment.js ./src/application/finance-commitment.js
+COPY --from=build /app/src/application/finance-context-commitment.js ./src/application/finance-context-commitment.js
 COPY --from=build /app/sites/worker.js ./sites/worker.js
 COPY --from=build /app/sites/access-control.js ./sites/access-control.js
 COPY --from=build /app/sites/access ./sites/access
