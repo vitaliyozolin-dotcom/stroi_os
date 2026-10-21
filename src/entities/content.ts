@@ -10,6 +10,7 @@ export interface ProjectAttachment {
 }
 
 export interface FieldReport {
+  sourceDraftId?: string;
   id: string;
   createdAt: string;
   author: string;
@@ -36,6 +37,7 @@ export interface EvidencePhoto {
 }
 
 export interface ProjectDocument {
+  sourceDraftId?: string;
   id: string;
   name: string;
   type: string;

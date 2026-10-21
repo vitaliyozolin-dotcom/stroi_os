@@ -6,6 +6,7 @@ export type TaskPriority = 'low' | 'normal' | 'high' | 'critical';
 export type TaskHistoryKind = 'created' | 'edited' | 'status' | 'assignee' | 'due_date' | 'comment' | 'completed' | 'reopened';
 
 export interface TaskHistoryEvent {
+  sourceTelegramCallbackId?: string;
   id: string;
   timestamp: string;
   actor: string;
@@ -14,6 +15,7 @@ export interface TaskHistoryEvent {
 }
 
 export interface ProjectTask {
+  sourceDraftId?: string;
   id: string;
   title: string;
   description?: string;

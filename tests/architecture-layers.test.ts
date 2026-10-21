@@ -106,8 +106,8 @@ test('project synchronization is runtime-neutral and the storage compatibility f
   assert.equal(existsSync(new URL('../src/storage.ts', import.meta.url)), false);
 });
 
-test('App composes project adapters while the synchronization hook depends only on application ports', () => {
-  const app = source('src/App.tsx');
+test('Workspace hook composes project adapters while the synchronization hook depends only on application ports', () => {
+  const app = source('src/presentation/useWorkspaceProject.ts');
   const hook = source('src/useProjectState.ts');
   const ports = source('src/application/ports.ts');
 

@@ -1,9 +1,10 @@
+import { registerFieldReport } from './project-records.js';
 import type { FieldReport, UserRole } from '../entities/index';
 import { validUploadedDocumentFile } from '../domain/project-documents.ts';
 import type { DocumentUploadPort } from './project-documents.ts';
 import type { Clock, IdGenerator } from './ports.ts';
 import type { DocumentsSnapshot, DocumentsPatch } from '../domain/contexts.ts';
-import { moduleChange, type ModuleChange, type ModuleRepository } from './module-repository.ts';
+import { type ModuleChange, type ModuleRepository } from './module-repository.ts';
 import { planToday, validPlanDate } from '../domain/construction/index.js';
 export const uploadFieldReport = async (repository: ModuleRepository<DocumentsSnapshot, DocumentsPatch>, input: { projectId: string; files: File[]; date: string; note: string; stageId: string; sourceLink: string }, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator, uploader: DocumentUploadPort, signal: AbortSignal): Promise<{ ok: true; change: ModuleChange<DocumentsPatch> } | { ok: false; error: string }> => {
  try {
@@ -19,9 +20,10 @@ export const uploadFieldReport = async (repository: ModuleRepository<DocumentsSn
    if (!validUploadedDocumentFile(input.projectId, file) || file.size > 12*1024*1024 || !/^image\/(jpeg|png|webp)$/.test(file.type)) throw new Error('Сервер вернул некорректные сведения фото.');
    attachments.push({ id: ids.next('attachment'), key: file.key, name: file.name, mimeType: file.type, sizeBytes: file.size, uploadedAt: file.uploadedAt, uploadedBy: identity.name, source: 'web' });
   }
-  check(); const state = readState(), summary = `Добавлен фотоотчёт за ${input.date}: ${input.files.length} фото`;
-  const report: FieldReport = { id: ids.next('field-report'), createdAt: `${input.date}T12:00:00+03:00`, author: identity.name, note: input.note.trim() + (input.sourceLink ? '\nИсточник: '+input.sourceLink : ''), source: 'web', stageId: input.stageId || undefined, clientVisible: false, attachments };
-  const change = moduleChange(state, { fieldReports: [report, ...state.fieldReports] }, 'field_report_uploaded', summary, { identity, clock, ids });
-  const committed = repository.commit(change); return committed.ok ? { ok: true, change } : committed;
+  check();
+  const result = registerFieldReport(repository, { createdAt: `${input.date}T12:00:00+03:00`, note: input.note.trim() + (input.sourceLink ? '\nИсточник: '+input.sourceLink : ''), source: 'web', stageId: input.stageId || undefined, attachments }, { identity, clock, ids });
+  if (!result.ok) return result;
+  if (!result.change) throw new Error('Отчёт уже зарегистрирован.');
+  return { ok: true, change: result.change };
  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : 'Не удалось сохранить отчёт.' }; }
 };

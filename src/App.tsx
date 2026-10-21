@@ -1,14 +1,14 @@
-import { requestApi } from './infrastructure/api-http';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useSession } from './presentation/useSession';
+import { useWorkspaceProject } from './presentation/useWorkspaceProject';
+import { CreateProjectDialog } from './presentation/CreateProjectDialog';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { WorkspacePages } from './presentation/WorkspacePages';
 import {
   AlertTriangle,
   Bell,
-  Building2,
   CalendarRange,
   ChevronDown,
-  ClipboardCheck,
   Cloud,
   CloudOff,
   House,
@@ -33,16 +33,11 @@ import {
 import { AppInstall } from './components/AppInstall';
 import { HelpCenter } from './components/HelpCenter';
 import { QuestionRegistry } from './components/QuestionRegistry';
-import { Field, Modal, StatusBadge } from './components/Ui';
-import type { AuthenticatedUser, UserRole } from './entities/index';
-import { allowedPages, pageLabels, readWorkspaceRoute, workspacePath, type PageId } from './presentation/navigation';
-import { useProjectState, type SyncPhase } from './useProjectState';
-import { createProjectState } from './seed';
+import { Modal, StatusBadge } from './components/Ui';
+import type { UserRole } from './entities/index';
+import { allowedPages, pageLabels, workspacePath, type PageId } from './presentation/navigation';
+import type { SyncPhase } from './useProjectState';
 import { isTaskOverdue, projectProgressTotals } from './domain/index';
-import { normalizeAppState, projectRepository } from './infrastructure/project-http';
-import { clearProjectCache, projectCacheFactory } from './infrastructure/project-cache';
-
-const projectStateDependencies = { repository: projectRepository, cacheFactory: projectCacheFactory, normalizeState: normalizeAppState };
 
 const roleLabels: Record<UserRole, string> = {
   management: 'Управление',
@@ -80,29 +75,11 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((part) 
 
 function App() {
   const todayKey = new Date().toISOString().slice(0, 10);
-  const [role, setRole] = useState<UserRole>('client');
   const location = useLocation();
   const changeLocation = useNavigate();
-  const route = useMemo(() => readWorkspaceRoute(location.pathname, location.search), [location.pathname, location.search]);
-  const page = route.page ?? (role === 'client' ? 'client' : 'overview');
-  const [session, setSession] = useState<AuthenticatedUser | null>(null);
-  const [sessionError, setSessionError] = useState('');
+  const { session, role, sessionError } = useSession();
+  const { state, updateState, sync, localCache, conflict, retry, useServerVersion, keepLocalVersion, applyServerSnapshot, projects, createProject, route, page } = useWorkspaceProject(session, role);
   const focusEntityId = route.entityId;
-  const attemptedProject = useRef<string | null>(null);
-  const {
-    state,
-    updateState,
-    sync,
-    localCache,
-    conflict,
-    retry,
-    useServerVersion,
-    keepLocalVersion,
-    applyServerSnapshot,
-    projects,
-    switchProject,
-    createProject,
-  } = useProjectState(role, session?.name ?? 'Виталий Озолин', session ? `${session.email}|${session.role}` : '', projectStateDependencies);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -110,88 +87,6 @@ function App() {
   const [questionsOpen, setQuestionsOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
-  const [projectForm, setProjectForm] = useState({ code: 'H-001', name: '', address: '', model: '', area: '', clientNames: '', contractValue: '', targetCost: '', startDate: new Date().toISOString().slice(0, 10), targetDate: '', foreman: state.project.foreman, source: '' });
-
-  useEffect(() => {
-    let active = true;
-    void requestApi('/api/session', { headers: { Accept: 'application/json' }, cache: 'no-store' })
-      .then(async (response) => {
-        const body = await response.json() as { user?: AuthenticatedUser; error?: string };
-        if (!response.ok || !body.user) throw new Error(body.error ?? 'session_unavailable');
-        if (!active) return;
-        setSession(body.user);
-        setRole(body.user.role);
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        if (import.meta.env.DEV) {
-          setSession({
-            id: 'owner',
-            email: 'vitaliyozolin@gmail.com',
-            name: 'Виталий Озолин',
-            role: 'management',
-            isOwner: true,
-          });
-          setRole('management');
-          return;
-        }
-        setSessionError(error instanceof Error && error.message === 'access_not_assigned'
-          ? 'Ваш аккаунт разрешён на сайте, но роль в проекте ещё не назначена.'
-          : 'Не удалось подтвердить рабочий доступ. Обновите страницу или обратитесь к владельцу.');
-      });
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
-    if (!session) return undefined;
-    const verifySession = async () => {
-      try {
-        const response = await requestApi('/api/session', { headers: { Accept: 'application/json' }, cache: 'no-store' });
-        if (response.ok) return;
-        if (response.status !== 401 && response.status !== 403) return;
-      } catch {
-        return;
-      }
-      await clearProjectCache();
-      window.location.assign('/login');
-    };
-    const verifyVisibleSession = () => {
-      if (document.visibilityState === 'visible') void verifySession();
-    };
-    const timer = window.setInterval(() => void verifySession(), 30_000);
-    window.addEventListener('focus', verifyVisibleSession);
-    window.addEventListener('pageshow', verifyVisibleSession);
-    document.addEventListener('visibilitychange', verifyVisibleSession);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener('focus', verifyVisibleSession);
-      window.removeEventListener('pageshow', verifyVisibleSession);
-      document.removeEventListener('visibilitychange', verifyVisibleSession);
-    };
-  }, [session]);
-
-  useEffect(() => {
-    if (!session || !route.valid) return;
-    if (sync.phase === 'saving' || sync.phase === 'conflict') {
-      attemptedProject.current = null;
-      return;
-    }
-    if (sync.phase === 'loading') return;
-    if (!allowedPages(role).includes(page)) {
-      void changeLocation(workspacePath(route.projectId ?? state.project.id, role === 'client' ? 'client' : 'overview'), { replace: true });
-      return;
-    }
-    if (route.projectId && route.projectId !== state.project.id) {
-      if (attemptedProject.current === route.projectId) return;
-      attemptedProject.current = route.projectId;
-      void switchProject(route.projectId);
-      return;
-    }
-    attemptedProject.current = null;
-    if (location.pathname === '/') {
-      void changeLocation(workspacePath(state.project.id, page, route.entityId), { replace: true });
-    }
-  }, [session, role, page, route, state.project.id, sync.phase, switchProject, changeLocation, location.pathname]);
 
   useEffect(() => {
     setMobileMenu(false);
@@ -223,19 +118,6 @@ function App() {
     }
   };
 
-
-  const submitProject = async (event: FormEvent) => {
-    event.preventDefault();
-    const area = Number(projectForm.area);
-    const contractValue = Number(projectForm.contractValue);
-    const targetCost = Number(projectForm.targetCost);
-    if (!projectForm.code.trim() || !projectForm.name.trim() || !projectForm.targetDate || area <= 0 || targetCost < 0) return;
-    const next = createProjectState(state, { ...projectForm, area, contractValue, targetCost, actor: session?.name ?? 'Виталий Озолин' });
-    setCreateProjectOpen(false);
-    setProjectOpen(false);
-    void changeLocation(workspacePath(next.project.id, 'overview'));
-    await createProject(next);
-  };
 
   if (!session) {
     return <div className="session-gate"><span><ShieldCheck size={28} /></span><h1>{sessionError ? 'Доступ не назначен' : 'Проверяем рабочий доступ'}</h1><p>{sessionError || 'ИКИОМА ОС определяет ваш аккаунт и роль в проектах.'}</p>{sessionError && <button type="button" className="button button--primary" onClick={() => window.location.reload()}>Повторить</button>}</div>;
@@ -370,28 +252,13 @@ function App() {
           {role !== 'client' && <button type="button" className="project-picker__open-card" onClick={() => { setProjectOpen(false); navigate('project'); }}><FolderKanban size={18} /><span><strong>Открыть карточку текущего проекта</strong><small>Реквизиты объекта, команда и документы</small></span></button>}
           <div className="project-picker__list" data-tour="project-list">{projects.map((project) => <button type="button" key={project.id} className={project.id === state.project.id ? 'project-picker__item project-picker__item--active' : 'project-picker__item'} onClick={() => { setProjectOpen(false); void changeLocation(workspacePath(project.id, page)); }}><span><House size={20} /></span><div><small>{project.code}{project.id === state.project.id ? ' · активный проект' : ''}</small><strong>{project.name}</strong><p>{project.model} · {project.area} м²</p></div><StatusBadge label={project.id === state.project.id ? 'Выбран' : 'Открыть'} tone={project.id === state.project.id ? 'positive' : 'neutral'} /></button>)}</div>
           <button type="button" data-tour="new-project" className="project-picker__add" onClick={() => {
-            const realProjectCount = projects.filter((project) => project.id !== 'workspace-initial').length;
             setProjectOpen(false);
-            setProjectForm({
-              code: `H-${String(realProjectCount + 1).padStart(3, '0')}`,
-              name: '',
-              clientNames: '',
-              address: '',
-              model: '',
-              area: '',
-              contractValue: '',
-              targetCost: '',
-              startDate: new Date().toISOString().slice(0, 10),
-              targetDate: '',
-              foreman: state.project.foreman,
-              source: '',
-            });
             setCreateProjectOpen(true);
           }}><Plus size={18} /> Добавить новый дом <small>проект, график и стартовая смета</small></button>
         </Modal>
       )}
 
-      {createProjectOpen && <Modal wide title="Новый строительный проект" subtitle="Сначала основные параметры и сроки. Неизвестные финансовые цифры можно оставить пустыми и заполнить после сметы." onClose={() => setCreateProjectOpen(false)}><form className="modal-form" onSubmit={submitProject}><div className="form-grid"><Field label="Код проекта"><input required value={projectForm.code} onChange={(event) => setProjectForm({ ...projectForm, code: event.target.value })} placeholder="H-001" /></Field><Field label="Название"><input required value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} placeholder="Рабочее название объекта" /></Field><Field label="Клиент"><input value={projectForm.clientNames} onChange={(event) => setProjectForm({ ...projectForm, clientNames: event.target.value })} /></Field><Field label="Адрес"><input value={projectForm.address} onChange={(event) => setProjectForm({ ...projectForm, address: event.target.value })} /></Field></div><div className="form-grid"><Field label="Модель / технология"><input value={projectForm.model} onChange={(event) => setProjectForm({ ...projectForm, model: event.target.value })} /></Field><Field label="Площадь, м²"><input required min="1" type="number" inputMode="decimal" value={projectForm.area} onChange={(event) => setProjectForm({ ...projectForm, area: event.target.value })} /></Field><Field label="Стоимость договора, ₽" hint="Можно заполнить позже"><input min="0" type="number" inputMode="numeric" value={projectForm.contractValue} onChange={(event) => setProjectForm({ ...projectForm, contractValue: event.target.value })} /></Field><Field label="Плановая себестоимость, ₽" hint="Можно заполнить после сметы"><input min="0" type="number" inputMode="numeric" value={projectForm.targetCost} onChange={(event) => setProjectForm({ ...projectForm, targetCost: event.target.value })} /></Field></div><div className="form-grid"><Field label="Начало"><input required type="date" value={projectForm.startDate} onChange={(event) => setProjectForm({ ...projectForm, startDate: event.target.value })} /></Field><Field label="Плановая сдача"><input required type="date" value={projectForm.targetDate} onChange={(event) => setProjectForm({ ...projectForm, targetDate: event.target.value })} /></Field><Field label="Прораб"><input value={projectForm.foreman} onChange={(event) => setProjectForm({ ...projectForm, foreman: event.target.value })} /></Field><Field label="Основание проекта"><input value={projectForm.source} onChange={(event) => setProjectForm({ ...projectForm, source: event.target.value })} placeholder="Договор, заявка или внутреннее решение" /></Field></div><div className="form-warning"><ClipboardCheck size={18} /><span>ИКИОМА ОС создаст 13 этапов. Если указана плановая себестоимость, она предварительно распределится по пакетам; до подтверждения это будет черновик.</span></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setCreateProjectOpen(false)}>Отмена</button><button type="submit" className="button button--primary"><Plus size={17} /> Создать проект</button></div></form></Modal>}
+      {createProjectOpen && <CreateProjectDialog nextCode={`H-${String(projects.filter(project => project.id !== 'workspace-initial').length + 1).padStart(3, '0')}`} state={state} actor={session.name} onClose={() => setCreateProjectOpen(false)} onCreate={async next => { setCreateProjectOpen(false); setProjectOpen(false); void changeLocation(workspacePath(next.project.id, 'overview')); await createProject(next); }} />}
 
       {role === 'management' && questionsOpen && <QuestionRegistry key={state.project.id} projectId={state.project.id} currentPage={page} onClose={() => setQuestionsOpen(false)} />}
       {role === 'management' && <HelpCenter onOpenQuestions={() => setQuestionsOpen(true)} projectId={state.project.id} currentPage={page} onNavigate={navigate} onOpenProjects={() => setProjectOpen(true)} onCloseProjects={() => setProjectOpen(false)} />}

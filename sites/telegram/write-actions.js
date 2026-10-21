@@ -1,3 +1,4 @@
+import { createTelegramTask, changeTelegramTaskStatus, registerTelegramDocument, registerTelegramReport } from './business-commands.js';
 import { createProjectCommitment } from '../../src/infrastructure/finance-commitment.js';
 import { dateKey } from '../lib/date.js';
 import { clean } from '../lib/validation.js';
@@ -22,30 +23,7 @@ export const createTelegramWriteActions = ({
     if (!assignee) throw new Error('assignee_missing');
     const now = new Date().toISOString();
     const taskId = `task-telegram-${draft.id}`;
-    const task = {
-      id: taskId,
-      title: clean(draft.payload.title, 500),
-      status: 'todo',
-      priority: draft.payload.priority,
-      assigneeId: assignee.id,
-      assigneeName: assignee.name,
-      createdBy: user.name,
-      createdAt: now,
-      updatedAt: now,
-      dueDate: draft.payload.dueDate,
-      originalDueDate: draft.payload.dueDate,
-      rescheduleCount: 0,
-      attachments: [],
-      sourceDraftId: draft.id,
-      history: [{
-        id: `task-history-${crypto.randomUUID()}`,
-        timestamp: now,
-        actor: user.name,
-        kind: 'created',
-        text: `Создал задачу через Telegram и назначил ${assignee.name}`,
-      }],
-    };
-    let taskCreated = false;
+    const task = { id: taskId, title: clean(draft.payload.title, 500) };
     await assertTelegramDraftLease(env.DB, draft);
     const mutation = await mutateProjectFromTelegram(
       env,
@@ -56,7 +34,6 @@ export const createTelegramWriteActions = ({
       `Создана задача «${task.title}» · ответственный ${assignee.name}`,
       (state) => {
         if ((state.tasks ?? []).some((item) => item.id === taskId || item.sourceDraftId === draft.id)) {
-          taskCreated = false;
           return TELEGRAM_MUTATION_NOOP;
         }
         const currentUser = (state.settings?.users ?? []).find((item) => item.id === binding.system_user_id && item.status !== 'disabled');
@@ -65,19 +42,7 @@ export const createTelegramWriteActions = ({
         if (!currentAssignee) throw new Error('assignee_missing');
         user = currentUser;
         assignee = currentAssignee;
-        task.assigneeName = currentAssignee.name;
-        task.createdBy = currentUser.name;
-        task.history[0].actor = currentUser.name;
-        task.history[0].text = `Создал задачу через Telegram и назначил ${currentAssignee.name}`;
-        taskCreated = true;
-        state.tasks = [task, ...(state.tasks ?? [])];
-        state.activity = [{
-          id: `activity-${crypto.randomUUID()}`,
-          timestamp: now,
-          actor: user.name,
-          text: `Создана задача «${task.title}» через Telegram · ответственный ${assignee.name}`,
-          tone: 'neutral',
-        }, ...(state.activity ?? [])];
+        return createTelegramTask(state, currentUser, { ...draft, payload: { ...draft.payload, title: task.title } }, now) ? undefined : TELEGRAM_MUTATION_NOOP;
       },
     );
     const confirmedTask = (mutation.state.tasks ?? []).find((item) => item.id === taskId || item.sourceDraftId === draft.id) ?? task;
@@ -112,18 +77,7 @@ export const createTelegramWriteActions = ({
     const note = clean(draft.payload.note, 2400);
     if (!note) throw new Error('invalid_note');
     const now = new Date().toISOString();
-    const report = {
-      id: `field-report-telegram-${draft.id}`,
-      createdAt: now,
-      author: user.name,
-      note,
-      source: 'telegram',
-      clientVisible: false,
-      telegramMessageId: draft.payload.telegramMessageId,
-      attachments: [],
-      sourceDraftId: draft.id,
-    };
-    let noteCreated = false;
+    const reportId = `field-report-telegram-${draft.id}`;
     await assertTelegramDraftLease(env.DB, draft);
     const mutation = await mutateProjectFromTelegram(
       env,
@@ -133,23 +87,16 @@ export const createTelegramWriteActions = ({
       'telegram.note.create',
       `Добавлена запись в дневник объекта · ${user.name}`,
       (state) => {
-        if ((state.fieldReports ?? []).some((item) => item.id === report.id || item.sourceDraftId === draft.id)) {
-          noteCreated = false;
+        if ((state.fieldReports ?? []).some((item) => item.id === reportId || item.sourceDraftId === draft.id)) {
           return TELEGRAM_MUTATION_NOOP;
         }
         const currentUser = (state.settings?.users ?? []).find((item) => item.id === binding.system_user_id && item.status !== 'disabled');
         if (!currentUser) throw new Error('action_denied');
         user = currentUser;
-        report.author = currentUser.name;
-        noteCreated = true;
-        state.fieldReports = [report, ...(state.fieldReports ?? [])];
-        state.activity = [{
-          id: `activity-${crypto.randomUUID()}`,
-          timestamp: now,
-          actor: user.name,
-          text: 'Добавил запись в дневник объекта через Telegram',
-          tone: 'neutral',
-        }, ...(state.activity ?? [])];
+        return registerTelegramReport(state, currentUser, {
+          id: reportId, createdAt: now, note, source: 'telegram', attachments: [],
+          telegramMessageId: draft.payload.telegramMessageId, sourceDraftId: draft.id,
+        }, now) ? undefined : TELEGRAM_MUTATION_NOOP;
       },
     );
     await dispatchNotifications(
@@ -281,7 +228,6 @@ export const createTelegramWriteActions = ({
     const now = new Date().toISOString();
     const isDocument = draft.kind === 'document';
     const summary = isDocument ? `Загружен документ «${attachment.name}» через Telegram` : `Добавлен фотоотчёт через Telegram · ${user.name}`;
-    let fileCreated = false;
     const mutation = resolvedFile.existing ? null : await mutateProjectFromTelegram(
       env,
       draft.project_id,
@@ -294,55 +240,19 @@ export const createTelegramWriteActions = ({
           ? (state.documents ?? []).some((item) => item.sourceDraftId === draft.id)
           : (state.fieldReports ?? []).some((item) => item.sourceDraftId === draft.id);
         if (existing) {
-          fileCreated = false;
           return TELEGRAM_MUTATION_NOOP;
         }
         const currentUser = (state.settings?.users ?? []).find((item) => item.id === binding.system_user_id && item.status !== 'disabled');
         if (!currentUser) throw new Error('action_denied');
         user = currentUser;
-        fileCreated = true;
-        if (isDocument) {
-          const document = {
-            id: `document-telegram-${draft.id}`,
-            name: attachment.name.replace(/\.[^.]+$/, ''),
-            type: draft.payload.typeLabel,
-            category: draft.payload.category,
-            updatedAt: now,
-            documentDate: dateKey(),
-            clientVisible: false,
-            status: 'current',
-            direction: 'internal',
-            storageLocation: `ИКИОМА ОС / ${state.project?.code ?? draft.project_id} / Документы`,
-            fileKey: attachment.key,
-            fileName: attachment.name,
-            mimeType: attachment.mimeType,
-            sizeBytes: attachment.sizeBytes,
-            uploadedAt: attachment.uploadedAt,
-            uploadedBy: user.name,
-            sourceDraftId: draft.id,
-          };
-          state.documents = [document, ...(state.documents ?? [])];
-        } else {
-          const report = {
-            id: `field-report-telegram-${draft.id}`,
-            createdAt: now,
-            author: user.name,
+        const change = isDocument
+          ? registerTelegramDocument(state, currentUser, draft, attachment, now)
+          : registerTelegramReport(state, currentUser, {
+            id: `field-report-telegram-${draft.id}`, createdAt: now, source: 'telegram',
             note: clean(draft.payload.note, 1000) || (attachment.mimeType.startsWith('audio/') ? 'Голосовой отчёт без расшифровки' : 'Фотоотчёт без комментария'),
-            source: 'telegram',
-            clientVisible: false,
-            telegramMessageId: draft.payload.telegramMessageId,
-            attachments: [attachment],
-            sourceDraftId: draft.id,
-          };
-          state.fieldReports = [report, ...(state.fieldReports ?? [])];
-        }
-        state.activity = [{
-          id: `activity-${crypto.randomUUID()}`,
-          timestamp: now,
-          actor: user.name,
-          text: summary,
-          tone: 'neutral',
-        }, ...(state.activity ?? [])];
+            attachments: [attachment], telegramMessageId: draft.payload.telegramMessageId, sourceDraftId: draft.id,
+          }, now);
+        return change ? undefined : TELEGRAM_MUTATION_NOOP;
       },
     );
     const notificationMutation = mutation ?? {
@@ -393,36 +303,9 @@ export const createTelegramWriteActions = ({
         if (status === 'done' && currentUser.role !== 'management') throw new Error('action_denied');
         user = currentUser;
         task = currentTask;
-        if ((currentTask.history ?? []).some((event) => event.sourceTelegramCallbackId === callback.id)) {
-          statusChanged = false;
-          return TELEGRAM_MUTATION_NOOP;
-        }
-        if (currentTask.status === status) {
-          statusChanged = false;
-          return TELEGRAM_MUTATION_NOOP;
-        }
-        statusChanged = true;
-        state.tasks = (state.tasks ?? []).map((item) => item.id === currentTask.id ? {
-          ...item,
-          status,
-          updatedAt: now,
-          completedAt: status === 'done' ? now : item.completedAt,
-          history: [{
-            id: `task-history-${crypto.randomUUID()}`,
-            timestamp: now,
-            actor: user.name,
-            kind: status === 'done' ? 'completed' : 'status',
-            text: `Изменил статус через Telegram: ${taskStatusLabel(status)}`,
-            sourceTelegramCallbackId: callback.id,
-          }, ...(item.history ?? [])],
-        } : item);
-        state.activity = [{
-          id: `activity-${crypto.randomUUID()}`,
-          timestamp: now,
-          actor: user.name,
-          text: `Задача «${task.title}» → ${taskStatusLabel(status)}`,
-          tone: status === 'done' ? 'positive' : status === 'waiting' ? 'warning' : 'neutral',
-        }, ...(state.activity ?? [])];
+        const change = changeTelegramTaskStatus(state, currentUser, taskId, status, callback.id, now, `Изменил статус через Telegram: ${taskStatusLabel(status)}`);
+        statusChanged = Boolean(change);
+        return change ? undefined : TELEGRAM_MUTATION_NOOP;
       },
     );
     const committedTask = (mutation.state.tasks ?? []).find((item) => item.id === taskId) ?? task;

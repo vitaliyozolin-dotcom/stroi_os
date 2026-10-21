@@ -66,7 +66,7 @@ test('the user-facing product is consistently branded as IKIOMA OS', () => {
 
 test('lead timing and conversational Telegram summaries are visible and supported', () => {
   const marketing = source('src/pages/MarketingPage.tsx');
-  const settings = source('src/pages/SettingsPage.tsx');
+  const settings = source('src/presentation/settings/IntegrationSettings.tsx') + source('src/presentation/settings/useIntegrationSettings.ts');
   const worker = source('sites/worker.js');
   const bootstrap = source('sites/integrations/telegram-bootstrap.js');
 
@@ -82,7 +82,7 @@ test('lead timing and conversational Telegram summaries are visible and supporte
 
 
 test('Telegram common chat recheck is webhook-backed, observable and honestly labelled', () => {
-  const settings = source('src/pages/SettingsPage.tsx');
+  const settings = source('src/presentation/settings/IntegrationSettings.tsx') + source('src/presentation/settings/useIntegrationSettings.ts');
   const worker = source('sites/worker.js');
   const integrationRoutes = source('sites/integrations/routes.js');
   const webhook = source('sites/telegram/webhook.js');
@@ -141,7 +141,7 @@ test('Telegram explains exactly what is read, drafted, saved or ignored', () => 
 
   assert.match(source('sites/telegram/update-handler.js'), /command\.name === 'note'/);
   assert.match(worker, /action === 'nc'/);
-  assert.match(source('sites/telegram/write-actions.js'), /state\.fieldReports = \[report/);
+  assert.match(source('src/application/project-records.js'), /fieldReports: \[report/);
   assert.match(worker, /Ничего не записано в ИКИОМА ОС/);
   assert.match(rendering, /Молчание никогда не означает сохранение/);
   assert.match(worker, /telegramCommandSuggestion/);

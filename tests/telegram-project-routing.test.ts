@@ -343,7 +343,8 @@ test('Telegram retries keep the update lease and queue confirmations before clos
   }
 
   const statusBlock = functionBlock('telegramChangeTaskStatus', '');
-  assert.match(statusBlock, /sourceTelegramCallbackId: callback\.id/);
+  assert.match(statusBlock, /changeTelegramTaskStatus\(state, currentUser, taskId, status, callback\.id/);
+  assert.match(readFileSync(new URL('../src/domain/task-mutations.js', import.meta.url), 'utf8'), /sourceTelegramCallbackId: input\.callbackId/);
   assert.ok(statusBlock.indexOf('dispatchNotifications(') < statusBlock.indexOf('telegramDurableVisibility('));
   assert.match(statusBlock, /`telegram-task-status:\$\{callback\.id\}`/);
   assert.match(statusBlock, /`telegram-task-status-confirm:\$\{callback\.id\}`/);

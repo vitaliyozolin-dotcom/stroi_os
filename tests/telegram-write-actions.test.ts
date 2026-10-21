@@ -5,6 +5,7 @@ import { createTelegramWriteActions } from '../sites/telegram/write-actions.js';
 function fixture(role = 'management') {
   const user = { id: 'manager', name: 'Manager', role };
   const state = {
+    project: { id: 'project' },
     tasks: [{ id: 'task', title: 'Task', assigneeId: 'manager', status: 'todo', history: [] as any[] }],
     settings: { users: [user], notifications: { events: { taskAssigned: true } } },
     activity: [],

@@ -1,8 +1,9 @@
+import { registerProjectDocument } from './project-records.js';
 import type { UserRole } from '../entities/index';
-import { prepareUploadedDocument, validateDocumentDraft, validUploadedDocumentFile, type DocumentDraft, type UploadedDocumentFile } from '../domain/project-documents.ts';
+import { validateDocumentDraft, validUploadedDocumentFile, type DocumentDraft, type UploadedDocumentFile } from '../domain/project-documents.ts';
 import type { Clock, IdGenerator } from './ports.ts';
 import type { DocumentsSnapshot, DocumentsPatch } from '../domain/contexts.ts';
-import { moduleChange, type ModuleChange, type ModuleRepository } from './module-repository.ts';
+import { type ModuleChange, type ModuleRepository } from './module-repository.ts';
 export interface DocumentUploadPort { upload(projectId: string, file: File, signal: AbortSignal): Promise<UploadedDocumentFile> }
 export type DocumentUploadResult = { ok: true; change: ModuleChange<DocumentsPatch> } | { ok: false; error: string };
 export const uploadProjectDocument = async (repository: ModuleRepository<DocumentsSnapshot, DocumentsPatch>, input: { projectId: string; draft: DocumentDraft; file: File }, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator, uploader: DocumentUploadPort, signal: AbortSignal): Promise<DocumentUploadResult> => {
@@ -14,8 +15,9 @@ export const uploadProjectDocument = async (repository: ModuleRepository<Documen
   const file = await uploader.upload(input.projectId, input.file, signal);
   check();
   if (!validUploadedDocumentFile(input.projectId, file)) throw new Error('Сервер вернул некорректные сведения файла.');
-  const state = readState(), now = clock.now(), document = prepareUploadedDocument(state, input.draft, file, ids.next('document'), identity.name, now), summary = `Загружен документ «${document.name}»`;
-  const change = moduleChange(state, { documents: [document, ...state.documents] }, 'document_updated', summary, { identity, clock: { now: () => now }, ids });
-  const committed = repository.commit(change); return committed.ok ? { ok: true, change } : committed;
+  const result = registerProjectDocument(repository, { draft: input.draft, file }, { identity, clock, ids });
+  if (!result.ok) return result;
+  if (!result.change) throw new Error('Документ уже зарегистрирован.');
+  return { ok: true, change: result.change };
  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : 'Не удалось загрузить документ.' }; }
 };
