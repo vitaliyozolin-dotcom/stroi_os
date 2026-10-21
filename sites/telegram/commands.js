@@ -1,6 +1,6 @@
 import { clean } from '../lib/validation.js';
 
-const TELEGRAM_COMMAND_NAMES = [
+export const TELEGRAM_COMMAND_NAMES = [
   'task', 'tasks', 'stages', 'done', 'finance', 'expense', 'status',
   'note', 'report', 'doc', 'camera', 'project', 'help',
 ];

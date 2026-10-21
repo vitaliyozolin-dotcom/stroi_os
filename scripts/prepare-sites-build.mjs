@@ -20,8 +20,15 @@ await mkdir(`${projectRoot}dist/src/infrastructure`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/projects`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/routes`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
+await mkdir(`${projectRoot}dist/server/runtime`, { recursive: true });
 
 await Promise.all([
+  copyFile(`${projectRoot}sites/runtime/initialization.js`, `${projectRoot}dist/server/runtime/initialization.js`),
+  copyFile(`${projectRoot}sites/projects/snapshot.js`, `${projectRoot}dist/server/projects/snapshot.js`),
+  copyFile(`${projectRoot}sites/telegram/files.js`, `${projectRoot}dist/server/telegram/files.js`),
+  copyFile(`${projectRoot}sites/telegram/visibility.js`, `${projectRoot}dist/server/telegram/visibility.js`),
+  copyFile(`${projectRoot}sites/telegram/registration.js`, `${projectRoot}dist/server/telegram/registration.js`),
+  copyFile(`${projectRoot}sites/telegram/update-handler.js`, `${projectRoot}dist/server/telegram/update-handler.js`),
   ...['index', 'plan-baseline', 'stage-control', 'schedule-forecast', 'automatic-schedule', 'stage-validation', 'baseline-validation', 'schedule-validation'].map(name => copyFile(`${projectRoot}src/domain/construction/${name}.js`, `${projectRoot}dist/src/domain/construction/${name}.js`)),
   copyFile(`${projectRoot}src/infrastructure/finance-commitment.js`, `${projectRoot}dist/src/infrastructure/finance-commitment.js`),
   copyFile(`${projectRoot}src/application/finance-context-commitment.js`, `${projectRoot}dist/src/application/finance-context-commitment.js`),
@@ -75,4 +82,5 @@ await Promise.all([
   copyFile(`${projectRoot}sites/telegram/transport.js`, `${projectRoot}dist/server/telegram/transport.js`),
   copyFile(`${projectRoot}sites/telegram/webhook.js`, `${projectRoot}dist/server/telegram/webhook.js`),
   copyFile(`${projectRoot}sites/telegram/write-drafts.js`, `${projectRoot}dist/server/telegram/write-drafts.js`),
+  copyFile(`${projectRoot}sites/telegram/write-actions.js`, `${projectRoot}dist/server/telegram/write-actions.js`),
 ]);

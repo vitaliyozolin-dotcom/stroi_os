@@ -293,40 +293,42 @@ test('task callback key includes project identity for duplicate task ids', () =>
 });
 
 test('project routing and confirmation are isolated by Telegram user, chat and draft project', () => {
-  const worker = readFileSync(new URL('../sites/worker.js', import.meta.url), 'utf8');
+  const processor = readFileSync(new URL('../sites/telegram/update-handler.js', import.meta.url), 'utf8');
+  const initialization = readFileSync(new URL('../sites/runtime/initialization.js', import.meta.url), 'utf8');
+  const visibility = readFileSync(new URL('../sites/telegram/visibility.js', import.meta.url), 'utf8');
   const bindings = readFileSync(new URL('../sites/telegram/bindings.js', import.meta.url), 'utf8');
   const drafts = readFileSync(new URL('../sites/telegram/drafts.js', import.meta.url), 'utf8');
   const projectWrite = readFileSync(new URL('../sites/projects/write.js', import.meta.url), 'utf8');
-  assert.match(worker, /PRIMARY KEY \(telegram_user_id, chat_id\)/);
-  assert.match(worker, /saveTelegramProjectSelection\(env\.DB, telegramUserId, chatId, project\.id\)/);
-  assert.match(worker, /bindingForTelegramProject\(env\.DB, telegramUserId, draft\.project_id\)/);
-  assert.match(worker, /runClaimedTelegramDraft\(callback, draft, env/);
+  assert.match(initialization, /PRIMARY KEY \(telegram_user_id, chat_id\)/);
+  assert.match(processor, /saveTelegramProjectSelection\(env\.DB, telegramUserId, chatId, project\.id\)/);
+  assert.match(processor, /bindingForTelegramProject\(env\.DB, telegramUserId, draft\.project_id\)/);
+  assert.match(processor, /runClaimedTelegramDraft\(callback, draft, env/);
   assert.match(drafts, /status = 'processing'/);
-  assert.match(worker, /telegramConfirmVisible/);
-  assert.match(worker, /replyAuthor\.username/);
-  assert.match(worker, /К какому проекту относится это действие/);
-  assert.match(worker, /К какому проекту относится этот файл или отчёт/);
-  assert.match(worker, /command\.name === 'expense'/);
-  assert.match(worker, /message is not modified/);
+  assert.match(processor, /telegramConfirmVisible/);
+  assert.match(processor, /replyAuthor\.username/);
+  assert.match(processor, /К какому проекту относится это действие/);
+  assert.match(processor, /К какому проекту относится этот файл или отчёт/);
+  assert.match(processor, /command\.name === 'expense'/);
+  assert.match(visibility, /message is not modified/);
   assert.match(bindings, /WHERE code_hash = \? AND used_at IS NULL AND expires_at >= \?/);
   assert.match(bindings, /SET used_at = \?, claim_id = \?/);
   assert.match(bindings, /export const unlinkTelegramBinding/);
-  assert.match(worker, /pending: \{ type: 'command', command, sourceMessageId:/);
+  assert.match(processor, /pending: \{ type: 'command', command, sourceMessageId:/);
   assert.match(projectWrite, /await env\.DB\.batch\(\[stateStatement, \.\.\.outboxStatements\]\)/);
   assert.match(projectWrite, /WHERE project_id = \? AND revision = \? AND updated_at = \? AND updated_by = \?/);
 });
 
 test('Telegram retries keep the update lease and queue confirmations before closing drafts', () => {
-  const worker = readFileSync(new URL('../sites/worker.js', import.meta.url), 'utf8');
+  const actions = readFileSync(new URL('../sites/telegram/write-actions.js', import.meta.url), 'utf8');
   const inbox = readFileSync(new URL('../sites/telegram/inbox.js', import.meta.url), 'utf8');
   assert.match(inbox, /TELEGRAM_UPDATE_LEASE_MS = 360_000/);
   assert.match(inbox, /now\.getTime\(\) - receivedAt <= processingTtlMs/);
 
   const functionBlock = (name: string, nextName: string) => {
-    const start = worker.indexOf(`const ${name} =`);
-    const end = worker.indexOf(`const ${nextName} =`, start + 1);
+    const start = actions.indexOf(`const ${name} =`);
+    const end = nextName ? actions.indexOf(`const ${nextName} =`, start + 1) : actions.indexOf('return { telegramConfirmTask', start + 1);
     assert.ok(start >= 0 && end > start, `missing ${name}`);
-    return worker.slice(start, end);
+    return actions.slice(start, end);
   };
   for (const [name, nextName] of [
     ['telegramConfirmTask', 'telegramConfirmNote'],
@@ -340,7 +342,7 @@ test('Telegram retries keep the update lease and queue confirmations before clos
     assert.match(block, /`telegram-draft:\$\{draft\.id\}`/);
   }
 
-  const statusBlock = functionBlock('telegramChangeTaskStatus', 'telegramHandleCallback');
+  const statusBlock = functionBlock('telegramChangeTaskStatus', '');
   assert.match(statusBlock, /sourceTelegramCallbackId: callback\.id/);
   assert.ok(statusBlock.indexOf('dispatchNotifications(') < statusBlock.indexOf('telegramDurableVisibility('));
   assert.match(statusBlock, /`telegram-task-status:\$\{callback\.id\}`/);

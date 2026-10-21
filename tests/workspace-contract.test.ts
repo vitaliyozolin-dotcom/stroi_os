@@ -72,12 +72,12 @@ test('lead timing and conversational Telegram summaries are visible and supporte
 
   assert.match(marketing, /Поступила: \{formatDateTime\(lead\.createdAt\)\}/);
   assert.match(settings, /Формы на ikioma\.ru/);
-  assert.match(worker, /command\.name === 'stages'/);
-  assert.match(worker, /command\.name === 'done'/);
-  assert.match(worker, /command\.name === 'finance'/);
+  assert.match(source('sites/telegram/update-handler.js'), /command\.name === 'stages'/);
+  assert.match(source('sites/telegram/update-handler.js'), /command\.name === 'done'/);
+  assert.match(source('sites/telegram/update-handler.js'), /command\.name === 'finance'/);
   assert.match(bootstrap, /command: 'finance'/);
-  assert.match(worker, /naturalTelegramIntent/);
-  assert.match(worker, /repliedToBot/);
+  assert.match(source('sites/telegram/commands.js'), /naturalTelegramIntent/);
+  assert.match(source('sites/telegram/update-handler.js'), /repliedToBot/);
 });
 
 
@@ -87,7 +87,7 @@ test('Telegram common chat recheck is webhook-backed, observable and honestly la
   const integrationRoutes = source('sites/integrations/routes.js');
   const webhook = source('sites/telegram/webhook.js');
 
-  assert.match(worker, /CREATE TABLE IF NOT EXISTS telegram_chat_candidates/);
+  assert.match(source('sites/runtime/initialization.js'), /CREATE TABLE IF NOT EXISTS telegram_chat_candidates/);
   assert.match(webhook, /rememberTelegramChatCandidates\(env\.DB, update\)/);
   assert.match(worker, /readObservedTelegramChats/);
   assert.match(worker, /createIntegrationHandlers/);
@@ -135,13 +135,13 @@ test('Telegram webhook is restored safely when the app starts', () => {
 });
 
 test('Telegram explains exactly what is read, drafted, saved or ignored', () => {
-  const worker = source('sites/worker.js');
+  const worker = source('sites/telegram/update-handler.js');
   const rendering = source('sites/telegram/rendering.js');
   const bootstrap = source('sites/integrations/telegram-bootstrap.js');
 
-  assert.match(worker, /command\.name === 'note'/);
+  assert.match(source('sites/telegram/update-handler.js'), /command\.name === 'note'/);
   assert.match(worker, /action === 'nc'/);
-  assert.match(worker, /state\.fieldReports = \[report/);
+  assert.match(source('sites/telegram/write-actions.js'), /state\.fieldReports = \[report/);
   assert.match(worker, /Ничего не записано в ИКИОМА ОС/);
   assert.match(rendering, /Молчание никогда не означает сохранение/);
   assert.match(worker, /telegramCommandSuggestion/);

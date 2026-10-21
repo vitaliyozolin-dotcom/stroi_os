@@ -32,6 +32,7 @@ COPY --from=build /app/sites/integrations ./sites/integrations
 COPY --from=build /app/sites/leads ./sites/leads
 COPY --from=build /app/sites/projects ./sites/projects
 COPY --from=build /app/sites/routes ./sites/routes
+COPY --from=build /app/sites/runtime ./sites/runtime
 COPY --from=build /app/sites/telegram ./sites/telegram
 USER node
 COPY --from=build /app/sites/lib ./sites/lib

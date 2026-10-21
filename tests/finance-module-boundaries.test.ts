@@ -66,7 +66,7 @@ test('web and Telegram create commitments through the same runtime-neutral appli
   assert.doesNotMatch(module, /\bfetch\(|\.DB\b|\.prepare\(|from ['"]react|process\.env/);
   assert.match(source('src/infrastructure/finance-commitment.js'), /createFinanceCommitment\(financeCommitmentSnapshot\(state\), input, context\)/);
   assert.match(source('src/application/finance.ts'), /createFinanceCommitment\(/);
-  assert.match(source('sites/worker.js'), /createProjectCommitment\(state, \{ \.\.\.entry, sourceDraftId: draft\.id \}/);
+  assert.match(source('sites/telegram/write-actions.js'), /createProjectCommitment\(state, \{ \.\.\.entry, sourceDraftId: draft\.id \}/);
 });
 
 test('finance repository is scoped and redundant whole-project application facades stay removed', () => {

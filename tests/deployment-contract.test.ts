@@ -26,7 +26,7 @@ test('production images are SHA-addressable and include Telegram modules', () =>
 test('Sites artifact includes every Telegram module imported by its Worker entrypoint', () => {
   const prepare = source('scripts/prepare-sites-build.mjs');
 
-  for (const moduleName of ['attachment-drafts', 'bindings', 'commands', 'connection', 'drafts', 'inbox', 'outbox', 'project-store', 'read-commands', 'rendering', 'transport', 'webhook', 'write-drafts']) {
+  for (const moduleName of ['attachment-drafts', 'bindings', 'commands', 'connection', 'drafts', 'inbox', 'outbox', 'project-store', 'read-commands', 'rendering', 'transport', 'webhook', 'write-drafts', 'write-actions', 'files', 'visibility', 'registration', 'update-handler']) {
     assert.match(
       prepare,
       new RegExp(`sites/telegram/${moduleName}\\.js.*dist/server/telegram/${moduleName}\\.js`),
@@ -59,10 +59,10 @@ test('Sites artifact includes Worker file-route modules', () => {
 test('both runtime artifacts include extracted project, access, automation, integration and API boundaries', () => {
   const prepare = source('scripts/prepare-sites-build.mjs');
   const dockerfile = source('Dockerfile');
-  for (const modulePath of ['access/session', 'access/users', 'automations/battle', 'feedback/routes', 'integrations/camera', 'integrations/notifications', 'integrations/routes', 'integrations/status', 'integrations/telegram-access', 'integrations/telegram-bootstrap', 'leads/routes', 'projects/routes', 'projects/write', 'routes/api']) {
+  for (const modulePath of ['access/session', 'access/users', 'automations/battle', 'feedback/routes', 'integrations/camera', 'integrations/notifications', 'integrations/routes', 'integrations/status', 'integrations/telegram-access', 'integrations/telegram-bootstrap', 'leads/routes', 'projects/routes', 'projects/write', 'routes/api', 'runtime/initialization', 'projects/snapshot']) {
     assert.match(prepare, new RegExp(`sites/${modulePath}\\.js.*dist/server/${modulePath}\\.js`));
   }
-  for (const directory of ['access', 'automations', 'feedback', 'integrations', 'leads', 'projects', 'routes']) {
+  for (const directory of ['access', 'automations', 'feedback', 'integrations', 'leads', 'projects', 'routes', 'runtime']) {
     assert.match(dockerfile, new RegExp(`sites/${directory} ./sites/${directory}`));
   }
 });
@@ -71,12 +71,14 @@ test('runtime initializes schema before listening while readiness itself stays r
   const worker = source('sites/worker.js');
   const server = source('server/index.js');
 
-  assert.match(worker, /BATTLE_SCHEMA_KEY = 'battle_schema_version'/);
-  assert.match(worker, /export const initializeBattleRuntime/);
+  const initialization = source('sites/runtime/initialization.js');
+  assert.match(worker, /from '\.\/runtime\/initialization\.js'/);
+  assert.match(initialization, /BATTLE_SCHEMA_KEY = 'battle_schema_version'/);
+  assert.match(initialization, /export const initializeBattleRuntime/);
   assert.ok(server.indexOf('await initializeBattleRuntime(env)') < server.indexOf('server.listen('));
-  const readinessStart = worker.indexOf('export const battleReadiness');
-  const readinessEnd = worker.indexOf('const ensureBattleReady', readinessStart);
-  const readiness = worker.slice(readinessStart, readinessEnd);
+  const readinessStart = initialization.indexOf('export const battleReadiness');
+  const readinessEnd = initialization.indexOf('export const ensureBattleReady', readinessStart);
+  const readiness = initialization.slice(readinessStart, readinessEnd);
   assert.match(readiness, /SELECT value FROM system_meta/);
   assert.doesNotMatch(readiness, /INSERT|UPDATE|DELETE|CREATE TABLE/);
 });

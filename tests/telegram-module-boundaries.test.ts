@@ -6,6 +6,19 @@ const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.
 
 test('Telegram transport, durable outbox, inbox, drafts and bindings are isolated behind Worker compatibility exports', () => {
   const worker = source('sites/worker.js');
+  assert.doesNotMatch(worker, /\.prepare\(|CREATE TABLE|const telegramHandleMessage|const telegramHandleCallback|const telegramFileToR2/);
+  for (const module of ['update-handler', 'registration', 'files', 'visibility', 'write-actions']) {
+    assert.ok(worker.includes(`from './telegram/${module}.js'`));
+    assert.doesNotMatch(source(`sites/telegram/${module}.js`), /from ['"]\.\.\/worker/);
+  }
+  assert.ok(worker.includes("from './runtime/initialization.js'"));
+  const actions = source('sites/telegram/write-actions.js');
+  assert.match(worker, /createTelegramWriteActions/);
+  assert.doesNotMatch(actions, /from ['"]\.\.\/worker/);
+  for (const name of ['telegramConfirmTask', 'telegramConfirmNote', 'telegramConfirmExpense', 'telegramConfirmFile', 'telegramChangeTaskStatus']) {
+    assert.ok(!worker.includes(`const ${name} = async`));
+    assert.ok(actions.includes(`const ${name} = async`));
+  }
   const transport = source('sites/telegram/transport.js');
   const outbox = source('sites/telegram/outbox.js');
   const inbox = source('sites/telegram/inbox.js');
