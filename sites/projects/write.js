@@ -10,6 +10,7 @@ import { clean, validProjectId } from '../lib/validation.js';
 import { validateFinanceChanges } from './finance.js';
 import { validateBaselineChanges } from './baseline.js';
 import { validateStageControl } from './stage-control.js';
+import { validateTreasuryChanges } from '../../src/domain/treasury.js';
 
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_JSON_BODY_BYTES = 32 * 1024;
@@ -85,6 +86,8 @@ export const createProjectWriteHandler = ({
     if (baselineError) return json({ ok: false, error: 'invalid_baseline_transition', message: baselineError }, 422);
     const financeError = validateFinanceChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
     if (financeError) return json({ ok: false, error: 'invalid_finance_transition', message: financeError }, 422);
+    const treasuryError = validateTreasuryChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
+    if (treasuryError) return json({ ok: false, error: 'invalid_treasury_transition', message: treasuryError }, 422);
     const state = applyAutomations(previousSnapshot?.state ?? null, mergedState, actor);
     let stateJson;
     try {
@@ -119,7 +122,22 @@ export const createProjectWriteHandler = ({
       )
       ON CONFLICT(id) DO NOTHING
     `).bind(delivery.stableId, String(delivery.chatId), delivery.text, JSON.stringify(delivery.options ?? {}), now, now, projectId, nextRevision, now, actor, role, stateJson));
-    const batchResults = await env.DB.batch([stateStatement, ...outboxStatements]);
+    // The audit record commits in the same transaction as the state and outbox.
+    // The guarded SELECT cannot write a new revision's audit on a failed CAS.
+    const auditStatement = env.DB.prepare(`
+      INSERT INTO audit_log (
+        id, project_id, revision, created_at, actor, role, action, summary, state_bytes
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE EXISTS (
+        SELECT 1 FROM project_state
+        WHERE project_id = ? AND revision = ? AND updated_at = ? AND updated_by = ?
+          AND updated_role = ? AND state_json = ?
+      )
+      ON CONFLICT(id) DO NOTHING
+    `).bind(`project-write:${projectId}:${nextRevision}`, projectId, nextRevision, now, actor, role, action, summary, stateBytes,
+      projectId, nextRevision, now, actor, role, stateJson);
+    const batchResults = await env.DB.batch([stateStatement, ...outboxStatements, auditStatement]);
     if (changes(batchResults?.[0]) !== 1) {
       const current = await readSnapshot(env.DB, projectId);
       const currentIdentity = current ? projectIdentity(request, env, current.state) : null;
@@ -127,16 +145,6 @@ export const createProjectWriteHandler = ({
         ? { ...current, state: stateForRole(current.state, currentIdentity), updatedRole: currentIdentity.role }
         : null;
       return json({ ok: false, error: 'revision_conflict', current: safeCurrent }, 409);
-    }
-
-    try {
-      await env.DB.prepare(`
-        INSERT INTO audit_log (
-          id, project_id, revision, created_at, actor, role, action, summary, state_bytes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(crypto.randomUUID(), projectId, nextRevision, now, actor, role, action, summary, stateBytes).run();
-    } catch {
-      // Состояние уже сохранено. Сбой журнала не должен заставлять клиента повторять запись.
     }
 
     context.waitUntil(dispatchNotifications(previousSnapshot?.state ?? null, state, env, actor, new URL(request.url).origin, summary, nextRevision, notificationPlan).catch(() => null));

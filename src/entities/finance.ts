@@ -34,7 +34,7 @@ export interface FinanceEntry extends CostClassification {
   /** Planned date for the unpaid remainder; independent of document/payment dates. */
   dueDate?: string;
   dueDateHistory?: { date: string | null; at: string; by: string }[];
-  payments?: { id: string; amount: number; date: string; document: string; recordedAt: string; recordedBy: string }[];
+  payments?: { id: string; amount: number; date: string; document: string; documentId?: string; recordedAt: string; recordedBy: string }[];
   legacyPayment?: { amount: number; lastRecordedDate?: string; document?: string };
   budgetAllocation?: { at: string; by: string; budgetLineId: string };
   historicalPayment?: { existingOperation?: boolean; sourceDocumentId: string; sourceUniqueKey: string; sourceSha256: string; confirmation: string; sourceDate: string; recordedAt: string; recordedBy: string };
@@ -59,7 +59,9 @@ export interface FinanceEntry extends CostClassification {
   acceptedAmount?: number;
   acceptedAt?: string;
   acceptanceDocument?: string;
+  acceptanceDocumentId?: string;
   paidAmount?: number;
   paidAt?: string;
   paymentDocument?: string;
+  paymentDocumentId?: string;
 }

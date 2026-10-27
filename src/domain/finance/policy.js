@@ -19,11 +19,11 @@ export const expenseAcceptanceSources = (state, entry) => {
 };
 
 export const financeActionError = (state, entry, kind, amount, date, document, source) => {
-  const limit = financeMoney(kind === 'accept' ? entry.amount - acceptedAmountFor(entry) : kind === 'pay' ? acceptedAmountFor(entry) - paidAmountFor(entry) : entry.amount - paidAmountFor(entry));
-  if (!Number.isFinite(amount) || Math.abs(amount - financeMoney(amount)) > 0.000001 || amount <= 0 || amount > limit) return 'Укажите сумму больше нуля и не больше доступного остатка.';
+  const limit = financeMoney(kind === 'accept' ? entry.amount - acceptedAmountFor(entry) : entry.amount - paidAmountFor(entry));
+  if (!Number.isFinite(amount) || !Number.isSafeInteger(Math.round(amount * 100)) || Math.abs(amount - financeMoney(amount)) > 0.000001 || amount <= 0 || amount > limit) return 'Укажите сумму больше нуля и не больше доступного остатка.';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date || !document.trim()) return 'Укажите фактическую дату и документ-основание.';
   if ((kind === 'receive') !== (entry.kind === 'income')) return 'Это действие недоступно для данной операции.';
-  if (kind === 'accept' && needsExpenseApproval(entry)) return 'Сначала утвердите расход.';
+  if (['accept', 'pay'].includes(kind) && needsExpenseApproval(entry)) return 'Сначала утвердите расход.';
   if (kind === 'accept' && !expenseAcceptanceSources(state, entry).some((item) => item.id === source)) return 'Сначала примите связанную работу или поставку и выберите её как основание.';
   return '';
 };

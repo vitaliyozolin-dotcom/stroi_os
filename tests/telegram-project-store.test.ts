@@ -79,7 +79,7 @@ test('Telegram project mutation fails after three conflicting revisions', async 
   );
 });
 
-test('Telegram shares the financial write policy and rejects unauthorized or unaccepted payments before SQL', async () => {
+test('Telegram shares the financial write policy and rejects unauthorized or unapproved payments before SQL', async () => {
   const previous = { project: { id: 'project-1' }, financeEntries: [{ id: 'e', kind: 'expense', status: 'committed', amount: 100, date: '2026-10-19', description: 'Работы', counterparty: 'Подрядчик' }] };
   const store = createTelegramProjectStore({ ensureSchema: async () => undefined, readSnapshot: async () => ({ state: previous, revision: 1 }), changes: () => 1, mutationNoop: noop });
   for (const role of ['management', 'foreman', 'client']) {

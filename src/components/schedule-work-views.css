@@ -1,0 +1,102 @@
+.schedule-workspace--embedded { gap:18px; }
+.schedule-board__options { flex-wrap:wrap; gap:10px 18px; }
+.schedule-board__filters { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:12px 24px; border-bottom:1px solid var(--schedule-line); background:#f5f5ed; }
+.schedule-board__search { display:flex; align-items:center; gap:8px; flex:1 1 220px; color:#666e5c; }
+.schedule-board__search input { min-width:0; width:100%; padding:8px 0; border:0; border-radius:0; background:transparent; color:var(--schedule-ink); font:inherit; font-size:12px; }
+.schedule-board__search input::placeholder { color:#666e5c; opacity:1; }
+.schedule-board__filters select { max-width:240px; min-height:36px; padding:6px 28px 6px 10px; border:1px solid var(--schedule-line); border-radius:4px; background:var(--schedule-paper); color:#67715b; font:inherit; font-size:12px; }
+.schedule-board__check:has(input:disabled) { color:#989e90; cursor:default; }
+.schedule-board__count { font-size:11px; color:#666e5c; white-space:nowrap; }
+.schedule-board__empty { padding:40px 24px; text-align:center; color:#666e5c; font-size:13px; }
+.schedule-board .schedule-board__name { width:100%; margin:0; border:0; border-right:1px solid var(--schedule-line); border-radius:0; color:inherit; }
+.schedule-board .schedule-board__bar { padding:0; border:0; }
+.schedule-board .schedule-board__row { min-height:104px; }
+.schedule-board__track { min-height:103px; }
+.schedule-board__row--payments .schedule-board__track { min-height:116px; }
+.schedule-board__row--payments .schedule-board__baseline { top:97px; }
+.schedule-board .schedule-board__payment-dot { position:absolute; top:65px; display:grid; place-items:center; transform:translateX(-50%); width:27px; height:27px; padding:0; border:1px solid #c8b7a1; border-radius:50%; background:#f2e8db; color:#7d6040; font-size:11px; z-index:3; text-align:center; }
+.schedule-board .schedule-board__payment-dot--income { border-color:#b1c2a6; background:#e1ebd9; color:#526c3d; }
+.schedule-work-list__head, .schedule-work-list__row { display:grid; grid-template-columns:minmax(200px,1.6fr) minmax(150px,1fr) minmax(130px,.8fr); gap:20px; padding:20px 24px; }
+.schedule-work-list:has(.has-payments) .schedule-work-list__head, .schedule-work-list__row.has-payments { grid-template-columns:minmax(180px,1.5fr) minmax(140px,.85fr) minmax(120px,.7fr) minmax(190px,1fr); }
+.schedule-work-list__head { padding-top:13px; padding-bottom:13px; border-bottom:1px solid var(--schedule-line); font-size:10px; color:#666e5c; }
+.schedule-work-list__row { border-bottom:1px solid #e5e7dd; }
+.schedule-work-list__row:last-child { border-bottom:0; }
+.schedule-board .schedule-stage-link { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; width:100%; padding:0; border:0; border-radius:0; background:transparent; color:#34402a; }
+.schedule-stage-link strong { font-size:14px; font-weight:550; line-height:1.45; }
+.schedule-stage-link svg { flex-shrink:0; color:#666e5c; margin-top:3px; }
+.schedule-stage-link:hover strong { text-decoration:underline; text-underline-offset:3px; }
+.schedule-status { display:inline-flex; padding:4px 7px; margin:8px 6px 0 0; background:#eceee4; color:#666e5c; border-radius:3px; font-size:10px; }
+.schedule-status--in_progress { background:#e0e8d5; color:#52633f; }
+.schedule-status--accepted { background:#e4ebdc; color:#52633f; }
+.schedule-status--blocked, .schedule-status--rework { background:#f0e1d7; color:#795337; }
+.schedule-driving { display:inline-block; margin-top:7px; font-size:10px; font-weight:500; color:#8b6443; }
+.schedule-board__name small.schedule-driving { color:#8b6443; }
+.schedule-stage-owner { display:block; margin-top:8px; color:#666e5c; font-size:11px; line-height:1.5; }
+.schedule-work-progress { display:flex; align-items:center; gap:9px; margin-top:10px; }
+.schedule-work-progress progress { appearance:none; width:100%; height:3px; border:0; background:#e5e8dc; border-radius:2px; }
+.schedule-work-progress progress::-webkit-progress-bar { background:#e5e8dc; border-radius:2px; }
+.schedule-work-progress progress::-webkit-progress-value { background:#8da572; border-radius:2px; }
+.schedule-work-progress progress::-moz-progress-bar { background:#8da572; border-radius:2px; }
+.schedule-work-progress > span { color:#666e5c; font-size:10px; font-variant-numeric:tabular-nums; }
+.schedule-stage-blocker { margin:9px 0 0; padding:8px 10px; border-left:2px solid #bf9473; background:#f0e9df; color:#795337; font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
+.schedule-work-list__dates { display:flex; flex-direction:column; gap:13px; }
+.schedule-work-list__dates span, .schedule-deviation { display:flex; flex-direction:column; gap:5px; align-items:flex-start; }
+.schedule-work-list__dates small, .schedule-deviation small { font-size:10px; line-height:1.5; color:#666e5c; }
+.schedule-work-list__dates strong, .schedule-deviation strong { font-size:12px; line-height:1.4; font-weight:500; color:#536247; }
+.schedule-deviation--late strong { color:#795337; }
+.schedule-linked-tasks { margin-top:12px; border-top:1px solid #e4e7da; padding-top:9px; }
+.schedule-linked-tasks summary { display:flex; align-items:center; gap:6px; cursor:pointer; font-size:11px; color:#666e5c; list-style:none; }
+.schedule-linked-tasks summary::-webkit-details-marker { display:none; }
+.schedule-linked-tasks summary::after { content:'+'; margin-left:auto; font-size:14px; }
+.schedule-linked-tasks[open] summary::after { content:'−'; }
+.schedule-linked-tasks summary > span { margin-left:4px; color:#666e5c; font-size:10px; }
+.schedule-linked-tasks ul { list-style:none; margin:10px 0 0; padding:0; }
+.schedule-linked-tasks li { margin:0 0 10px; }
+.schedule-linked-tasks li:last-child { margin-bottom:0; }
+.schedule-linked-tasks li strong, .schedule-linked-tasks li button { font-size:11px; font-weight:500; line-height:1.5; color:#66745a; }
+.schedule-board .schedule-linked-tasks li button { display:flex; align-items:flex-start; gap:6px; width:100%; padding:0; border:0; background:none; }
+.schedule-linked-tasks li small { display:block; margin-top:3px; font-size:10px; line-height:1.5; color:#666e5c; }
+.schedule-linked-payments { display:flex; flex-direction:column; gap:7px; }
+.schedule-board .schedule-payment { display:flex; align-items:center; gap:7px; width:100%; padding:8px 9px; border:1px solid #e1dacd; border-radius:4px; background:#f5efe5; color:#795337; }
+.schedule-payment > span { min-width:0; flex:1; font-size:10px; }
+.schedule-payment small { display:block; margin-top:3px; font-size:10px; color:#795337; }
+.schedule-payment > strong { flex-shrink:0; font-size:11px; font-weight:500; font-variant-numeric:tabular-nums; }
+.schedule-board .schedule-payment--income { border-color:#d8e0cd; background:#edf1e5; color:#52633f; }
+.schedule-payment--income small { color:#52633f; }
+.schedule-kanban { display:grid; grid-template-columns:repeat(5,minmax(230px,1fr)); overflow-x:auto; align-items:start; gap:12px; padding:20px; scrollbar-width:thin; overscroll-behavior-x:contain; }
+.schedule-kanban__column { min-width:0; border:1px solid #e1e4d8; border-radius:5px; background:#f0f1e9; }
+.schedule-kanban__column > header { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px; border-top:3px solid #c5cbb9; border-radius:4px 4px 0 0; }
+.schedule-kanban__column--progress > header { border-color:#849a65; }
+.schedule-kanban__column--review > header { border-color:#c4aa79; }
+.schedule-kanban__column--accepted > header { border-color:#9eb38a; }
+.schedule-kanban__column h3 { margin:0; font-size:12px; font-weight:550; color:#637254; }
+.schedule-kanban__column > header > span { color:#666e5c; font-size:11px; }
+.schedule-kanban__cards { display:grid; gap:10px; padding:0 9px 10px; }
+.schedule-kanban__card { padding:14px; border:1px solid #e0e4d6; border-radius:4px; background:#fcfcf6; box-shadow:0 1px 2px #26321c05; }
+.schedule-kanban__phase { display:block; margin-bottom:8px; color:#666e5c; font-size:9px; text-transform:uppercase; letter-spacing:.05em; }
+.schedule-kanban__card .schedule-stage-link strong { font-size:13px; }
+.schedule-kanban__date { display:flex; justify-content:space-between; gap:8px; margin-top:13px; font-size:10px; line-height:1.5; color:#666e5c; }
+.schedule-kanban__date strong { color:#657554; font-size:11px; font-weight:500; white-space:nowrap; }
+.schedule-kanban__date--baseline { margin-top:5px; }
+.schedule-kanban__date--baseline strong { color:#666e5c; font-weight:400; }
+.schedule-kanban__card .schedule-deviation { flex-direction:row; justify-content:space-between; gap:8px; margin-top:10px; padding-top:9px; border-top:1px solid #edf0e6; }
+.schedule-kanban__card .schedule-deviation strong { font-size:10px; white-space:nowrap; }
+.schedule-kanban__card .schedule-linked-payments { margin-top:12px; }
+.schedule-kanban__empty { padding:15px 5px 24px; text-align:center; font-size:11px; color:#666e5c; }
+@media(max-width:1100px) {
+ .schedule-work-list__head { display:none; }
+ .schedule-work-list__row, .schedule-work-list__row.has-payments { grid-template-columns:minmax(190px,1.4fr) minmax(140px,1fr) minmax(120px,.8fr); }
+ .schedule-work-list__row .schedule-linked-payments { grid-column:1/-1; display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
+}
+@media(max-width:700px) {
+ .schedule-board__filters { padding:10px 16px; gap:8px 12px; }
+ .schedule-board__search { flex-basis:100%; }
+ .schedule-board__filters select { flex:1; max-width:100%; }
+ .schedule-board__count { margin-left:auto; }
+ .schedule-board__options { justify-content:flex-start; gap:9px 17px; }
+ .schedule-work-list__row, .schedule-work-list__row.has-payments { grid-template-columns:1fr 1fr; gap:16px; padding:19px 17px; }
+ .schedule-work-list__row > div:first-child { grid-column:1/-1; }
+ .schedule-work-list__row .schedule-linked-payments { grid-template-columns:1fr; }
+ .schedule-kanban { padding:14px; grid-template-columns:repeat(5,minmax(245px,75vw)); gap:10px; }
+ .schedule-board .schedule-board__view { padding-inline:10px; font-size:12px; }
+}

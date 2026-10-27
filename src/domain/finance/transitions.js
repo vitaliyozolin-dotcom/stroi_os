@@ -12,7 +12,7 @@ export const createCommitment = (state, input, identity) => {
     return { ok: false, error: 'Финансовая операция с таким ID уже существует.' };
   }
   if (!input.id || !['expense', 'income'].includes(input.kind) || !Number.isFinite(input.amount)
-    || input.amount <= 0 || Math.abs(input.amount - financeMoney(input.amount)) > 0.000001
+    || input.amount <= 0 || !Number.isSafeInteger(Math.round(input.amount * 100)) || Math.abs(input.amount - financeMoney(input.amount)) > 0.000001
     || typeof input.description !== 'string' || !input.description.trim()) return { ok: false, error: 'Укажите сумму с точностью до копеек и назначение операции.' };
   if (input.description.trim().length > 500) return { ok: false, error: 'Сократите назначение операции до 500 символов.' };
   if (!validDate(input.date)) return { ok: false, error: 'Укажите корректную дату операции.' };
@@ -48,10 +48,11 @@ const recordAction = (state, entry, input, identity, kind) => {
   if (error) return { ok: false, error };
   if (kind === 'accept') {
     return { ok: true, changed: true, entry: {
-      ...entry, status: 'accepted',
+      ...entry, status: paidAmountFor(entry) >= entry.amount ? 'paid' : 'accepted',
       acceptedAmount: financeMoney(acceptedAmountFor(entry) + input.amount),
       acceptedAt: input.date, acceptedBy: identity.name,
-      acceptanceSource: input.source, acceptanceDocument: input.document.trim(), document: input.document.trim(),
+      acceptanceSource: input.source, acceptanceDocument: input.document.trim(), acceptanceDocumentId: input.documentId,
+      document: input.document.trim(),
     } };
   }
   const paidAmount = financeMoney(paidAmountFor(entry) + input.amount);
@@ -59,7 +60,10 @@ const recordAction = (state, entry, input, identity, kind) => {
   // The client candidate retains the existing server-owned ledger unchanged.
   return { ok: true, changed: true, entry: {
     ...entry, status: paidAmount >= entry.amount ? 'paid' : entry.status,
-    paidAmount, paidAt: input.date, paidBy: identity.name, paymentDocument: input.document.trim(),
+    // A paid status must never make an advance look like accepted work through
+    // the legacy status fallback. Acceptance remains an independent fact.
+    acceptedAmount: acceptedAmountFor(entry),
+    paidAmount, paidAt: input.date, paidBy: identity.name, paymentDocument: input.document.trim(), paymentDocumentId: input.documentId,
   } };
 };
 

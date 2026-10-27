@@ -1,4 +1,4 @@
-import { projectIdentity } from '../access-control.js';
+import { documentVisibilityForRole, projectIdentity } from '../access-control.js';
 import { json } from '../lib/http.js';
 import { readFormDataLimited, readStreamPrefix } from '../lib/request-body.js';
 import { claimUploadAdmission } from '../lib/upload-admission.js';
@@ -74,6 +74,7 @@ export const createFileHandlers = ({ ensureSchema, readSnapshot }) => {
       const snapshot = await readSnapshot(env.DB, projectId);
       const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
       if (!identity) return json({ ok: false, error: 'project_access_denied' }, 403);
+      if (!documentVisibilityForRole(snapshot.state, identity)({ fileKey: key, clientVisible: true })) return json({ ok: false, error: 'file_not_found' }, 404);
       const checkpoint = (snapshot.state?.checkpoints ?? []).find((item) => (
         (item.photos ?? []).some((photo) => clean(photo.fileKey, 500) === key)
       ));
@@ -145,8 +146,9 @@ export const createFileHandlers = ({ ensureSchema, readSnapshot }) => {
       const snapshot = await readSnapshot(env.DB, projectId);
       const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
       if (!identity) return json({ ok: false, error: 'project_access_denied' }, 403);
-      const document = (snapshot.state?.documents ?? []).find((item) => clean(item.fileKey, 500) === key);
-      if (!document || (identity.role === 'client' && !document.clientVisible)) return json({ ok: false, error: 'file_not_found' }, 404);
+      const visibleDocument = documentVisibilityForRole(snapshot.state, identity);
+      const document = (snapshot.state?.documents ?? []).find((item) => clean(item.fileKey, 500) === key && visibleDocument(item));
+      if (!document) return json({ ok: false, error: 'file_not_found' }, 404);
       const object = await env.BUCKET.get(key);
       if (!object) return json({ ok: false, error: 'file_not_found' }, 404);
       const headers = protectedFileHeaders(safeFileName(document.fileName || document.name), 'document');
@@ -168,6 +170,7 @@ export const createFileHandlers = ({ ensureSchema, readSnapshot }) => {
       const snapshot = await readSnapshot(env.DB, projectId);
       const identity = snapshot ? projectIdentity(request, env, snapshot.state) : null;
       if (!identity) return json({ ok: false, error: 'project_access_denied' }, 403);
+      if (!documentVisibilityForRole(snapshot.state, identity)({ fileKey: key, clientVisible: true })) return json({ ok: false, error: 'file_not_found' }, 404);
       const report = (snapshot.state?.fieldReports ?? []).find((item) => (
         (item.attachments ?? []).some((attachment) => clean(attachment.key, 500) === key)
       ));

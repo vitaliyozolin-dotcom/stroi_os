@@ -10,6 +10,7 @@ import type { QualityCheckpoint } from './quality';
 import type { Stage } from './stage';
 import type { ProjectTask } from './task';
 import type { AppSettings } from './user';
+import type { TreasuryState } from './treasury';
 
 export interface AppState {
   version: 1;
@@ -19,6 +20,8 @@ export interface AppState {
   stages: Stage[];
   budgetLines: BudgetLine[];
   financeEntries: FinanceEntry[];
+  /** Optional pilot planning layer; existing payment events remain authoritative. */
+  treasury?: TreasuryState;
   procurement: ProcurementItem[];
   counterparties: CounterpartyProfile[];
   supplierQuotes: SupplierQuote[];

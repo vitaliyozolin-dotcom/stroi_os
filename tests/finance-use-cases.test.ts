@@ -84,7 +84,7 @@ test('commands recheck current approval, acceptance sources and the remaining am
   assert.equal(acceptProjectExpense(approved, fact(1), context()).ok, false);
   approved.stages[0].status = 'accepted';
   const accepted = changedState(acceptProjectExpense(approved, fact(20), context()));
-  for (const amount of [NaN, Infinity, 0, -1, 0.001, 20.01]) {
+  for (const amount of [NaN, Infinity, 0, -1, 0.001, 1000.31]) {
     assert.equal(recordProjectPayment(accepted, fact(amount), context()).ok, false, String(amount));
   }
   assert.equal(recordProjectPayment(accepted, { ...fact(1), date: '2026-02-30' }, context()).ok, false);
@@ -116,7 +116,7 @@ test('receipt remains separate from work acceptance and is persisted with precis
   const commands = createFinanceUseCases(state, identity, deps.clock, deps.ids, (next, metadata) => calls.push({ state: next, metadata }));
   assert.equal(commands.recordReceipt(fact(100)).ok, true);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].state.financeEntries[0].acceptedAmount, undefined);
+  assert.equal(calls[0].state.financeEntries[0].acceptedAmount, 0);
   assert.equal(calls[0].state.financeEntries[0].paidAmount, 100);
   assert.equal((calls[0].metadata as { action: string }).action, 'income_received');
   assert.equal(validateFinanceChanges(state, calls[0].state, identity, now), '');

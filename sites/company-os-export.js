@@ -1,4 +1,5 @@
 import { FINANCE_RULES_VERSION, financeTotals, outstandingExpenseTotal, outstandingAmountFor } from '../src/domain/finance-totals.js';
+import { treasuryProjection, treasuryCostSummary } from '../src/domain/treasury.js';
 
 const OIDC_ISSUER = 'https://token.actions.githubusercontent.com';
 const OIDC_AUDIENCE = 'company-os-export';
@@ -89,7 +90,46 @@ const parseStateRow = (row) => {
   }
 };
 
-const financeProject = ({ row, state }) => {
+const treasuryExport = (state, generatedAt) => {
+  // Match the workspace's project-local end-of-day cutoff. Export does not
+  // implement cash or cost arithmetic: both results come from the shared core.
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Moscow' }).format(new Date(generatedAt));
+  const projection = treasuryProjection(state, { today, horizonDays: 91, scenario: 'base' });
+  const costs = treasuryCostSummary(state);
+  const rubles = cents => cents === null ? null : cents / 100;
+  return {
+    version: 1, enabled: true, canonical: true, as_of: projection.today,
+    timezone: 'Europe/Moscow', cutoff: 'end_of_day', scenario: projection.scenario, horizon_days: projection.days.length,
+    cash_balance_rub: rubles(projection.openingCents), balance_known: projection.openingKnown,
+    projection_complete: projection.completeness, minimum_balance_rub: rubles(projection.minBalanceCents),
+    first_deficit_date: projection.firstDeficitDate, peak_funding_rub: rubles(projection.peakFundingCents),
+    peak_reserve_funding_rub: rubles(projection.peakReserveFundingCents),
+    unallocated_inflows_rub: rubles(projection.unallocatedCents.income),
+    unallocated_outflows_rub: rubles(projection.unallocatedCents.expense),
+    unallocated_settlements_rub: rubles(projection.unallocatedSettlementCents),
+    warning_count: projection.warnings.length,
+    // Deliberate allowlist: descriptions, sources, accounts, legal entities,
+    // documents and warning texts remain inside the construction workspace.
+    events: projection.events.map(event => ({
+      id: event.id, entry_id: event.entryId, ...(event.trancheId ? { tranche_id: event.trancheId } : {}),
+      kind: event.kind, amount_rub: rubles(event.amountCents), date: event.date,
+      scheduled_date: event.scheduledDate, contractual_due_date: event.contractualDueDate, certainty: event.certainty,
+      overdue: event.overdue, excluded: event.excluded === true,
+    })),
+    days: projection.days.map(day => ({
+      date: day.date, inflow_rub: rubles(day.inflowCents), outflow_rub: rubles(day.outflowCents),
+      balance_rub: rubles(day.balanceCents), deficit_rub: rubles(day.deficitCents),
+      reserve_shortfall_rub: rubles(day.reserveShortfallCents), event_ids: day.events.map(event => event.id),
+    })),
+    costs: {
+      ac_rub: rubles(costs.recognizedCents), etc_rub: rubles(costs.etcCents), eac_rub: rubles(costs.eacCents),
+      approved_budget_rub: rubles(costs.budgetCents), variance_rub: rubles(costs.varianceCents),
+      complete: costs.complete, warning_count: costs.warnings.length,
+    },
+  };
+};
+
+const financeProject = ({ row, state }, generatedAt) => {
   const commitments = (state.financeEntries ?? []).flatMap((entry) => {
     if (entry?.kind !== 'expense') return [];
     const remaining = outstandingAmountFor(entry);
@@ -115,6 +155,7 @@ const financeProject = ({ row, state }) => {
     cash_balance_rub: 0, bank_balance_confirmed: false, minimum_reserve_rub: 0,
     commitments, confirmed_inflows: inflows,
     source_ref: `ikioma:${state.project.id}:revision:${row.revision}`,
+    ...(state.treasury?.enabled === true ? { treasury: treasuryExport(state, generatedAt) } : {}),
   };
 };
 
@@ -188,7 +229,7 @@ const investorProject = ({ row, state }) => {
 
 export const buildIkiomaCompanyOsPayload = ({ stateRows = [], leadRows = [], generatedAt = new Date().toISOString() } = {}) => {
   const parsed = stateRows.map(parseStateRow).filter(Boolean);
-  const finance = parsed.map(financeProject);
+  const finance = parsed.map(item => financeProject(item, generatedAt));
   const investor = parsed.map(investorProject);
   const stateSales = parsed.flatMap(salesFromState);
   const inboxSales = salesFromInbox(leadRows);

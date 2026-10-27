@@ -2,7 +2,7 @@ import type { BudgetLineInput, CostClassificationInput, FinanceDueDateInput, Fin
 import type { FinanceCommandContext } from './finance-context';
 import type { FinanceRepository, FinanceReadModel, FinanceMutation, FinanceFailure } from './finance-repository.ts';
 import { editFinanceBudgetLine, classifyFinanceContextCosts, setFinanceContextDueDate, type FinancePlanningCommandResult } from './finance-context-planning.ts';
-import { approveFinanceExpense, acceptFinanceExpense, recordFinancePayment, recordFinanceReceipt, type FinanceFactsSnapshot, type FinanceFactsCommandResult, type FactCommand } from './finance-context-facts.ts';
+import { approveFinanceExpense, acceptFinanceExpense, recordFinancePayment, recordFinanceReceipt, attachFinanceDocument, type AttachFinanceDocumentCommand, type FinanceFactsSnapshot, type FinanceFactsCommandResult, type FactCommand } from './finance-context-facts.ts';
 import { createFinanceCommitment, type CreateCommitmentInput, type FinanceCommitmentCommandResult } from './finance-context-commitment.js';
 import { importFinanceHistory, type HistoryImportCommand, type FinanceHistoryCommandResult } from './finance-context-history.ts';
 
@@ -13,7 +13,7 @@ const planningSnapshot = (state: FinanceReadModel): FinancePlanningSnapshot => (
   projectId: state.project.id, budgetLines: state.budgetLines, budgetMeta: state.budgetMeta, financeEntries: state.financeEntries,
 });
 const factsSnapshot = (state: FinanceReadModel): FinanceFactsSnapshot => ({
-  ...planningSnapshot(state), projectCode: state.project.code, procurement: state.procurement, checkpoints: state.checkpoints, stages: state.stages,
+  ...planningSnapshot(state), projectCode: state.project.code, procurement: state.procurement, checkpoints: state.checkpoints, stages: state.stages, documents: state.documents,
 });
 
 /** Financial workflows depend only on the scoped repository, never the project write contract. */
@@ -48,6 +48,7 @@ export const createFinanceUseCases = (repository: FinanceRepository, context: Fi
       return commit(result, result.ok && result.change ? { kind: 'commitment', change: result.change, entryId: result.entryId } : null);
     }),
     approveExpense: (entryId: string) => fact(state => approveFinanceExpense(state, entryId, context)),
+    attachDocument: (input: AttachFinanceDocumentCommand) => fact(state => attachFinanceDocument(state, input, context)),
     acceptExpense: (input: FactCommand) => fact(state => acceptFinanceExpense(state, input, context)),
     recordPayment: (input: FactCommand) => fact(state => recordFinancePayment(state, input, context)),
     recordReceipt: (input: FactCommand) => fact(state => recordFinanceReceipt(state, input, context)),

@@ -100,8 +100,15 @@ test('date metadata cannot forge or remove server history and only management ma
 
 test('adding a due date cannot bypass payment amount rules or rewrite ledger', () => {
   const before = fixture([entry({ acceptedAmount: 50, paidAmount: 20, payments: [{ id: 'p', amount: 20, date: '2026-09-15', document: 'Receipt', recordedAt: '2026-09-15T12:00:00Z', recordedBy: 'Payer' }] })]);
-  const overpaid = structuredClone(before); Object.assign(overpaid.financeEntries[0], { dueDate: '2026-10-15', paidAmount: 60, paidAt: '2026-10-07', paymentDocument: 'Receipt' });
+  const advance = structuredClone(before); Object.assign(advance.financeEntries[0], { dueDate: '2026-10-15', paidAmount: 60, paidAt: '2026-10-07', paymentDocument: 'Receipt' });
+  assert.equal(validateFinanceChanges(before, advance, identity, now), '');
+  assert.equal(advance.financeEntries[0].acceptedAmount, 50);
+  assert.deepEqual(advance.financeEntries[0].payments?.[0], before.financeEntries[0].payments?.[0]);
+  const overpaid = structuredClone(before); Object.assign(overpaid.financeEntries[0], { dueDate: '2026-10-15', paidAmount: 101, paidAt: '2026-10-07', paymentDocument: 'Receipt' });
   assert.match(validateFinanceChanges(before, overpaid, identity, now), /Суммы/);
+  const unapproved = fixture(), paidWithoutApproval = structuredClone(unapproved);
+  Object.assign(paidWithoutApproval.financeEntries[0], { dueDate: '2026-10-15', paidAmount: 10, paidAt: '2026-10-07', paymentDocument: 'Receipt' });
+  assert.match(validateFinanceChanges(unapproved, paidWithoutApproval, identity, now), /утвердите/);
   const rewritten = structuredClone(before); rewritten.financeEntries[0].dueDate = '2026-10-15'; rewritten.financeEntries[0].payments = [];
   assert.match(validateFinanceChanges(before, rewritten, identity, now), /История платежей/);
 });

@@ -72,23 +72,37 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
       if (!old) { delete entry.approvedAt; delete entry.approvedBy; }
       continue;
     }
-    const acceptedAmount = accepted(entry);
     const paidAmount = paid(entry);
+    const pays = paidAmount > (old ? paid(old) : 0);
+    // Legacy paid records remain readable as-is. A new payment must explicitly
+    // carry the prior acceptance so status='paid' cannot invent work acceptance.
+    if (pays && entry.acceptedAmount == null) entry.acceptedAmount = old ? accepted(old) : 0;
+    const acceptedAmount = accepted(entry);
     if (!['expense', 'income'].includes(entry.kind) || !['committed', 'accepted', 'paid'].includes(entry.status)
       || !Number.isFinite(entry.amount) || entry.amount <= 0
       || !Number.isFinite(acceptedAmount) || !Number.isFinite(paidAmount)
+      || [entry.amount, acceptedAmount, paidAmount].some(amount => !Number.isSafeInteger(cents(amount)) || Math.abs(amount - cents(amount) / 100) > 0.000001)
       || acceptedAmount < 0 || paidAmount < 0 || cents(acceptedAmount) > cents(entry.amount)
-      || cents(paidAmount) > cents(entry.kind === 'expense' ? acceptedAmount : entry.amount)) return 'Суммы должны соответствовать правилу: оплачено ≤ принято ≤ обязательство.';
+      || cents(paidAmount) > cents(entry.amount)) return 'Суммы приёмки и оплаты должны быть неотрицательными, с точностью до копеек и не больше обязательства.';
     if (old && (cents(acceptedAmount) < cents(accepted(old)) || cents(paidAmount) < cents(paid(old)))) return 'Нельзя уменьшить ранее записанную приёмку или оплату.';
     const accepts = entry.kind === 'expense' && acceptedAmount > (old ? accepted(old) : 0);
-    const pays = paidAmount > (old ? paid(old) : 0);
     const approves = !old?.approvedAt && text(entry.approvedAt);
     if (old && (old.approvedAt || accepted(old) > 0 || paid(old) > 0)
       && ['kind', 'amount', 'counterpartyId', 'stageId', 'budgetLineId', 'procurementItemId'].some((key) => entry[key] !== old[key])) return 'После утверждения нельзя менять сумму и связи расхода. Создайте отдельное обязательство.';
     if (approves && entry.kind !== 'expense') return 'Утверждение предусмотрено только для расходов.';
+    if (pays && entry.kind === 'expense' && !old?.approvedAt && !approves && !(old && (accepted(old) > 0 || paid(old) > 0))) return 'Сначала утвердите расход.';
     if (accepts && !old?.approvedAt && !approves && !(old && accepted(old) > 0)) return 'Сначала утвердите расход.';
     if (accepts && (!hasFinanceAcceptanceSource(state, entry) || !text(entry.acceptanceDocument) || !validDate(entry.acceptedAt))) return 'Для приёмки нужны принятая работа или поставка, фактическая дата и документ.';
     if (pays && (!text(entry.paymentDocument) || !validDate(entry.paidAt))) return 'Укажите фактическую дату и документ оплаты.';
+    for (const [field, changes] of [['acceptanceDocumentId', accepts], ['paymentDocumentId', pays]]) {
+      if (!changes && entry[field] !== old?.[field]) return 'Документ связывается с новой приёмкой или оплатой; прошлые основания сохраняются.';
+      if (changes && entry[field] !== undefined) {
+        const document = (state.documents ?? []).find(item => item.id === entry[field]);
+        if (!text(entry[field]) || !document || document.clientVisible !== false
+          || !document.fileKey?.startsWith(`${state.project?.id}/`)
+          || document.fileKey.split('/').some(part => part === '.' || part === '..')) return 'Документ финансового факта должен содержать приватный файл текущего проекта.';
+      }
+    }
     if (!old) entry.createdBy = identity.name;
     else if (old.createdBy) entry.createdBy = old.createdBy;
     if (old?.approvedAt) { entry.approvedAt = old.approvedAt; entry.approvedBy = old.approvedBy; }
@@ -106,6 +120,7 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
         amount: (cents(paidAmount) - cents(old ? paid(old) : 0)) / 100,
         date: entry.paidAt,
         document: entry.paymentDocument.trim(),
+        ...(entry.paymentDocumentId ? { documentId: entry.paymentDocumentId } : {}),
         recordedAt: now,
         recordedBy: identity.name,
       }];
@@ -114,6 +129,13 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
   }
   for (const old of oldEntries.values()) {
     if (!ids.has(old.id) && (old.approvedAt || accepted(old) > 0 || paid(old) > 0)) return 'Нельзя удалить утверждённый, принятый или оплаченный расход.';
+    const documentIds = new Set([old.acceptanceDocumentId, old.paymentDocumentId, ...(old.payments ?? []).map(payment => payment.documentId)].filter(Boolean));
+    for (const documentId of documentIds) {
+      const original = (previous?.documents ?? []).find(document => document.id === documentId);
+      if (!original?.fileKey) continue;
+      const current = (state.documents ?? []).find(document => document.id === documentId);
+      if (!current || ['fileKey', 'fileName', 'mimeType', 'sizeBytes', 'uploadedAt', 'clientVisible'].some(field => current[field] !== original[field])) return 'Оригинал документа записанной приёмки или оплаты нельзя удалить или подменить.';
+    }
   }
   return '';
 };

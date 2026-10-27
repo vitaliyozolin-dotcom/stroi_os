@@ -37,6 +37,7 @@ import { formatDate, money } from '../presentation/formatting';
 import { stageStatusLabel } from '../presentation/status-labels';
 import { projectWeekRange } from '../projectWeek';
 import { ScheduleTimeline, scheduleStageTitle, scheduleDisplayRow } from '../components/ScheduleTimeline';
+import { schedulePaymentMarkers } from '../components/schedule-work-model';
 import './schedule-page.css';
 import type { AppState, ProjectTask, StageStatus, UserRole } from '../entities/index';
 import { EmptyState, Field, Modal, ProgressBar, StatusBadge } from '../components/Ui';
@@ -52,14 +53,14 @@ const statusTone = (status: StageStatus): 'neutral' | 'positive' | 'warning' | '
 
 const taskDone = (task: ProjectTask) => ['done', 'canceled'].includes(task.status);
 
-type SchedulePageProps = { state: AppState; role: UserRole; actor: string; userId?: string; focusId?: string | null; onChange: (next: AppState) => void };
+export type SchedulePageProps = { state: AppState; role: UserRole; actor: string; userId?: string; focusId?: string | null; onChange: (next: AppState) => void; embedded?: boolean; onOpenFinance?: (entryId: string) => void; onOpenTask?: (taskId: string) => void };
 
 export function SchedulePage(props: SchedulePageProps) {
   if (!props.state.stages.length) return <div className="page-stack"><BaselinePanel state={props.state} role={props.role} actor={props.actor} onChange={props.onChange} /><EmptyState icon={CalendarDays} title="График пока не составлен" text="После добавления этапов здесь появятся исходные и действующие сроки." /></div>;
   return <ScheduleWithStages key={props.state.project.id} {...props} />;
 }
 
-function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: SchedulePageProps) {
+function ScheduleWithStages({ state, role, actor, userId, focusId, onChange, embedded = false, onOpenFinance, onOpenTask }: SchedulePageProps) {
   const planning = createSchedulePlanningUseCases(useModuleRepository(createConstructionRepository, state, onChange), { name: actor, role }, systemClock, runtimeIdGenerator);
   const [planExpected, setPlanExpected] = useState('');
   const [planStageId, setPlanStageId] = useState('');
@@ -85,10 +86,11 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
     ?? state.counterparties.find((item) => item.name.trim().toLocaleLowerCase('ru') === selected.responsible.trim().toLocaleLowerCase('ru'));
   const progress = progressTotals(state);
   const checkpoints = state.checkpoints.filter((item) => item.stageId === selected.id);
-  const stageTasks = state.tasks.filter((item) => item.stageId === selected.id);
+  const stageTasks = role === 'client' ? [] : state.tasks.filter((item) => item.stageId === selected.id && item.id !== `auto-stage-${selected.id}`);
   const openStageTasks = stageTasks.filter((item) => item.id !== `auto-stage-${selected.id}` && !taskDone(item));
   const unacceptedCheckpoints = checkpoints.filter((item) => item.status !== 'accepted');
-  const stageFinance = state.financeEntries.filter((item) => item.stageId === selected.id);
+  const stageFinance = role === 'management' ? state.financeEntries.filter((item) => item.stageId === selected.id) : [];
+  const plannedPayments = useMemo(() => schedulePaymentMarkers(state, role, todayKey), [state, role, todayKey]);
   const stageProcurement = state.procurement.filter((item) => item.stageId === selected.id);
   const stageDocuments = state.documents.filter((item) => item.stageId === selected.id);
   const stageFinancialTotals = stageFinanceTotals(state, selected.id);
@@ -135,22 +137,22 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
   };
 
   return (
-    <div className="page-stack schedule-workspace">
+    <div className={`page-stack schedule-workspace${embedded ? ' schedule-workspace--embedded' : ''}`}>
       {stageAction && <StageControlModal state={state} stageId={selected.id} action={stageAction} role={role} actor={actor} userId={userId} onChange={onChange} onClose={() => setStageAction(null)} />}
       {reviewing && <ScheduleReconciliation state={state} role={role} actor={actor} userId={userId} initialId={selected.id} onChange={onChange} onClose={() => setReviewing(false)} />}
-      <section className="schedule-heading">
+      {!embedded && <section className="schedule-heading">
         <div><span className="eyebrow">Производственный план</span><h1>Этапы и график</h1><p>{projectStarted && currentWeek.number > 0 ? `${currentWeek.number}-я неделя · ${formatDate(currentWeek.start)} — ${formatDate(currentWeek.end)}` : `Начало проекта · ${formatDate(state.project.startDate, true)}`}</p></div>
         <div className="schedule-heading__progress"><strong>{progress.physical}%</strong><span>выполнение ППР</span></div>
-      </section>
-      <section className="schedule-workspace-brief" aria-label="Основные сроки ППР">
+      </section>}
+      {!embedded && <section className="schedule-workspace-brief" aria-label="Основные сроки ППР">
         <div><span>Исходный ППР</span><strong>{forecast.baselineEnd ? formatDate(forecast.baselineEnd, true) : 'Не указан'}</strong></div>
         <div><span>{forecast.kind === 'actual' ? 'ППР выполнен' : forecast.kind === 'observed' ? 'Подтверждено к дате' : 'Прогноз по ППР'}</span><strong>{forecast.end ? formatDate(forecast.end, true) : 'Нужны сроки'}</strong><small>{forecast.kind === 'estimated' ? 'Предварительный' : forecast.kind === 'observed' ? 'Точная дата неизвестна' : forecast.kind === 'confirmed' ? 'По уточнённым остаткам' : ''}</small></div>
         <div><span>{['actual', 'observed'].includes(forecast.kind) ? 'Отклонение от ППР' : 'Прогноз отклонения'}</span><strong>{forecast.kind === 'observed' || forecast.baselineShift === null ? '—' : `${forecast.baselineShift > 0 ? '+' : ''}${forecast.baselineShift} дн.`}</strong></div>
         <div><span>Сдача по договору</span><strong>{state.project.targetDate ? formatDate(state.project.targetDate, true) : 'Не указана'}</strong></div>
-      </section>
+      </section>}
       {forecast.unmappedWork.length > 0 && <div className="schedule-scope" role="note"><AlertTriangle size={18} /><div><strong>Прогноз сдачи дома пока неполный</strong><p>В сроки ППР ещё не включены: {forecast.unmappedWork.join(', ').toLocaleLowerCase('ru')}.</p></div></div>}
       {!forecast.end && forecast.issues.length > 0 && <div className="schedule-scope" role="note"><AlertTriangle size={18} /><div><strong>Для прогноза нужны уточнения</strong><p>{forecast.issues[0].message}</p></div></div>}
-      <ScheduleTimeline state={state} today={todayKey} onSelect={openStage} />
+      <ScheduleTimeline state={state} today={todayKey} role={role} onSelect={openStage} onOpenFinance={onOpenFinance} onOpenTask={onOpenTask} />
       <details className="schedule-reference"><summary>Исходный план и настройки ППР</summary><div className="schedule-reference__body"><BaselinePanel state={state} role={role} actor={actor} onChange={onChange} />{role !== 'client' && <button type="button" className="button button--secondary" onClick={() => setReviewing(true)}>Сверить состав работ и зависимости</button>}<details><summary>Как рассчитан прогноз</summary><p>Прогноз учитывает внесённые этапы, их длительность и зависимости. Без свежего остатка используется полная длительность этапа из ППР; дата может сдвигаться с наступлением нового дня.</p>{forecast.notes.map(note => <p key={note}>{note}</p>)}{forecast.issues.map((issue, index) => <p key={index}>{issue.message}</p>)}</details></div></details>
       <details className="schedule-reference"><summary>Состояние объекта и история наблюдений</summary><div className="schedule-reference__body"><SiteProgress state={state} actor={actor} role={role} onChange={onChange} /></div></details>
       {detailOpen && !stageAction && !reviewing && !editingDates && !counterpartyId && <StageDrawer title={scheduleStageTitle(selected)} onClose={() => setDetailOpen(false)}>
@@ -168,6 +170,10 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
               <div><CalendarDays size={18} /><span><small>План 0 этапа</small><strong>{selected.baseline ? `${selected.baseline.start ? formatDate(selected.baseline.start) : '—'} — ${formatDate(selected.baseline.end)}` : 'Не зафиксирован'}</strong></span></div>
               <div><Clock3 size={18} /><span><small>Перенос окончания к Плану 0</small><strong>{planShiftLabel(baselineDays(selected.planEnd, selected.baseline?.end))}</strong></span></div>
               <div><CalendarDays size={18} /><span><small>Действующий план</small><strong>{formatDate(selected.planStart)} — {formatDate(selected.planEnd)}</strong></span></div>
+              <div><Clock3 size={18} /><span><small>Ручная оценка окончания</small><strong>{selected.forecastEnd ? formatDate(selected.forecastEnd) : 'Не указана'}</strong></span></div>
+              <div><Play size={18} /><span><small>Фактическое начало</small><strong>{selected.actualStart ? formatDate(selected.actualStart) : 'Не зафиксировано'}</strong></span></div>
+              <div><CheckCircle2 size={18} /><span><small>Фактическое выполнение</small><strong>{selected.completedOn || selected.actualEnd ? formatDate(selected.completedOn || selected.actualEnd!) : 'Дата неизвестна'}</strong></span></div>
+              <div><ShieldCheck size={18} /><span><small>Приёмка результата</small><strong>{selected.acceptedAt && Number.isFinite(Date.parse(selected.acceptedAt)) ? formatDate(planToday(new Date(selected.acceptedAt))) : 'Не зафиксирована'}</strong></span></div>
             </div></details>
             {selected.schedule && selected.schedule.dependencies.length > 0 && <div className="dependency-note"><Link2 size={18} /><span><small>Начинается после</small><strong>{selected.schedule.dependencies.map(link => { const previous = state.stages.find(stage => stage.id === link.stageId); return `${previous ? scheduleStageTitle(previous) : 'Неизвестный этап'}${link.lagDays ? ` + ${link.lagDays} дн.` : ''}`; }).join(' · ')}</strong></span></div>}
             {!selected.schedule && selected.dependency && <div className="dependency-note"><Link2 size={18} /><span><small>Зависимость</small><strong>{selected.dependency}</strong></span></div>}
@@ -185,10 +191,10 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
           </article>
 
           {(stageTasks.length > 0) && <details className="stage-disclosure"><summary>Задачи · {stageTasks.filter(taskDone).length}/{stageTasks.length}</summary><div className="stage-disclosure__body">
-            {stageTasks.length ? <div className="gate-list">{stageTasks.map((task) => <div key={task.id}><span className={`gate-list__icon gate-list__icon--${taskDone(task) ? 'accepted' : task.status === 'waiting' ? 'rework' : 'pending'}`}>{taskDone(task) ? <CheckCircle2 size={17} /> : <ListTodo size={17} />}</span><span><strong>{task.title}</strong><small>{task.assigneeName} · срок {formatDate(task.dueDate, true)} · {taskDone(task) ? 'выполнено' : task.status === 'in_progress' ? 'в работе' : task.status === 'review' ? 'на проверке' : task.status === 'waiting' ? 'есть препятствие' : 'запланировано'}</small></span></div>)}</div> : <div className="locked-gate"><ListTodo size={22} /><p>Задачи связываются с этапом в разделе «Задачи». При старте сохраняются существующие контрольные точки.</p></div>}
+            {stageTasks.length ? <div className="gate-list">{stageTasks.map((task) => <div key={task.id}><span className={`gate-list__icon gate-list__icon--${taskDone(task) ? 'accepted' : task.status === 'waiting' ? 'rework' : 'pending'}`}>{taskDone(task) ? <CheckCircle2 size={17} /> : <ListTodo size={17} />}</span><span>{onOpenTask ? <button type="button" className="entity-link" onClick={() => { setDetailOpen(false); onOpenTask(task.id); }}>{task.title}</button> : <strong>{task.title}</strong>}<small>{task.assigneeName} · срок {formatDate(task.dueDate, true)} · {task.status === 'canceled' ? 'отменено' : task.status === 'done' ? 'выполнено' : task.status === 'in_progress' ? 'в работе' : task.status === 'review' ? 'на проверке' : task.status === 'waiting' ? 'есть препятствие' : 'запланировано'}</small></span></div>)}</div> : <div className="locked-gate"><ListTodo size={22} /><p>Задачи связываются с этапом в разделе «Задачи». При старте сохраняются существующие контрольные точки.</p></div>}
           </div></details>}
 
-          {(stageFinance.length > 0 || stageFinancialTotals.plan > 0 || stageFinancialTotals.forecast > 0) && <details className="stage-disclosure"><summary>Расходы и бюджет</summary><div className="stage-disclosure__body">
+          {role === 'management' && (stageFinance.length > 0 || stageFinancialTotals.plan > 0 || stageFinancialTotals.forecast > 0) && <details className="stage-disclosure"><summary>Расходы и бюджет</summary><div className="stage-disclosure__body">
             <div className="stage-facts">
               <div><CircleDollarSign size={18} /><span><small>План затрат</small><strong>{money(stageFinancialTotals.plan)}</strong></span></div>
               <div><Clock3 size={18} /><span><small>Прогноз затрат</small><strong>{money(stageFinancialTotals.forecast)}</strong></span></div>
@@ -197,7 +203,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange }: S
             </div>
             {state.budgetLines.some(line => line.stageIds.includes(selected.id) && line.stageIds.length > 1) && <p className="muted">Общие статьи распределены между этапами поровну. Это приблизительная оценка бюджета этапа.</p>}
             {(stageFinancialTotals.billed > 0 || stageFinancialTotals.received > 0) && <div className="dependency-note"><CircleDollarSign size={18} /><span><small>Доход по этапу</small><strong>{money(stageFinancialTotals.billed)} начислено · {money(stageFinancialTotals.received)} получено</strong></span></div>}
-            {stageFinance.length ? <div className="gate-list">{stageFinance.slice(0, 5).map((item) => <div key={item.id}><span className={`gate-list__icon gate-list__icon--${item.status === 'paid' ? 'accepted' : 'pending'}`}><CircleDollarSign size={17} /></span><span><strong>{item.description}</strong><small>{item.kind === 'income' ? 'Доход' : 'Расход'} · {money(item.amount)} · оплачено {money(paidAmountFor(item))}</small></span></div>)}</div> : <div className="locked-gate"><CircleDollarSign size={22} /><p>Финансовые операции этапа появятся здесь после создания обязательств или платежей.</p></div>}
+            {stageFinance.length ? <div className="gate-list">{stageFinance.map((item) => <div key={item.id}><span className={`gate-list__icon gate-list__icon--${item.status === 'paid' ? 'accepted' : 'pending'}`}><CircleDollarSign size={17} /></span><span>{onOpenFinance ? <button type="button" className="entity-link" onClick={() => { setDetailOpen(false); onOpenFinance(item.id); }}>{item.description}</button> : <strong>{item.description}</strong>}<small>{item.kind === 'income' ? 'Поступление' : 'Расход'} · {money(item.amount)} · {item.kind === 'income' ? 'получено' : 'оплачено'} {money(paidAmountFor(item))}</small>{plannedPayments.filter(payment => payment.entryId === item.id).map(payment => <small key={payment.id}>{payment.source === 'treasury' ? 'Прогноз транша' : 'План остатка'}: {payment.date ? formatDate(payment.date, true) : 'дата не указана'} · {money(payment.amount)}{payment.overdue ? ' · просрочено' : ''}</small>)}</span></div>)}</div> : <div className="locked-gate"><CircleDollarSign size={22} /><p>Финансовые операции этапа появятся здесь после создания обязательств или платежей.</p></div>}
           </div></details>}
 
           {(stageProcurement.length + stageDocuments.length > 0) && <details className="stage-disclosure"><summary>Снабжение и документы · {stageProcurement.length + stageDocuments.length}</summary><div className="stage-disclosure__body">

@@ -23,6 +23,7 @@ await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/runtime`, { recursive: true });
 
 await Promise.all([
+  copyFile(`${projectRoot}src/domain/treasury.js`, `${projectRoot}dist/src/domain/treasury.js`),
   copyFile(`${projectRoot}src/application/tasks-runtime.js`, `${projectRoot}dist/src/application/tasks-runtime.js`),
   copyFile(`${projectRoot}src/application/module-repository-runtime.js`, `${projectRoot}dist/src/application/module-repository-runtime.js`),
   copyFile(`${projectRoot}src/application/project-records.js`, `${projectRoot}dist/src/application/project-records.js`),

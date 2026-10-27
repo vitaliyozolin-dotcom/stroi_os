@@ -314,7 +314,7 @@ test('project routing and confirmation are isolated by Telegram user, chat and d
   assert.match(bindings, /SET used_at = \?, claim_id = \?/);
   assert.match(bindings, /export const unlinkTelegramBinding/);
   assert.match(processor, /pending: \{ type: 'command', command, sourceMessageId:/);
-  assert.match(projectWrite, /await env\.DB\.batch\(\[stateStatement, \.\.\.outboxStatements\]\)/);
+  assert.match(projectWrite, /await env\.DB\.batch\(\[stateStatement, \.\.\.outboxStatements, auditStatement\]\)/);
   assert.match(projectWrite, /WHERE project_id = \? AND revision = \? AND updated_at = \? AND updated_by = \?/);
 });
 

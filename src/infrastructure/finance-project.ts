@@ -32,7 +32,7 @@ export const applyFinancePlanningResult = (state: AppState, result: FinancePlann
 
 export const financeFactsSnapshot = (state: AppState): FinanceFactsSnapshot => ({
   ...financePlanningSnapshot(state), projectCode: state.project.code,
-  procurement: state.procurement, checkpoints: state.checkpoints, stages: state.stages,
+  procurement: state.procurement, checkpoints: state.checkpoints, stages: state.stages, documents: state.documents,
 });
 
 /** Append a finance document without replacing the document registry or unrelated contexts. */
@@ -40,10 +40,16 @@ export const applyFinanceFactsResult = (state: AppState, result: FinanceFactsCom
   if (!result.ok) return result;
   if (!result.change) return { ok: true, change: null };
   if (result.change.expectedReferences !== financeAcceptanceSnapshot(state)) return { ok: false, error: 'Основания приёмки обновились. Повторите действие на свежих данных.' };
+  const reference = result.change.expectedDocument;
+  if (reference && reference.value !== JSON.stringify(state.documents.find(document => document.id === reference.id))) return { ok: false, error: 'Документ-основание обновился. Выберите его заново.' };
   const applied = applyFinancePlanningResult(state, result);
   if (!applied.ok || !applied.change) return applied;
   const document = result.change.appendDocument;
   if (!document) return applied;
+  if (result.change.attachmentOnly) {
+    if (state.documents.some(item => item.financeEntryId === document.financeEntryId && item.fileKey === document.fileKey)) return { ok: true, change: null };
+    if (state.documents.some(item => item.id === document.id)) return { ok: false, error: 'Документ с таким ID уже существует. Повторите прикрепление.' };
+  }
   return { ok: true, change: { ...applied.change, state: { ...applied.change.state, documents: [document, ...state.documents] } } };
 };
 

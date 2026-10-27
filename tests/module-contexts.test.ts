@@ -69,17 +69,23 @@ for (const specification of specifications) {
  });
 }
 
-test('accepted supply becomes a finance read dependency; ordering and delivery alone never permit payment', () => {
+test('accepted supply remains necessary for financial acceptance while approved advances remain independent', () => {
  let state = fixture(); const ctx = context();
  const supply = createProcurementUseCases(adapters.createSupplyRepository(() => state, next => { state = next; }), ctx.identity, ctx.clock, ctx.ids);
  const finance = createFinanceUseCases(createProjectFinanceRepository(() => state, next => { state = next; }), ctx);
  assert.equal(supply.createRequirement({ projectId: state.project.id, draft: { stageId: 'stage', item: 'Бетон', quantity: 1, unit: 'м³', neededBy: '', budget: 50, supplierId: 'vendor', owner: 'Прораб' } }).ok, true);
  const supplyId = state.procurement[0].id;
  state.financeEntries = [{ id: 'expense', kind: 'expense', status: 'committed', amount: 50, date: '2026-10-20', description: 'Бетон', counterparty: 'Поставщик', stageId: 'stage', procurementItemId: supplyId }];
- assert.equal(finance.approveExpense('expense').ok, true);
  const input = { entryId: 'expense', amount: 50, date: '2026-10-20', document: 'УПД', source: `procurement:${supplyId}` };
+ assert.equal(finance.recordPayment(input).ok, false, 'ordering alone cannot approve an advance');
+ assert.equal(finance.approveExpense('expense').ok, true);
+ const approved = structuredClone(state);
+ assert.equal(finance.recordPayment({ ...input, amount: 20, document: 'ПП на аванс' }).ok, true);
+ assert.equal(validateFinanceChanges(approved, state, ctx.identity, now), '');
+ assert.equal(state.financeEntries[0].acceptedAmount, 0);
+ const advanceEvent = structuredClone(state.financeEntries[0].payments?.[0]);
  for (const status of ['rfq', 'ordered', 'in_transit', 'delivered', 'accepted']) {
-  assert.equal(finance.recordPayment(input).ok, false);
+  assert.equal(finance.recordPayment(input).ok, false, 'amount above remaining obligation is rejected');
   assert.equal(finance.acceptExpense(input).ok, false);
   assert.equal(supply.change({ action: 'advance', itemId: supplyId, expected: procurementSnapshot(state, supplyId) }).ok, true);
   assert.equal(state.procurement[0].status, status);
@@ -88,9 +94,10 @@ test('accepted supply becomes a finance read dependency; ordering and delivery a
  assert.equal(finance.acceptExpense(input).ok, true);
  assert.equal(validateFinanceChanges(before, structuredClone(state), ctx.identity, now), '');
  const accepted = structuredClone(state);
- assert.equal(finance.recordPayment(input).ok, true);
+ assert.equal(finance.recordPayment({ ...input, amount: 30 }).ok, true);
  assert.equal(validateFinanceChanges(accepted, state, ctx.identity, now), '');
- assert.equal(state.financeEntries[0].payments?.length, 1);
+ assert.equal(state.financeEntries[0].payments?.length, 2);
+ assert.deepEqual(state.financeEntries[0].payments?.[0], advanceEvent);
 });
 const draft = (): TaskDraft => ({ title: 'Проверить основание', description: 'Сверить по чертежу', priority: 'normal', assigneeId: 'worker', reviewerId: 'owner', dueDate: '2026-10-25', plannedStart: '', baselineEnd: '', baselineNote: '', reason: '', stageId: 'stage', counterpartyId: '', procurementItemId: '', checkpointId: 'point' });
 test('task application owns creation, comments, review, fixed baseline and stale-form rejection', () => {

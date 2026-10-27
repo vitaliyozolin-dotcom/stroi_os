@@ -81,7 +81,7 @@ export const reconcileRemoteSnapshot = (model: SyncModel, remote: SyncSnapshot):
 
 // Acknowledging our own write must accept server stamps even if another field
 // in the same task/project was edited while the request was in flight.
-const acknowledgePlanFields = (sent: AppState, local: AppState, server: AppState) => {
+const acknowledgeServerFields = (sent: AppState, local: AppState, server: AppState) => {
   const base = structuredClone(sent), current = structuredClone(local);
   const accept = (sentItem: object, localItem: object, serverItem: object, dateFields: string[]) => {
     const before = sentItem as Record<string, unknown>, item = localItem as Record<string, unknown>, saved = serverItem as Record<string, unknown>;
@@ -116,6 +116,52 @@ const acknowledgePlanFields = (sent: AppState, local: AppState, server: AppState
       if (before && item) accept(before, item, saved, fields);
     }
   }
+  // A later local partial payment keeps its aggregate amount, date and evidence.
+  // Its first receipt and audit metadata come only from the acknowledged server
+  // write, so the next save appends precisely the remaining payment delta.
+  for (const savedEntry of server.financeEntries) {
+    const sentEntry = base.financeEntries.find(entry => entry.id === savedEntry.id);
+    const localEntry = current.financeEntries.find(entry => entry.id === savedEntry.id);
+    if (!sentEntry || !localEntry) continue;
+    const before = sentEntry as unknown as Record<string, unknown>;
+    const item = localEntry as unknown as Record<string, unknown>;
+    const saved = savedEntry as unknown as Record<string, unknown>;
+    for (const field of ['payments', 'legacyPayment', 'dueDateHistory', 'costGroupHistory']) {
+      if (saved[field] !== undefined) {
+        before[field] = structuredClone(saved[field]);
+        item[field] = structuredClone(saved[field]);
+      } else { delete before[field]; delete item[field]; }
+    }
+    // These fields also appear on an optimistic, not-yet-sent action. A server
+    // response to an earlier write must not erase that newer local action.
+    for (const field of ['createdBy', 'approvedAt', 'approvedBy', 'paidBy', 'acceptedBy']) {
+      const locallyChanged = before[field] !== item[field];
+      if (saved[field] !== undefined) {
+        before[field] = structuredClone(saved[field]);
+        if (!locallyChanged) item[field] = structuredClone(saved[field]);
+      } else {
+        delete before[field];
+        if (!locallyChanged) delete item[field];
+      }
+    }
+    // The trusted boundary can make the legacy acceptance fallback explicit.
+    // Adopt that value only if no newer local acceptance changed it.
+    if (before.acceptedAmount === item.acceptedAmount && saved.acceptedAmount !== undefined) {
+      before.acceptedAmount = saved.acceptedAmount;
+      item.acceptedAmount = saved.acceptedAmount;
+    }
+  }
+  // Treasury history is stamped only by the server. A second edit made while
+  // this write was in flight keeps its fields, but must inherit that receipt.
+  if (base.treasury && current.treasury && server.treasury) {
+    const changed = JSON.stringify(base.treasury) !== JSON.stringify(current.treasury);
+    if (server.treasury.history !== undefined) {
+      base.treasury.history = structuredClone(server.treasury.history);
+      current.treasury.history = structuredClone(server.treasury.history);
+    }
+    delete base.treasury.changeReason;
+    if (!changed) delete current.treasury.changeReason;
+  }
   return { base, current };
 };
 
@@ -124,7 +170,7 @@ export const reconcileSavedSnapshot = (model: SyncModel, sent: AppState, remote:
   let state = model.state;
   if (model.state === sent) state = serverState;
   else if (remote.state) {
-    const accepted = acknowledgePlanFields(sent, model.state, serverState);
+    const accepted = acknowledgeServerFields(sent, model.state, serverState);
     const merged = mergeProjectStates(accepted.base, accepted.current, serverState);
     state = synchronizeDerivedProgress(merged.conflicts.length ? accepted.current : merged.state);
   }
