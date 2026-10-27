@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ensureSchema, initializeBattleRuntime } from '../sites/runtime/initialization.js';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { ensureSchema, initializeBattleRuntime, BATTLE_RESET_KEY } from '../sites/runtime/initialization.js';
+
+test('installed deployment gate reads the actual runtime marker after module extraction', () => {
+  const worker = readFileSync(new URL('../sites/worker.js', import.meta.url), 'utf8');
+  const marker = execFileSync('sed', ['-n', "s/^const BATTLE_RESET_KEY = '\\([^']*\\)';$/\\1/p"], { input: worker, encoding: 'utf8' }).trim();
+  assert.equal(marker, BATTLE_RESET_KEY);
+  assert.match(marker, /^[A-Za-z0-9_-]{1,80}$/);
+  assert.match(worker, /BATTLE_RESET_KEY !== RUNTIME_BATTLE_RESET_KEY/);
+});
 
 test('initialization retries schema failure, never seeds business records and requires manual readiness', async () => {
   let fail = true;

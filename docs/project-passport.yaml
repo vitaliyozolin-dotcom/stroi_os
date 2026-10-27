@@ -16,9 +16,9 @@ project:
     unknowns: ["Подтверждённые остатки счетов", "Доли средств на общем счёте", "Сверка исторических платежей", "Полный денежный план оставшихся работ", "Оценка признанной себестоимости и запасов"]
     roadmap:
       - id: finance-workspace-core
-        status: in_progress
+        status: done
         result: "Аддитивный treasury, четыре вкладки, связанные представления ППР и защищённые документы"
-        evidence: "docs/finance-workspace.md; автоматические и визуальные проверки перед выпуском"
+        evidence: "PR 81; CI 40605040114 и 40605287809 — 573 проверки; Chromium desktop/mobile. Статус развёртывания хранится в проверяемой квитанции выпуска."
       - id: finance-workspace-pilot-reconciliation
         status: awaiting_source
         depends_on: [finance-workspace-core]
@@ -31,7 +31,7 @@ project:
         status: planned
         depends_on: [finance-workspace-pilot-reconciliation]
         result: "Полный CPM с резервами, шаблоны запуска объекта, автоматическое распознавание и сверка документов"
-    current_step: "Проверить и выпустить безопасную основу на существующем стеке"
+    current_step: "Сверка остатков и полного денежного плана пилота после штатного выпуска; реальные исходные данные не подставлены"
     next_step: "Сверить начальные остатки и будущий денежный план пилотного объекта по первичным источникам"
     deadline: null
     ai_contract:

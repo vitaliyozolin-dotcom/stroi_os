@@ -1,7 +1,7 @@
 import { clean } from '../lib/validation.js';
 
 const BATTLE_SCHEMA_VERSION = 17;
-const BATTLE_RESET_KEY = 'battle_v17_reset';
+export const BATTLE_RESET_KEY = 'battle_v17_reset';
 const BATTLE_SCHEMA_KEY = 'battle_schema_version';
 let schemaPromise;
 let battleReadyPromise;
