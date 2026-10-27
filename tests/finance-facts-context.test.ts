@@ -17,7 +17,7 @@ const approved = () => { const result = approveProjectExpense(fixture(), 'expens
 
 test('facts run on finance and acceptance references without a project snapshot', () => {
  const state = approved(), snapshot = financeFactsSnapshot(state), before = structuredClone(snapshot);
- assert.equal('documents' in snapshot, false); assert.equal('tasks' in snapshot, false);
+ assert.equal(snapshot.documents, state.documents); assert.equal('tasks' in snapshot, false);
  const result = acceptFinanceExpense(snapshot, fact, context());
  assert.ok(result.ok && result.change); if (!result.ok || !result.change) return;
  assert.deepEqual(snapshot, before); assert.equal('state' in result.change, false);
@@ -54,7 +54,8 @@ test('stale finance, changed project, changed acceptance reject without mutation
 test('approval no-op, payment restrictions and incoming receipts remain in narrow core', () => {
  const state = approved(), snapshot = financeFactsSnapshot(state);
  assert.deepEqual(approveFinanceExpense(snapshot, 'expense', context()), { ok: true, change: null });
- assert.equal(recordFinancePayment(snapshot, fact, context()).ok, false);
+ assert.equal(recordFinancePayment(snapshot, fact, context()).ok, true);
+ assert.equal(recordFinancePayment(snapshot, { ...fact, amount: 101 }, context()).ok, false);
  assert.equal(acceptFinanceExpense(snapshot, fact, { ...context(), identity: { name: 'Клиент', role: 'client' } }).ok, false);
  snapshot.financeEntries = [{ ...snapshot.financeEntries[0], kind: 'income' }];
  const receipt = recordFinanceReceipt(snapshot, fact, context());

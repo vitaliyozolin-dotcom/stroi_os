@@ -16,6 +16,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist/client ./dist/client
 COPY --from=build /app/server ./server
 COPY --from=build /app/src/domain/finance-totals.js ./src/domain/finance-totals.js
+COPY --from=build /app/src/domain/treasury.js ./src/domain/treasury.js
 COPY --from=build /app/src/domain/finance ./src/domain/finance
 COPY --from=build /app/src/domain/construction ./src/domain/construction
 COPY --from=build /app/src/infrastructure/finance-commitment.js ./src/infrastructure/finance-commitment.js

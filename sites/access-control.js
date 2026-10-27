@@ -63,10 +63,46 @@ const publicUser = (user) => ({
   status: user.status === 'disabled' ? 'disabled' : user.status === 'active' ? 'active' : 'invited',
 });
 
+/** Financial evidence uses the same boundary for metadata, aliases and downloads. */
+export const documentVisibilityForRole = (state, identity) => {
+  if (identity.role === 'management') return () => true;
+  const entries = new Map((state.financeEntries ?? []).map(entry => [entry.id, entry]));
+  const kindsByDocument = new Map();
+  const remember = (id, kind) => {
+    if (!id) return;
+    const kinds = kindsByDocument.get(id) ?? new Set();
+    kinds.add(kind); kindsByDocument.set(id, kinds);
+  };
+  for (const entry of entries.values()) {
+    for (const id of [entry.acceptanceDocumentId, entry.paymentDocumentId, entry.historicalPayment?.sourceDocumentId,
+      ...(entry.payments ?? []).map(payment => payment.documentId)]) remember(id, entry.kind);
+  }
+  for (const document of state.documents ?? []) {
+    if (document.financeEntryId) remember(document.id, entries.get(document.financeEntryId)?.kind ?? 'unknown');
+  }
+  const restrictedIds = new Set(), restrictedKeys = new Set();
+  for (const document of state.documents ?? []) {
+    const kinds = kindsByDocument.get(document.id);
+    // Clients keep explicitly published income evidence. Cost, account and
+    // payment evidence stays private, including another record for the same file.
+    if ((document.financeEntryId || kinds?.size) && (identity.role !== 'client'
+      || document.clientVisible !== true || !kinds?.size || [...kinds].some(kind => kind !== 'income'))) {
+      if (document.id) restrictedIds.add(document.id);
+      if (document.fileKey) restrictedKeys.add(document.fileKey);
+    }
+  }
+  return document => !restrictedIds.has(document.id)
+    && (!document.fileKey || !restrictedKeys.has(document.fileKey))
+    && (identity.role !== 'client' || document.clientVisible === true);
+};
+
 export const stateForRole = (state, identity) => {
   const role = identity.role;
   if (role === 'management') return state;
   const safe = JSON.parse(JSON.stringify(state));
+  // Treasury contains private balances, account and contract evidence.
+  delete safe.treasury;
+  safe.documents = (safe.documents ?? []).filter(documentVisibilityForRole(state, identity));
 
   if (role === 'foreman') {
     safe.project.contractValue = 0;
@@ -91,6 +127,9 @@ export const stateForRole = (state, identity) => {
     }));
     safe.tasks = (safe.tasks ?? []).filter((task) => clean(task.assigneeId, 100) === identity.id);
     safe.settings.users = (safe.settings?.users ?? []).filter((user) => user.role !== 'client').map(publicUser);
+    // Historical activity has no audience marker and may contain payment sums.
+    // Authoritative work status remains available through stages and own tasks.
+    safe.activity = [];
     return safe;
   }
 
@@ -119,6 +158,8 @@ export const stateForRole = (state, identity) => {
 
 export const mergeStateForRole = (previous, incoming, identity, { serverManagedRoster = false } = {}) => {
   const role = identity.role;
+  // Additive pilot data survives saves by an older client that has never seen it.
+  if (previous?.treasury && !Object.hasOwn(incoming, 'treasury')) incoming = { ...incoming, treasury: previous.treasury };
   if (!previous || (role === 'management' && identity.isOwner && !serverManagedRoster)) return incoming;
   if (role === 'management') {
     return {
@@ -132,6 +173,9 @@ export const mergeStateForRole = (previous, incoming, identity, { serverManagedR
     };
   }
   if (role === 'foreman') {
+    const visibleDocument = documentVisibilityForRole({ ...previous, documents: [...(previous.documents ?? []), ...(incoming.documents ?? [])] }, identity);
+    const hiddenDocuments = (previous.documents ?? []).filter(document => !visibleDocument(document));
+    const previousActivityIds = new Set((previous.activity ?? []).map(event => event.id));
     const submittedTasks = new Map((incoming.tasks ?? []).map((task) => [clean(task.id, 100), task]));
     const tasks = (previous.tasks ?? []).map((task) => {
       if (clean(task.assigneeId, 100) !== identity.id) return task;
@@ -158,9 +202,11 @@ export const mergeStateForRole = (previous, incoming, identity, { serverManagedR
       tasks,
       fieldReports: incoming.fieldReports,
       checkpoints: incoming.checkpoints,
-      documents: incoming.documents,
+      // A restricted client never received the private records and cannot drop,
+      // overwrite or reveal them by saving the visible documents collection.
+      documents: [...(incoming.documents ?? []).filter(visibleDocument), ...hiddenDocuments],
       decisions: incoming.decisions,
-      activity: incoming.activity,
+      activity: [...(incoming.activity ?? []).filter(event => !previousActivityIds.has(event.id)), ...(previous.activity ?? [])].slice(0, 300),
     };
   }
   return {

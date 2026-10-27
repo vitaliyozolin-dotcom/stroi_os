@@ -58,10 +58,10 @@ test('partial acceptance and payments obey actual remaining amount; legacy total
   const paid = structuredClone(accepted);
   Object.assign(paid.financeEntries[0], { paidAmount: 25000, paidAt: '2026-09-08', paymentDocument: 'ПП 1' });
   assert.equal(validateFinanceChanges(accepted, paid, identity, now), '');
-  assert.equal(financeActionError(paid, paid.financeEntries[0], 'pay', 15000, '2026-09-08', 'ПП 2', ''), '');
-  assert.ok(financeActionError(paid, paid.financeEntries[0], 'pay', 15001, '2026-09-08', 'ПП 2', ''));
+  assert.equal(financeActionError(paid, paid.financeEntries[0], 'pay', 75000, '2026-09-08', 'ПП 2', ''), '');
+  assert.ok(financeActionError(paid, paid.financeEntries[0], 'pay', 75001, '2026-09-08', 'ПП 2', ''));
   const overpaid = structuredClone(paid);
-  overpaid.financeEntries[0].paidAmount = 40001;
+  overpaid.financeEntries[0].paidAmount = 100001;
   assert.ok(validateFinanceChanges(paid, overpaid, identity, now));
   const legacy = state();
   legacy.financeEntries[0].status = 'paid';
@@ -93,7 +93,7 @@ test('foreman and client cannot alter financial facts through role merging', () 
   }
 });
 
-test('HTTP write boundary rejects payment without acceptance before any database mutation', async () => {
+test('HTTP write boundary rejects an unapproved advance before any database mutation', async () => {
   const previous = state();
   previous.project.id = 'project-1';
   const next = structuredClone(previous);

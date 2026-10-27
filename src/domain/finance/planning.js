@@ -2,7 +2,7 @@ import { financeMoney, text, validDate } from './policy.js';
 
 const groups = ['construction', 'overhead', 'reserve', 'unallocated'];
 const deny = () => ({ ok: false, error: 'Финансовое планирование доступно только роли «Управление».' });
-const amountValid = value => Number.isFinite(value) && value >= 0 && Math.abs(value - financeMoney(value)) <= 0.000001;
+const amountValid = value => Number.isFinite(value) && Number.isSafeInteger(Math.round(value * 100)) && value >= 0 && Math.abs(value - financeMoney(value)) <= 0.000001;
 export const budgetLineSnapshot = (state, lineId) => {
   const line = state.budgetLines.find(item => item.id === lineId);
   return JSON.stringify([line?.id, line?.plan, line?.forecast, state.budgetMeta.version, state.budgetMeta.source]);

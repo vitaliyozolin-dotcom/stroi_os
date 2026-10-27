@@ -71,6 +71,7 @@ export const mergeProjectStates = (base: AppState, local: AppState, remote: AppS
     schemaVersion: Math.max(base.schemaVersion ?? 1, local.schemaVersion ?? 1, remote.schemaVersion ?? 1),
     project: mergeObject('project', base.project, local.project, remote.project, conflicts),
     budgetMeta: mergeObject('budgetMeta', base.budgetMeta, local.budgetMeta, remote.budgetMeta, conflicts),
+    treasury: mergeObject('treasury', base.treasury, local.treasury, remote.treasury, conflicts),
     settings: mergeObject('settings', base.settings, local.settings, remote.settings, conflicts),
     stages: mergeCollection('stages', base.stages, local.stages, remote.stages, conflicts, equalStage),
     activity: [...local.activity, ...remote.activity]

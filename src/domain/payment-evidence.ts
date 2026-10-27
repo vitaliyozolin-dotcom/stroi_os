@@ -3,7 +3,9 @@ import type { FinanceEntry, ProjectDocument } from '../entities/index';
 /** Read-only evidence labels. A filename or payment note is not a verified payment. */
 export function paymentEvidence(entry: FinanceEntry, documents: ProjectDocument[]) {
   const source = documents.find(doc => doc.id === entry.historicalPayment?.sourceDocumentId);
-  const attached = documents.filter(doc => Boolean(doc.fileKey) && (doc.id === source?.id || doc.financeEntryId === entry.id));
+  const references = new Set([entry.historicalPayment?.sourceDocumentId, entry.acceptanceDocumentId, entry.paymentDocumentId,
+    ...(entry.payments ?? []).map(payment => payment.documentId)].filter(Boolean));
+  const attached = documents.filter(doc => Boolean(doc.fileKey) && (references.has(doc.id) || doc.financeEntryId === entry.id));
   const spreadsheet = /\.(xlsx?|csv|ods)$/i.test(source?.fileName || entry.document || '');
   const sourceLabel = entry.historicalPayment ? spreadsheet ? 'По таблице' : 'Со слов владельца' : 'Отметка в системе';
   const typed = attached.filter(doc => !/\.(xlsx?|csv|ods)$/i.test(doc.fileName || '') && ['invoice', 'act', 'upd', 'waybill'].includes(doc.category || ''));

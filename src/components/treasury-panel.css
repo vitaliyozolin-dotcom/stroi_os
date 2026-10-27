@@ -1,0 +1,102 @@
+.treasury-panel { display:grid; gap:22px; }
+.treasury-toolbar { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:18px; }
+.treasury-toolbar h2, .treasury-section-heading h3 { margin:0; font-size:21px; letter-spacing:-.03em; font-weight:500; }
+.treasury-toolbar p { margin:7px 0 0; font-size:12px; line-height:1.6; color:#626f56; }
+.treasury-toolbar__actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.treasury-toolbar__actions .button { font-size:12px; min-height:39px; }
+.treasury-toolbar select { max-width:220px; min-height:39px; border:1px solid #d8ddcf; border-radius:5px; padding:8px 28px 8px 11px; background:#f8f8f2; color:#526147; font:inherit; font-size:12px; }
+.treasury-empty { padding:35px; border:1px solid #dce0d1; border-radius:9px; background:linear-gradient(140deg,#f5f6ee,#eef0e5); display:grid; gap:14px; justify-items:start; }
+.treasury-empty > svg { color:#626f56; }
+.treasury-empty h3 { margin:0; font-size:25px; letter-spacing:-.035em; font-weight:500; }
+.treasury-empty p { max-width:600px; font-size:14px; line-height:1.75; color:#626f56; margin:0; }
+.treasury-facts { display:flex; flex-wrap:wrap; gap:10px 28px; padding:17px 0; border-block:1px solid #dce0d1; }
+.treasury-facts > div { display:grid; gap:7px; flex:1 1 145px; }
+.treasury-facts span { color:#626f56; font-size:11px; }
+.treasury-facts strong { font-size:22px; font-weight:500; letter-spacing:-.035em; font-variant-numeric:tabular-nums; }
+.treasury-facts small { color:#626f56; font-size:10px; line-height:1.5; }
+.treasury-negative { color:#a4533d !important; }
+.treasury-note { display:flex; gap:11px; padding:15px 17px; background:#f0eddf; border:1px solid #e4ddc6; color:#786643; border-radius:6px; font-size:12px; line-height:1.6; }
+.treasury-note > svg { flex:0 0 auto; margin-top:2px; }
+.treasury-note p { margin:0; }
+.treasury-note details { margin-top:7px; }
+.treasury-note summary { cursor:pointer; }
+.treasury-note ul { margin:9px 0 0; padding-left:19px; }
+.treasury-chart { position:relative; padding:23px 23px 18px; border:1px solid #dce0d2; border-radius:8px; background:#fcfcf7; overflow:hidden; }
+.treasury-chart__title { display:flex; justify-content:space-between; gap:15px; flex-wrap:wrap; margin-bottom:14px; font-size:13px; font-weight:500; }
+.treasury-chart__title span { font-size:11px; color:#626f56; font-weight:400; }
+.treasury-chart svg { display:block; width:100%; height:auto; max-height:260px; overflow:visible; }
+.treasury-chart text { font-family:inherit; font-size:11px; fill:#626f56; }
+.treasury-chart__labels { display:flex; justify-content:space-between; margin-top:11px; font-size:10px; color:#626f56; }
+.treasury-chart__legend { display:flex; flex-wrap:wrap; gap:16px; padding-top:12px; font-size:10px; color:#626f56; }
+.treasury-chart__legend i { display:inline-block; vertical-align:middle; width:17px; height:2px; margin-right:5px; background:#697f4c; }
+.treasury-chart__legend i[data-line="reserve"] { background:#c1ac71; }
+.treasury-chart__legend i[data-line="zero"] { background:#b0b5a5; }
+.treasury-section { border-top:1px solid #dce0d2; padding-top:21px; }
+.treasury-section-heading { display:flex; gap:16px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-bottom:14px; }
+.treasury-section-heading h3 { font-size:17px; }
+.treasury-section-heading > span, .treasury-caption { color:#626f56; font-size:11px; line-height:1.65; }
+.treasury-event { display:grid; grid-template-columns:78px minmax(0,1fr) minmax(100px,auto) 30px; gap:16px; width:100%; align-items:center; border:0; border-bottom:1px solid #e0e3d7; padding:15px 0; border-radius:0; background:transparent; font:inherit; text-align:left; color:#35412c; cursor:pointer; }
+.treasury-event:hover { background:#f0f2e8; }
+.treasury-event time { color:#626f56; font-size:12px; }
+.treasury-event__name { display:grid; gap:5px; min-width:0; }
+.treasury-event__name strong { font-size:13px; font-weight:500; line-height:1.5; overflow-wrap:anywhere; }
+.treasury-event__name small { font-size:10px; color:#626f56; line-height:1.5; }
+.treasury-event__amount { display:grid; gap:6px; text-align:right; font-size:13px; font-weight:500; font-variant-numeric:tabular-nums; }
+.treasury-event__amount small { font-size:10px; color:#626f56; font-weight:400; }
+.treasury-event__amount[data-kind="income"] { color:#557746; }
+.treasury-event__edit { color:#626f56; }
+.treasury-event-empty { padding:25px 0; color:#626f56; font-size:13px; }
+.treasury-date-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 0 7px; font-size:12px; color:#626f56; }
+.treasury-date-heading strong { font-weight:500; }
+.treasury-date-heading span { font-size:11px; }
+.treasury-settings-list { display:grid; gap:0; border-top:1px solid #e0e3d7; }
+.treasury-settings-row { display:flex; justify-content:space-between; align-items:center; gap:18px; padding:16px 0; border-bottom:1px solid #e0e3d7; }
+.treasury-settings-row > div { display:grid; gap:5px; }
+.treasury-settings-row strong { font-size:13px; font-weight:500; }
+.treasury-settings-row small { font-size:11px; color:#626f56; line-height:1.6; }
+.treasury-settings-row .text-button { font-size:12px; white-space:nowrap; }
+.treasury-form-note { margin:0; font-size:12px; line-height:1.7; color:#626f56; }
+.treasury-checkbox { display:flex; align-items:flex-start; gap:10px; font-size:13px; color:#58664a; line-height:1.55; }
+.treasury-checkbox input { flex:0 0 auto; margin-top:4px; width:16px; height:16px; }
+.treasury-tranche { padding:18px; background:#f0f2e8; border:1px solid #dce2d0; border-radius:7px; display:grid; gap:14px; }
+.treasury-tranche__heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.treasury-tranche__heading strong { font-size:13px; font-weight:500; }
+.treasury-tranche__heading button { color:#96765f; }
+.treasury-tranche .form-grid { gap:13px; }
+.treasury-form-inline { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+.treasury-form-inline > span { font-size:12px; color:#626f56; }
+.treasury-payment-fact { border-top:1px solid #dce2d0; padding:16px 0; display:grid; gap:13px; }
+.treasury-payment-fact > strong { font-size:13px; font-weight:500; }
+.treasury-payment-fact .form-grid { gap:12px; }
+.treasury-form-footer { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding-top:8px; }
+.treasury-form-footer .button { min-height:43px; }
+.treasury-validation { display:flex; align-items:flex-start; gap:8px; font-size:12px; line-height:1.6; color:#9d4e37; }
+.treasury-day-table { overflow:auto; }
+.treasury-day-table table { width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; }
+.treasury-day-table th { text-align:right; font-size:10px; font-weight:500; color:#626f56; padding:12px 10px; border-bottom:1px solid #dce0d1; white-space:nowrap; }
+.treasury-day-table td { text-align:right; padding:11px 10px; border-bottom:1px solid #e7e9de; white-space:nowrap; }
+.treasury-day-table td:first-child,.treasury-day-table th:first-child { text-align:left; }
+.treasury-day-table tr[data-deficit="true"] { background:#f6eee5; }
+.treasury-audit { margin:0; padding:0 0 0 16px; color:#626f56; font-size:11px; line-height:1.7; }
+@media(max-width:680px) {
+ .treasury-panel { gap:18px; }
+ .treasury-toolbar h2 { font-size:20px; }
+ .treasury-toolbar__actions { width:100%; }
+ .treasury-toolbar__actions select { min-width:0; flex:1; max-width:none; }
+ .treasury-empty { padding:25px 20px; }
+ .treasury-empty h3 { font-size:23px; }
+ .treasury-empty p { font-size:13px; }
+ .treasury-facts { gap:17px; }
+ .treasury-facts > div { flex-basis:calc(50% - 17px); }
+ .treasury-facts strong { font-size:21px; }
+ .treasury-event { grid-template-columns:62px minmax(0,1fr) auto; gap:11px; }
+ .treasury-event__name strong { font-size:12px; }
+ .treasury-event__amount { font-size:12px; }
+ .treasury-event__edit { display:none; }
+ .treasury-chart { padding:17px 14px; }
+ .treasury-chart svg { height:180px; min-height:180px; }
+ .treasury-chart text { display:none; }
+ .treasury-settings-row { align-items:flex-start; }
+ .treasury-tranche { padding:14px; }
+ .treasury-form-footer { position:sticky; bottom:-20px; margin:0 -20px -20px; padding:15px 20px; background:#f8f8f2; border-top:1px solid #e0e4d5; }
+}
