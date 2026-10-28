@@ -40,7 +40,10 @@ export const linkedStageTasks = (tasks: ProjectTask[], stageId: string) => tasks
 export const scheduleStageTitle = (stage: Stage) => (stage.shortName || stage.name).replace(/^\s*\d+(?:\.\d+)*(?:[.)]\s*|\s+)/u, '').trim() || stage.name;
 export interface SchedulePaymentMarker {
   id: string; entryId: string; stageId: string; kind: 'income' | 'expense'; amount: number; date: string | null; title: string;
-  contractualDueDate?: string | null; overdue?: boolean; source: 'legacy' | 'treasury';
+  contractualDueDate?: string | null; overdue?: boolean; contractOverdue?: boolean; source: 'legacy' | 'treasury';
+  /** The cash forecast may roll a missed scheduled date forward; it does not move the PPR marker. */
+  forecastDate?: string | null; dateLabel?: string; dateReason?: string | null; forecastDelayDays?: number | null;
+  excludedFromCash?: boolean;
 }
 /** Read-only projection: document dates and paid amounts never become future payments. */
 export function schedulePaymentMarkers(source: FinanceEntry[] | Pick<AppState, 'project' | 'financeEntries' | 'treasury' | 'stages' | 'tasks'>, role: UserRole, today?: string): SchedulePaymentMarker[] {
@@ -51,10 +54,16 @@ export function schedulePaymentMarkers(source: FinanceEntry[] | Pick<AppState, '
     if (!validPlanDate(today)) return [];
     const byId = new Map(entries.map(entry => [entry.id, entry]));
     return treasuryProjection(source, { today, horizonDays: 1, scenario: 'base' }).events.flatMap(event => {
-      const stageId = byId.get(event.entryId)?.stageId;
-      if (!stageId || event.excluded || event.amountCents <= 0) return [];
-      return [{ id: event.id, entryId: event.entryId, stageId, kind: event.kind, amount: event.amountCents / 100, date: event.date, title: event.description,
-        contractualDueDate: event.contractualDueDate, overdue: event.overdue, source: 'treasury' as const }];
+      // A payment can be accounted against one budget stage but triggered by another stage/task.
+      // Its timeline marker follows the triggering work, including when that work has no usable date.
+      const resolution = event.dateResolution;
+      const stageId = resolution?.stageId ?? resolution?.linkedStageId ?? byId.get(event.entryId)?.stageId;
+      if (!stageId || event.amountCents <= 0) return [];
+      return [{ id: event.id, entryId: event.entryId, stageId, kind: event.kind, amount: event.amountCents / 100, date: event.scheduledDate, title: event.description,
+        contractualDueDate: event.contractualDueDate, overdue: event.overdue || Boolean(event.scheduledDate && event.scheduledDate <= today),
+        contractOverdue: event.contractOverdue, source: 'treasury' as const,
+        forecastDate: event.date, dateLabel: resolution?.label, dateReason: resolution?.reason ?? null,
+        forecastDelayDays: event.forecastDelayDays, excludedFromCash: Boolean(event.excluded) }];
     }).sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999') || a.id.localeCompare(b.id));
   }
   return entries.flatMap(entry => {

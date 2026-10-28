@@ -10,6 +10,8 @@ import { BaselinePanel } from './BaselinePanel';
 import { StageRadar } from './StageRadar';
 import { ScheduleReconciliation } from './ScheduleReconciliation';
 import { Field, SectionHeader } from './Ui';
+import { SchedulePaymentImpact } from './SchedulePaymentImpact';
+import { previewScheduleRecovery } from '../application/schedule-payment-preview';
 
 export const scheduleDeltaLabel = (days: number | null) => days === null ? 'Нет полного исходного ППР для сравнения' : days > 0 ? `Позже Плана 0 на ${days} календ. дн.` : days < 0 ? `Раньше Плана 0 на ${Math.abs(days)} календ. дн.` : 'В срок по Плану 0';
 
@@ -55,7 +57,9 @@ function RecoveryScenario({ state, view }: { state: AppState; view: ScheduleFore
   const [id, setId] = useState(eligible[0]?.id || ''), [days, setDays] = useState(''), [crew, setCrew] = useState(''), [cost, setCost] = useState(''), [owner, setOwner] = useState('');
   const selected = eligible.find((s) => s.id === id);
   const result = selected && Number.isInteger(Number(days)) && Number(days) > 0 && Number(days) <= 730 ? simulateSchedule(state, { stageId: id, remainingDays: Number(days), ...(crew.trim() ? { crew: crew.trim() } : {}) }) : null;
+  const paymentPreview = result && state.treasury?.enabled ? previewScheduleRecovery(state, { stageId: id, remainingDays: Number(days), ...(crew.trim() ? { crew: crew.trim() } : {}) }) : null;
   return <details className="schedule-brief__scenario"><summary>Можно ли нагнать? Проверить сценарий</summary><p>Пробный расчёт одной меры. План, факты, назначения и деньги не меняются; вариант не сохраняется. Новую бригаду и стоимость ещё нужно подтвердить.</p><div className="schedule-review__grid"><Field label="Работа для изменения"><select value={id} onChange={(e) => { setId(e.target.value); setDays(''); setCrew(''); }}>{eligible.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field><Field label={`Остаток в сценарии, раб. дн. (сейчас ${selected?.siteUpdate?.remainingDays ?? '—'})`}><input type="number" min={1} max={730} value={days} onChange={(e) => setDays(e.target.value)} /></Field><Field label="Другая бригада, если нужна"><input maxLength={100} value={crew} onChange={(e) => setCrew(e.target.value)} placeholder={selected?.schedule?.crew || 'Без изменения ресурса'} /></Field><Field label="Дополнительная стоимость, ₽"><input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} placeholder="Неизвестна — оставить пустым" /></Field><Field label="Кто проверит выполнимость меры"><input maxLength={120} value={owner} onChange={(e) => setOwner(e.target.value)} /></Field></div>
     {result?.forecast?.end ? <div className="schedule-brief__attention"><strong>{formatDate(view.end!)} → {formatDate(result.forecast.end)}</strong><p>{result.gainedDays === 0 ? 'Выигрыш 0 дней: окончание проекта не изменилось. Другие работы по-прежнему определяют срок.' : result.gainedDays !== null && result.gainedDays > 0 ? `Можно выиграть ${result.gainedDays} календарных дней при указанных условиях.` : `Сценарий ухудшает срок на ${Math.abs(result.gainedDays!)} календарных дней.`}</p><p>{scheduleDeltaLabel(result.forecast.baselineShift)}. Доп. стоимость: {cost === '' ? 'не определена' : money(Number(cost))}. Проверяет: {owner.trim() || 'не назначен'}.</p></div> : result && <p className="blocker-note">Сценарий не рассчитан: {result.forecast?.issues[0]?.message || 'недостаточно подтверждённых данных'}.</p>}
+    {result && <SchedulePaymentImpact before={state} preview={paymentPreview} role="management" scenario />}
   </details>;
 }

@@ -42,6 +42,8 @@ import './schedule-page.css';
 import type { AppState, ProjectTask, StageStatus, UserRole } from '../entities/index';
 import { EmptyState, Field, Modal, ProgressBar, StatusBadge } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';
+import { SchedulePaymentImpact } from '../components/SchedulePaymentImpact';
+import { previewStagePlan } from '../application/schedule-payment-preview';
 
 const statusTone = (status: StageStatus): 'neutral' | 'positive' | 'warning' | 'danger' | 'blue' => {
   if (status === 'accepted') return 'positive';
@@ -108,6 +110,8 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange, emb
     setDateError('');
     setEditingDates(true);
   };
+
+  const planPreview = editingDates && role === 'management' && state.treasury?.enabled ? previewStagePlan(state, { stageId: planStageId, expected: planExpected, draft: dateForm }, { name: actor, role, id: userId }, systemClock.now()) : null;
 
   const saveDates = (event: FormEvent) => {
     event.preventDefault();
@@ -203,7 +207,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange, emb
             </div>
             {state.budgetLines.some(line => line.stageIds.includes(selected.id) && line.stageIds.length > 1) && <p className="muted">Общие статьи распределены между этапами поровну. Это приблизительная оценка бюджета этапа.</p>}
             {(stageFinancialTotals.billed > 0 || stageFinancialTotals.received > 0) && <div className="dependency-note"><CircleDollarSign size={18} /><span><small>Доход по этапу</small><strong>{money(stageFinancialTotals.billed)} начислено · {money(stageFinancialTotals.received)} получено</strong></span></div>}
-            {stageFinance.length ? <div className="gate-list">{stageFinance.map((item) => <div key={item.id}><span className={`gate-list__icon gate-list__icon--${item.status === 'paid' ? 'accepted' : 'pending'}`}><CircleDollarSign size={17} /></span><span>{onOpenFinance ? <button type="button" className="entity-link" onClick={() => { setDetailOpen(false); onOpenFinance(item.id); }}>{item.description}</button> : <strong>{item.description}</strong>}<small>{item.kind === 'income' ? 'Поступление' : 'Расход'} · {money(item.amount)} · {item.kind === 'income' ? 'получено' : 'оплачено'} {money(paidAmountFor(item))}</small>{plannedPayments.filter(payment => payment.entryId === item.id).map(payment => <small key={payment.id}>{payment.source === 'treasury' ? 'Прогноз транша' : 'План остатка'}: {payment.date ? formatDate(payment.date, true) : 'дата не указана'} · {money(payment.amount)}{payment.overdue ? ' · просрочено' : ''}</small>)}</span></div>)}</div> : <div className="locked-gate"><CircleDollarSign size={22} /><p>Финансовые операции этапа появятся здесь после создания обязательств или платежей.</p></div>}
+            {stageFinance.length ? <div className="gate-list">{stageFinance.map((item) => <div key={item.id}><span className={`gate-list__icon gate-list__icon--${item.status === 'paid' ? 'accepted' : 'pending'}`}><CircleDollarSign size={17} /></span><span>{onOpenFinance ? <button type="button" className="entity-link" onClick={() => { setDetailOpen(false); onOpenFinance(item.id); }}>{item.description}</button> : <strong>{item.description}</strong>}<small>{item.kind === 'income' ? 'Поступление' : 'Расход'} · {money(item.amount)} · {item.kind === 'income' ? 'получено' : 'оплачено'} {money(paidAmountFor(item))}</small>{plannedPayments.filter(payment => payment.entryId === item.id).map(payment => <small key={payment.id}>{payment.source === 'treasury' ? payment.dateLabel || 'Срок транша' : 'План остатка'}: {payment.date ? formatDate(payment.date, true) : 'дата не указана'} · {money(payment.amount)}{payment.overdue ? ' · срок прошёл' : ''}{payment.forecastDate && payment.forecastDate !== payment.date ? ` · в денежном прогнозе ${formatDate(payment.forecastDate, true)}` : ''}{payment.forecastDelayDays ? ` · позже договора на ${payment.forecastDelayDays} дн.` : ''}{payment.excludedFromCash ? ' · вне счетов компании' : ''}</small>)}</span></div>)}</div> : <div className="locked-gate"><CircleDollarSign size={22} /><p>Финансовые операции этапа появятся здесь после создания обязательств или платежей.</p></div>}
           </div></details>}
 
           {(stageProcurement.length + stageDocuments.length > 0) && <details className="stage-disclosure"><summary>Снабжение и документы · {stageProcurement.length + stageDocuments.length}</summary><div className="stage-disclosure__body">
@@ -242,6 +246,7 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange, emb
         </div>
         {selected.schedule && <p className="muted">Связи, бригада и сотрудник, подтверждающий состояние, изменяются в «Сверить ППР и факты».</p>}
         <Field label="Причина изменения плана / оценки"><input required={dateForm.planStart !== selected.planStart || dateForm.planEnd !== selected.planEnd || dateForm.forecastEnd !== selected.forecastEnd} value={dateForm.reason} onChange={(event) => setDateForm({ ...dateForm, reason: event.target.value })} /></Field>
+        <SchedulePaymentImpact before={state} preview={planPreview} role={role} today={todayKey} />
         {dateError && <p role="alert" className="danger-text">{dateError}</p>}{selected.baseline && <p className="muted">План 0: {selected.baseline.start ? formatDate(selected.baseline.start) : '—'} — {formatDate(selected.baseline.end)} · {selected.baseline.note}</p>}
         {selected.planHistory?.slice(-5).reverse().map((h, i) => <p className="baseline-history" key={i}>{h.before || '—'} → {h.after || '—'} · {h.reason}<small>{h.actor} · {formatDate(h.at.slice(0, 10))}</small></p>)}
         <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setEditingDates(false)}>Отмена</button><button type="submit" className="button button--primary">Сохранить график</button></div>

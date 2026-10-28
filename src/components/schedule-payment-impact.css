@@ -1,0 +1,12 @@
+.schedule-payment-impact { padding: 14px; border: 1px solid #cbd5e1; border-radius: 12px; background: #f8fafc; color: #1e293b; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.schedule-payment-impact > strong { font-size: 14px; }
+.schedule-payment-impact p { margin: 7px 0; line-height: 1.5; }
+.schedule-payment-impact__note, .schedule-payment-impact small { color: #475569; }
+.schedule-payment-impact__list { margin: 10px 0; padding: 0; list-style: none; }
+.schedule-payment-impact__list li { padding: 10px 0; border-top: 1px solid #cbd5e1; }
+.schedule-payment-impact__list li > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 12px; }
+.schedule-payment-impact__risk { color: #9f1239; font-weight: 600; }
+.schedule-payment-impact__metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0 4px; }
+.schedule-payment-impact__metrics > div { display: grid; gap: 4px; }
+.schedule-payment-impact__metrics span { color: #475569; }
+@media (max-width: 600px) { .schedule-payment-impact__metrics { grid-template-columns: 1fr; } }

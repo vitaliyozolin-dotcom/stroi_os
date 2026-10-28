@@ -94,8 +94,25 @@ test('treasury uses explicit safe fields: no descriptions, evidence, account ide
   assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
   assert.equal(JSON.stringify(result).includes('+79990000000'), false);
   for (const event of result.events) {
-    assert.deepEqual(Object.keys(event).sort(), ['id', 'entry_id', ...(event.tranche_id ? ['tranche_id'] : []), 'kind', 'amount_rub', 'date', 'scheduled_date', 'contractual_due_date', 'certainty', 'overdue', 'excluded'].sort());
+    assert.deepEqual(Object.keys(event).sort(), ['id', 'entry_id', ...(event.tranche_id ? ['tranche_id'] : []), 'kind', 'amount_rub', 'date', 'scheduled_date', 'contractual_due_date', 'certainty', 'overdue', 'excluded', 'date_basis', 'date_requires_review', 'contract_overdue', 'forecast_delay_days'].sort());
   }
   assert.equal(result.events.find((event: { entry_id: string }) => event.entry_id === 'direct').excluded, true);
   assert.ok(result.days.every((day: { event_ids: string[] }) => !day.event_ids.includes('direct:remaining')));
+});
+
+test('export follows PPR forecast changes while preserving contractual deadlines and safe date metadata', () => {
+  const state = fixture();
+  state.stages = [{ id: 'stage', name: 'PRIVATE stage name', planStart: '2026-10-30', forecastEnd: '2026-11-02' }];
+  state.treasury!.entryPlans[0].tranches[0].dateRule = { kind: 'stage_end', stageId: 'stage', offsetDays: 3, calendar: 'calendar' };
+  const initial = exportState(state).finance_projects[0].treasury.events[0];
+  state.stages[0].forecastEnd = '2026-11-07';
+  const shifted = exportState(state).finance_projects[0].treasury.events[0];
+  assert.equal(initial.scheduled_date, '2026-11-05');
+  assert.equal(shifted.scheduled_date, '2026-11-10');
+  assert.equal(shifted.contractual_due_date, initial.contractual_due_date);
+  assert.equal(shifted.date_basis, 'recorded_plan');
+  assert.equal(shifted.date_requires_review, true);
+  assert.equal(shifted.contract_overdue, true);
+  assert.equal(shifted.forecast_delay_days, 14);
+  assert.equal(JSON.stringify(shifted).includes('PRIVATE'), false);
 });

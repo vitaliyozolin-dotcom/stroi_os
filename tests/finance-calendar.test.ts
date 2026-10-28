@@ -112,3 +112,96 @@ test('adding a due date cannot bypass payment amount rules or rewrite ledger', (
   const rewritten = structuredClone(before); rewritten.financeEntries[0].dueDate = '2026-10-15'; rewritten.financeEntries[0].payments = [];
   assert.match(validateFinanceChanges(before, rewritten, identity, now), /История платежей/);
 });
+
+test('enabled calendar uses every remaining treasury tranche and never repeats the entry due date total', async () => {
+  const { emptyTreasury, treasuryProjection } = await import('../src/domain/treasury.js');
+  const state = fixture([entry({ id: 'contract', amount: 1000, dueDate: '2026-10-01', paidAmount: 200,
+    payments: [{ id: 'paid', amount: 200, date: '2026-10-20', document: 'Receipt', recordedAt: '2026-10-20T12:00:00Z', recordedBy: 'Payer' }] })]);
+  state.stages = [{ ...state.stages[0], id: 'foundation', name: 'Foundation', shortName: 'Foundation', status: 'ready', forecastEnd: '2026-11-03', schedule: undefined, siteUpdate: undefined }];
+  state.treasury = { ...emptyTreasury(), enabled: true, entryPlans: [{ entryId: 'contract', source: 'Contract', cashTreatment: 'account', sourceAccountId: 'bank', tranches: [
+    { id: 'advance', amountCents: 30000, certainty: 'confirmed', source: 'Contract', forecastDate: '2026-10-30', contractualDueDate: '2026-10-30', paymentAllocations: [{ paymentId: 'paid', amountCents: 20000 }] },
+    { id: 'finish', amountCents: 70000, certainty: 'confirmed', source: 'Contract', contractualDueDate: '2026-11-04', dateRule: { kind: 'stage_end', stageId: 'foundation', offsetDays: 2, calendar: 'calendar' } },
+  ] }] };
+  const before = structuredClone(state);
+  const items = financeCalendarItems(state, '2026-10-28');
+  const projection = treasuryProjection(state, { today: '2026-10-28', horizonDays: 91, scenario: 'base' });
+  assert.deepEqual(items.map(item => [item.id, item.remaining, item.dueDate]), [['contract:advance', 100, '2026-10-30'], ['contract:finish', 700, '2026-11-05']]);
+  assert.equal(financeCalendarTotal(items), 800);
+  assert.deepEqual(items.map(item => item.projectionEvent), projection.events);
+  assert.deepEqual(state, before);
+  state.stages[0].forecastEnd = '2026-11-10';
+  const moved = financeCalendarItems(state, '2026-10-28');
+  assert.equal(moved[0].dueDate, '2026-10-30');
+  assert.equal(moved[1].dueDate, '2026-11-12');
+  assert.equal(moved[1].projectionEvent?.contractualDueDate, '2026-11-04');
+  assert.deepEqual(state.financeEntries, before.financeEntries);
+});
+
+test('enabled calendar retains expired contractual and scheduled dates while cash forecast rolls forward', async () => {
+  const { emptyTreasury } = await import('../src/domain/treasury.js');
+  const state = fixture([entry({ id: 'late' }), entry({ id: 'contract-late' })]);
+  state.treasury = { ...emptyTreasury(), enabled: true, entryPlans: [
+    { entryId: 'late', source: 'Contract', tranches: [{ id: 'one', amountCents: 10000, certainty: 'confirmed', source: 'Contract', forecastDate: '2026-10-27', contractualDueDate: '2026-10-26' }] },
+    { entryId: 'contract-late', source: 'Contract', tranches: [{ id: 'two', amountCents: 10000, certainty: 'confirmed', source: 'Contract', forecastDate: '2026-11-20', contractualDueDate: '2026-10-27' }] },
+  ] };
+  const items = financeCalendarItems(state, '2026-10-28');
+  assert.equal(items[0].dueDate, '2026-10-27');
+  assert.equal(items[0].projectionEvent?.date, '2026-10-29');
+  assert.equal(items[0].projectionEvent?.contractualDueDate, '2026-10-26');
+  assert.equal(items[0].group, 'overdue');
+  assert.equal(items[1].dueDate, '2026-11-20');
+  assert.equal(items[1].group, 'overdue');
+});
+
+test('calendar exposes undated settlement, direct participant money, claimed and genuinely paid amounts distinctly', async () => {
+  const { emptyTreasury, treasuryProjection } = await import('../src/domain/treasury.js');
+  const state = fixture([
+    entry({ id: 'unknown', paidAmount: 30, dueDate: '2026-11-01' }),
+    entry({ id: 'direct', dueDate: '2026-11-02' }),
+    entry({ id: 'settled', paidAmount: 100, status: 'paid' }),
+    entry({ id: 'claimed', paidAmount: 100, status: 'paid', dueDate: '2026-11-02', payments: [{ id: 'order', amount: 100, date: '2026-10-28', document: 'Order', recordedAt: '2026-10-28T12:00:00Z', recordedBy: 'Payer' }] }),
+  ]);
+  state.treasury = { ...emptyTreasury(), enabled: true, entryPlans: [
+    { entryId: 'unknown', source: 'Contract', tranches: [{ id: 'a', amountCents: 10000, certainty: 'confirmed', source: 'Contract', forecastDate: '2026-11-01' }] },
+    { entryId: 'direct', source: 'Participant', cashTreatment: 'participant_direct', tranches: [] },
+    { entryId: 'claimed', source: 'Order', tranches: [], paymentFacts: [{ paymentId: 'order', cashTreatment: 'account', confirmation: 'claimed', source: 'Pending execution' }] },
+  ] };
+  const items = financeCalendarItems(state, '2026-10-28');
+  const byId = new Map(items.map(item => [item.entry.id, item]));
+  assert.equal(byId.has('settled'), false);
+  assert.equal(byId.get('unknown')?.remaining, 70);
+  assert.equal(byId.get('unknown')?.dueDate, null);
+  assert.equal(byId.get('unknown')?.group, 'undated');
+  assert.equal(byId.get('direct')?.projectionEvent?.excluded, true);
+  assert.equal(byId.get('claimed')?.remaining, 100);
+  assert.equal(financeCalendarTotal(items), 270);
+  assert.equal(financeCalendarTotal(items.filter(item => !item.projectionEvent?.excluded)), 170);
+  assert.equal(financeCalendarTotal(items) * 100, treasuryProjection(state, { today: '2026-10-28', horizonDays: 1 }).events.reduce((sum, event) => sum + event.amountCents, 0));
+});
+
+test('missing PPR anchor remains undated despite a legacy or contractual date', async () => {
+  const { emptyTreasury } = await import('../src/domain/treasury.js');
+  const state = fixture([entry({ id: 'linked', dueDate: '2026-11-01' })]);
+  state.stages = [];
+  state.treasury = { ...emptyTreasury(), enabled: true, entryPlans: [{ entryId: 'linked', source: 'Contract', tranches: [{ id: 'acceptance', amountCents: 10000, certainty: 'confirmed', source: 'Contract', contractualDueDate: '2026-11-01', dateRule: { kind: 'stage_acceptance', stageId: 'missing', offsetDays: 3, calendar: 'workdays' } }] }] };
+  const [item] = financeCalendarItems(state, '2026-10-28');
+  assert.equal(item.dueDate, null);
+  assert.equal(item.group, 'undated');
+  assert.equal(item.projectionEvent?.contractualDueDate, '2026-11-01');
+});
+
+test('enabled calendar uses seven forecast days after its end-of-day cutoff', async () => {
+  const { emptyTreasury } = await import('../src/domain/treasury.js');
+  const state = fixture([
+    entry({ id: 'cutoff', dueDate: '2026-10-28' }),
+    entry({ id: 'first', dueDate: '2026-10-29' }),
+    entry({ id: 'seventh', dueDate: '2026-11-04' }),
+    entry({ id: 'eighth', dueDate: '2026-11-05' }),
+  ]);
+  state.treasury = { ...emptyTreasury(), enabled: true };
+  const byId = new Map(financeCalendarItems(state, '2026-10-28').map(item => [item.entry.id, item]));
+  assert.equal(byId.get('cutoff')?.group, 'overdue');
+  assert.equal(byId.get('first')?.group, 'next7');
+  assert.equal(byId.get('seventh')?.group, 'next7');
+  assert.equal(byId.get('eighth')?.group, 'later');
+});

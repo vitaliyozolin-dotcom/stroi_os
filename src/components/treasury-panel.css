@@ -100,3 +100,32 @@
  .treasury-tranche { padding:14px; }
  .treasury-form-footer { position:sticky; bottom:-20px; margin:0 -20px -20px; padding:15px 20px; background:#f8f8f2; border-top:1px solid #e0e4d5; }
 }
+.finance-schedule-sync { margin:0 0 23px; padding:19px 20px; border:1px solid #d8dfcc; background:#f2f4ec; border-radius:8px; color:#35412c; }
+.finance-schedule-sync__heading { display:flex; justify-content:space-between; gap:15px; flex-wrap:wrap; align-items:flex-start; }
+.finance-schedule-sync__heading h3 { margin:0; font-size:17px; font-weight:500; }
+.finance-schedule-sync__heading p { margin:6px 0 0; color:#55614b; font-size:12px; }
+.finance-schedule-sync__explanation { margin:12px 0 0; color:#55614b; font-size:12px; line-height:1.65; max-width:1000px; }
+.finance-schedule-sync__details { margin-top:14px; font-size:12px; }
+.finance-schedule-sync__details summary { cursor:pointer; font-weight:500; }
+.finance-schedule-sync__rows { display:grid; margin-top:8px; }
+.finance-schedule-sync__row { padding:15px 0; border-top:1px solid #d8dfcc; display:grid; gap:10px; }
+.finance-schedule-sync__row > div:first-child { display:grid; gap:5px; }
+.finance-schedule-sync__row strong { font-size:13px; font-weight:500; }
+.finance-schedule-sync__row span { color:#55614b; line-height:1.5; }
+.finance-schedule-sync__row > .text-button { justify-self:start; }
+.finance-schedule-sync__row dl,.treasury-rule-preview dl { display:flex; gap:13px 24px; flex-wrap:wrap; margin:0; }
+.finance-schedule-sync__row dl > div,.treasury-rule-preview dl > div { display:grid; gap:4px; }
+.finance-schedule-sync__row dt,.treasury-rule-preview dt { font-size:11px; color:#55614b; }
+.finance-schedule-sync__row dd,.treasury-rule-preview dd { margin:0; font-size:12px; font-weight:500; }
+.finance-schedule-sync__warning { margin:0; color:#8d482e; font-size:12px; line-height:1.6; }
+.treasury-rule-preview { display:grid; gap:10px; padding:14px; border:1px solid #d5dec7; background:#fafbf6; border-radius:5px; }
+.treasury-rule-preview > strong { font-size:12px; font-weight:500; line-height:1.6; }
+.treasury-rule-preview > p { margin:0; font-size:11px; line-height:1.6; color:#55614b; }
+.treasury-rule-preview > p.finance-schedule-sync__warning { color:#8d482e; }
+@media(max-width:680px) {
+ .finance-schedule-sync { padding:15px; }
+ .finance-schedule-sync__heading h3 { font-size:16px; }
+ .finance-schedule-sync__heading .treasury-toolbar__actions { align-items:flex-start; }
+ .finance-schedule-sync__row dl > div,.treasury-rule-preview dl > div { flex:1 1 110px; }
+ .finance-schedule-sync__row,.treasury-rule-preview { overflow-wrap:anywhere; }
+}
