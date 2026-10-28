@@ -35,7 +35,7 @@ test('one snapshot has the same money contract in the workspace and both exports
   const totals = financeTotals(state);
   assert.deepEqual(totals, { plan: 410, forecast: 575, storedForecast: 460, committed: 225, accepted: 40, paid: 180, received: 40, contractedIncome: 100 });
   for (const payload of exportsFor(state)) {
-    assert.equal(payload.meta.finance_rules_version, 2);
+    assert.equal(payload.meta.finance_rules_version, 3);
     const row = payload.investor_projects[0];
     assert.equal(row.forecast_cost_rub, totals.forecast);
     assert.equal(row.accepted_cost_rub, totals.accepted);

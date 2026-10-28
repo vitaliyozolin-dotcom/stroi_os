@@ -1,7 +1,7 @@
 import type { CostClassificationInput, FinanceCommandResult } from '../application';
 import { ChevronDown, ChevronRight, Upload } from 'lucide-react';
 import type { AppState, BudgetLine, CostGroup } from '../entities/index';
-import { financeTotals, lineForecast, lineTotals, paidAmountFor, sourceEstimateTotals, unallocatedExpenses, unallocatedExpenseTotals } from '../domain/index';
+import { financeTotals, effectiveBudgetLines, lineForecast, lineTotals, paidAmountFor, sourceEstimateTotals, unallocatedExpenses, unallocatedExpenseTotals } from '../domain/index';
 import { costGroupLabels, costGroups, costGroupTotals, expenseCostGroup } from '../domain/cost-groups';
 import { formatDate, money } from '../presentation/formatting';
 import { CostGroups } from './CostGroups';
@@ -21,10 +21,10 @@ const deviationText = (forecast: number, plan: number) => {
   return `${difference > 0 ? '+' : '−'}${money(Math.abs(difference))} к плану`;
 };
 
-function BudgetLineRow({ state, line, onOpen }: { state: AppState; line: BudgetLine; onOpen: () => void }) {
+function BudgetLineRow({ state, line, onOpen }: { state: AppState; line: BudgetLine; onOpen?: () => void }) {
   const values = lineTotals(state, line);
   const forecast = lineForecast(state, line);
-  return <button type="button" className="money-budget__line" onClick={onOpen}>
+  return <button type="button" className="money-budget__line" onClick={onOpen} disabled={!onOpen}>
     <span className="money-budget__line-name">
       <strong>{line.name}</strong>
       {line.outsideSourceTotal && <small>Вне итога исходного файла{Number.isFinite(line.sourcePlan) ? ` · в файле ${money(line.sourcePlan!)}` : ''}</small>}
@@ -39,13 +39,15 @@ function BudgetLineRow({ state, line, onOpen }: { state: AppState; line: BudgetL
 
 export function FinanceBudgetPanel({ state, onClassify, onOpenLine, onOpenUnallocated, onImport }: FinanceBudgetPanelProps) {
   const totals = financeTotals(state);
+  const budgetLines = effectiveBudgetLines(state);
+  const activeVersion = state.treasury?.budgetVersions?.find(version => version.id === state.treasury?.activeBudgetVersionId);
   const groups = costGroupTotals(state);
   const source = sourceEstimateTotals(state.budgetLines);
   const unallocated = unallocatedExpenseTotals(state);
   const unallocatedCount = unallocatedExpenses(state).length;
   const outsideSource = state.budgetLines.filter(line => line.outsideSourceTotal);
   const groupHasSeparateClassification = (group: CostGroup) => state.financeEntries.some(entry => {
-    if (entry.kind !== 'expense' || paidAmountFor(entry) <= 0) return false;
+    if (entry.kind !== 'expense' || paidAmountFor(entry, state) <= 0) return false;
     const line = state.budgetLines.find(item => item.id === entry.budgetLineId);
     const lineGroup = line?.costGroup ?? 'unallocated';
     const actualGroup = expenseCostGroup(state, entry);
@@ -63,14 +65,15 @@ export function FinanceBudgetPanel({ state, onClassify, onOpenLine, onOpenUnallo
       <div><span>Оплачено</span><strong>{money(totals.paid)}</strong></div>
       <div className={totals.forecast > totals.plan ? 'money-budget__total--over' : ''}><span>Предварительный прогноз</span><strong>{money(totals.forecast)}</strong><small>{deviationText(totals.forecast, totals.plan)}</small></div>
     </div>
+    {activeVersion && <p className="money-budget__forecast-note">Действующий план: {activeVersion.name} · {activeVersion.taxBasis === 'gross' ? 'с НДС' : activeVersion.taxBasis === 'net' ? 'без НДС' : 'НДС не применяется'}. {activeVersion.taxNote} Изменение плана — через новую версию бюджета.</p>}
     <p className="money-budget__forecast-note">Прогноз учитывает внесённые суммы. Стоимость оставшихся работ ещё нужно сверить.</p>
 
-    {!state.budgetLines.length && <div className="money-budget__empty"><strong>Смета ещё не загружена</strong><p>Добавьте план, чтобы сравнивать расходы по статьям.</p></div>}
+    {!budgetLines.length && <div className="money-budget__empty"><strong>Смета ещё не загружена</strong><p>Добавьте план, чтобы сравнивать расходы по статьям.</p></div>}
 
     <div className="money-budget__groups" aria-label="План и оплаты по категориям">
       <div className="money-budget__category-head" aria-hidden="true"><span>Категория</span><span>План</span><span>Оплачено</span></div>
       {costGroups.map(group => {
-        const lines = state.budgetLines.filter(line => (line.costGroup ?? 'unallocated') === group);
+        const lines = budgetLines.filter(line => (line.costGroup ?? 'unallocated') === group);
         return <details className="money-budget__group" key={group}>
           <summary>
             <span className="money-budget__category-name"><ChevronDown size={15} /><span><strong>{costGroupLabels[group]}</strong><small>{group === 'reserve' ? 'Запас бюджета' : `Статей: ${lines.length}`}</small></span></span>
@@ -81,7 +84,7 @@ export function FinanceBudgetPanel({ state, onClassify, onOpenLine, onOpenUnallo
             {groupHasSeparateClassification(group) && <p className="money-budget__classification-note">Часть оплат отнесена к другой категории. Здесь статьи сгруппированы по плану, а оплаты категории — по назначению расходов.</p>}
             {lines.length > 0 ? <>
               <div className="money-budget__line-head" aria-hidden="true"><span>Статья</span><span>План</span><span>Оплачено</span><span>Прогноз</span></div>
-              {lines.map(line => <BudgetLineRow key={line.id} state={state} line={line} onOpen={() => onOpenLine(line.id)} />)}
+              {lines.map(line => <BudgetLineRow key={line.id} state={state} line={line} onOpen={state.budgetLines.some(original => original.id === line.id) ? () => onOpenLine(line.id) : undefined} />)}
             </> : <p className="money-budget__empty-group">Статей сметы в этой категории пока нет.</p>}
           </div>
         </details>;

@@ -9,6 +9,7 @@ export type { SyncPhase } from './presentation/sync-status';
 import {
   applyLocalChange,
   applyProjectRemote,
+  reconcileProjectExternalUpdate,
   createProjectWorkflow,
   createSyncModel,
   flushProjectChanges,
@@ -70,6 +71,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity: 
   const dirtyRef = useRef(initial.current.dirty);
   const readyRef = useRef(false);
   const savingRef = useRef(false);
+  const externalRemoteRef = useRef<RemoteProjectSnapshot | null>(null);
   const conflictRef = useRef<RemoteProjectSnapshot | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const cacheSessionRef = useRef<ProjectCacheSession | null>(null);
@@ -151,12 +153,30 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity: 
     conflict: () => conflictRef.current,
     setConflict: (next) => { conflictRef.current = next; setConflict(next); },
     saving: () => savingRef.current,
-    setSaving: (next) => { savingRef.current = next; },
+    setSaving: (next) => {
+      savingRef.current = next;
+      if (!next && externalRemoteRef.current) {
+        const remote = externalRemoteRef.current; externalRemoteRef.current = null;
+        const current = workflowRef.current;
+        if (current) {
+          reconcileProjectExternalUpdate(current, remote);
+          if (current.readModel().dirty && !current.conflict()) window.setTimeout(() => void flushRef.current(), 0);
+        }
+      }
+    },
     emit: emitSync,
   };
   workflowRef.current = workflow;
   flushRef.current = () => flushProjectChanges(workflow);
   hydrateRef.current = () => hydrateProject(workflow, refreshProjects);
+
+  const reconcileServerSnapshot = useCallback((remote: RemoteProjectSnapshot) => {
+    const current = workflowRef.current;
+    if (!current) return;
+    const result = reconcileProjectExternalUpdate(current, remote);
+    if (result === 'deferred' && (!externalRemoteRef.current || remote.projectId !== externalRemoteRef.current.projectId || remote.revision > externalRemoteRef.current.revision)) externalRemoteRef.current = remote;
+    if (result === 'applied' && current.readModel().dirty && !current.conflict()) window.setTimeout(() => void flushRef.current(), 0);
+  }, []);
 
   const applyRemote = useCallback((remote: RemoteProjectSnapshot) => {
     const current = workflowRef.current;
@@ -268,6 +288,7 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity: 
     useServerVersion,
     keepLocalVersion,
     applyServerSnapshot: applyRemote,
+    reconcileServerSnapshot,
     projects,
     switchProject,
     createProject,

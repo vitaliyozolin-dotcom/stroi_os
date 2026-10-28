@@ -1,5 +1,9 @@
 // Pure, shared Node/browser projections. This module never creates a payment.
+import { effectiveBudgetLines } from './finance-totals.js';
+import { ledgerEffect } from './finance-ledger.js';
 import { forecastSchedule, confirmedSiteUpdate } from './construction/schedule-forecast.js';
+import { treasuryInventorySummary, treasuryBudgetComparison, treasuryRateDays, validateTreasuryPlanning } from './treasury-planning.js';
+export { treasuryInventorySummary, treasuryBudgetComparison } from './treasury-planning.js';
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value ?? {}, key);
 const text = value => typeof value === 'string' && value.trim().length > 0;
 const integer = value => Number.isSafeInteger(value);
@@ -16,18 +20,26 @@ const datePart = value => {
 };
 const tomorrow = date => shift(date, 1);
 const unique = values => [...new Set(values)];
-const fields = ['version', 'enabled', 'accounts', 'entryPlans', 'costEstimates', 'reserveCents', 'scenarios', 'cashScopeReview'];
+const fields = ['version', 'enabled', 'accounts', 'entryPlans', 'costEstimates', 'reserveCents', 'scenarios', 'cashScopeReview', 'cashPlans', 'delayRates', 'inventoryLots', 'inventoryMovements', 'budgetVersions', 'activeBudgetVersionId', 'savedScenarios'];
 const stable = value => JSON.stringify(value, (_, item) => item && !Array.isArray(item) && typeof item === 'object'
   ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
 
 export const emptyTreasury = () => ({ version: 1, enabled: false, accounts: [], entryPlans: [], costEstimates: [] });
 export function treasuryScopeFingerprint(state) {
+  const semantic = rows => (rows ?? []).map(({ recordedAt, recordedBy, approvedAt, approvedBy, ...row }) => row);
   const input = stable({ projectId: state.project.id, financeEntries: state.financeEntries ?? [], budgetLines: state.budgetLines ?? [],
-    costEstimates: state.treasury?.costEstimates ?? [], entryPlans: state.treasury?.entryPlans ?? [] });
+    costEstimates: state.treasury?.costEstimates ?? [], entryPlans: state.treasury?.entryPlans ?? [], cashPlans: state.treasury?.cashPlans ?? [],
+    delayRates: state.treasury?.delayRates ?? [], inventoryLots: semantic(state.treasury?.inventoryLots), inventoryMovements: semantic(state.treasury?.inventoryMovements),
+    budgetVersions: semantic(state.treasury?.budgetVersions), activeBudgetVersionId: state.treasury?.activeBudgetVersionId ?? null,
+    financeLedger: state.financeLedger ?? null });
+  return hashFingerprint(input, 'scope-v1');
+}
+export function treasuryScenarioFingerprint(state) { return hashFingerprint(stable({ scope: treasuryScopeFingerprint(state), stages: state.stages ?? [], tasks: state.tasks ?? [], accounts: state.treasury?.accounts ?? [], reserveCents: state.treasury?.reserveCents ?? null, scenarios: state.treasury?.scenarios ?? null }), 'scenario-v1'); }
+function hashFingerprint(input, prefix) {
   // FNV-1a 64-bit is sufficient for deterministic change detection, not cryptographic evidence.
   let hash = 14695981039346656037n;
   for (let index = 0; index < input.length; index++) hash = BigInt.asUintN(64, (hash ^ BigInt(input.charCodeAt(index))) * 1099511628211n);
-  return `scope-v1:${hash.toString(16).padStart(16, '0')}:${input.length}`;
+  return `${prefix}:${hash.toString(16).padStart(16, '0')}:${input.length}`;
 }
 export const treasuryMoneyToCents = value => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
@@ -140,6 +152,7 @@ export function resolveTreasuryDateRuleDetails(state, rule, today) {
 export function resolveTreasuryDateRule(state, rule, today) {
   return resolveTreasuryDateRuleDetails(state, rule, today).date;
 }
+const paidPositive = entry => (entry.paidAmount ?? 0) > 0 || (entry.payments ?? []).some(payment => payment.amount > 0);
 const recordedPaid = entry => treasuryMoneyToCents(entry.paidAmount ?? (entry.status === 'paid' ? entry.amount : 0));
 export function treasuryPaymentReferences(entry) {
   const payments = (entry.payments ?? []).flatMap(payment => {
@@ -150,7 +163,7 @@ export function treasuryPaymentReferences(entry) {
   if (aggregate === null || detailed === null || aggregate <= detailed) return payments;
   // The date of the last partial payment cannot be assigned to the previous aggregate.
   return [{ id: `legacy:${entry.id}`, amountCents: aggregate - detailed,
-    date: payments.length ? null : datePart(entry.paidAt), legacy: true }, ...payments];
+    date: treasuryMoneyToCents(entry.legacyPayment?.amount) === aggregate - detailed ? datePart(entry.legacyPayment?.lastRecordedDate) : payments.length ? null : datePart(entry.paidAt), legacy: true }, ...payments];
 }
 function percentAmount(cents, percent) {
   const basisPoints = Math.round(percent * 100);
@@ -159,29 +172,61 @@ function percentAmount(cents, percent) {
   return integer(number) ? number : null;
 }
 
-export function treasuryCostSummary(state) {
+export function treasuryCostSummary(state, { today, workDelayDays = 0 } = {}) {
   const rows = state.treasury?.costEstimates ?? [], warnings = [];
+  const stock = treasuryInventorySummary(state.treasury), budget = treasuryBudgetComparison(state);
+  const delay = treasuryDelaySummary(state, { today, workDelayDays });
+  const extraRates = delay.rows.filter(row => (state.treasury?.delayRates ?? []).find(rate => rate.id === row.id)?.costTreatment === 'additional');
+  const delayRecognized = sum(extraRates.map(row => row.recognizedCents));
+  const delayRemaining = sum(extraRates.map(row => row.amountCents === null ? null : Math.max(0, row.amountCents - row.recognizedCents)));
   const invalid = rows.some(row => ['recognizedCents', 'remainingWorkCents', 'stockToConsumeCents', 'otherRemainingCents', 'approvedBudgetCents'].some(key => !nonnegative(row[key])));
   const ids = rows.map(row => row.budgetLineId).filter(Boolean);
-  const uncovered = (state.budgetLines ?? []).filter(line => !ids.includes(line.id));
+  const uncovered = effectiveBudgetLines(state).filter(line => !ids.includes(line.id));
   if (!rows.length) warnings.push('Оценка признанной и оставшейся себестоимости не заполнена.');
   if (uncovered.length) warnings.push(`Без оценки достройки: ${uncovered.length} статей бюджета.`);
   if (invalid) warnings.push('Некорректные суммы в оценке себестоимости.');
-  const recognizedCents = invalid || !rows.length ? null : sum(rows.map(row => row.recognizedCents));
-  const etcCents = invalid || !rows.length ? null : sum(rows.flatMap(row => [row.remainingWorkCents, row.stockToConsumeCents, row.otherRemainingCents]));
-  const budgetCents = invalid || !rows.length ? null : sum(rows.map(row => row.approvedBudgetCents));
+  if (delayRemaining === null || extraRates.some(row => row.amountCents !== null && (row.recognizedCents > row.amountCents || row.coveredCents > row.amountCents))) warnings.push('Не определена дополнительная стоимость задержки, признано или законтрактовано больше её текущего расчёта.');
+  const costBasisComparable = !budget.selected || rows.every(row => row.taxBasis === budget.selected.taxBasis);
+  if (!costBasisComparable) warnings.push('База сумм оценки затрат не совпадает с утверждённым бюджетом или не указана; сравнение требует сверки.');
+  if (!stock.valid) warnings.push('Движения материалов требуют сверки.');
+  if (stock.rows.some(lot => !rows.some(row => row.id === lot.costEstimateId))) warnings.push('Материалы не связаны с действующей оценкой затрат.');
+  if (stock.rows.some(lot => rows.find(row => row.id === lot.costEstimateId)?.stockToConsumeCents)) warnings.push('Материалы одновременно внесены в ручной запас и реестр партий; требуется сверка.');
+  const recognizedCents = invalid || !rows.length || !stock.valid ? null : sum([...rows.map(row => row.recognizedCents), stock.consumedCents, delayRecognized]);
+  const etcCents = invalid || !rows.length || !stock.valid || delayRemaining < 0 ? null : sum([...rows.flatMap(row => [row.remainingWorkCents, row.stockToConsumeCents, row.otherRemainingCents]), stock.stockCents, delayRemaining]);
+  const budgetCents = state.treasury?.activeBudgetVersionId ? budget.approvedCents : invalid || !rows.length ? null : sum(rows.map(row => row.approvedBudgetCents));
   const eacCents = recognizedCents === null || etcCents === null ? null : sum([recognizedCents, etcCents]);
   if (rows.length && [recognizedCents, etcCents, budgetCents, eacCents].includes(null)) warnings.push('Итог себестоимости отсутствует или выходит за точный диапазон расчёта.');
-  return { recognizedCents, etcCents, eacCents, budgetCents, varianceCents: eacCents === null || budgetCents === null ? null : eacCents - budgetCents,
-    complete: rows.length > 0 && !warnings.length, warnings };
+  return { recognizedCents, etcCents, eacCents, budgetCents, varianceCents: !costBasisComparable || eacCents === null || budgetCents === null ? null : eacCents - budgetCents,
+    originalBudgetCents: budget.originalCents, originalVarianceCents: !costBasisComparable || !budget.comparable || eacCents === null || budget.originalCents === null ? null : eacCents - budget.originalCents,
+    inventoryStockCents: stock.stockCents, inventoryConsumedCents: stock.consumedCents, complete: rows.length > 0 && !warnings.length, warnings };
+}
+
+export function treasuryDelaySummary(state, { today, workDelayDays = 0 } = {}) {
+  const rows = (state.treasury?.delayRates ?? []).map(rate => {
+    const resolution = rate.endRule ? resolveTreasuryDateRuleDetails(state, rate.endRule, today) : null;
+    let endDate = rate.endRule ? resolution.date : (validTreasuryDate(rate.endDate) ? rate.endDate : null);
+    if (endDate && workDelayDays && resolution?.basis !== 'actual') endDate = shift(endDate, workDelayDays);
+    const days = treasuryRateDays(rate.baselineEnd, endDate, rate.calendar);
+    const amountCents = days === null || !nonnegative(rate.dailyCents) || !integer(days * rate.dailyCents) ? null : days * rate.dailyCents;
+    const coveredCents = sum((rate.coverage ?? []).map(part => part.amountCents));
+    return { id: rate.id, name: rate.name, endDate, days, amountCents, coveredCents, recognizedCents: rate.recognizedCents ?? 0,
+      remainingCents: amountCents === null || coveredCents === null ? null : Math.max(0, amountCents - coveredCents),
+      paymentDate: endDate ? shift(endDate, rate.paymentOffsetDays) : null, reason: resolution?.reason ?? (!endDate ? 'Не определено окончание периода начисления.' : null) };
+  });
+  return { rows, totalCents: sum(rows.map(row => row.amountCents)), remainingCents: sum(rows.map(row => row.remainingCents)) };
 }
 
 /** today is an end-of-day cutoff. Forecast days begin on the following day. */
-export function treasuryProjection(state, { today, horizonDays = 91, scenario = 'base', accountId } = {}) {
+export function treasuryProjection(state, { today, horizonDays = 91, scenario = 'base', accountId, savedScenarioId } = {}) {
   if (!validTreasuryDate(today)) throw new Error('Укажите корректную дату среза.');
   if (!integer(horizonDays) || horizonDays < 1 || horizonDays > 1095) throw new Error('Горизонт: от 1 до 1095 дней.');
   if (!['base', 'cautious', 'stress'].includes(scenario)) throw new Error('Неизвестный сценарий.');
   const treasury = state.treasury ?? emptyTreasury(), warnings = [], events = [];
+  const ledger = ledgerEffect(state, { today }); warnings.push(...ledger.warnings);
+  const ledgerSettlements = new Map(ledger.settlementsByEntry.map(row => [row.entryId, row.amountCents]));
+  const savedScenario = savedScenarioId ? (treasury.savedScenarios ?? []).find(row => row.id === savedScenarioId) : null;
+  if (savedScenarioId && !savedScenario) throw new Error('Сохранённый сценарий не найден.');
+  if (savedScenario && savedScenario.basisFingerprint !== treasuryScenarioFingerprint(state)) warnings.push('Данные изменились после сохранения сценария; допущения применены к текущему состоянию.');
   const accounts = treasury.accounts.filter(account => !accountId || account.id === accountId);
   const accountMap = new Map(treasury.accounts.map(account => [account.id, account]));
   const plans = new Map(treasury.entryPlans.map(plan => [plan.entryId, plan]));
@@ -200,27 +245,32 @@ export function treasuryProjection(state, { today, horizonDays = 91, scenario = 
       openingKnown = false; warnings.push(`${account.name}: ограниченная сумма не определена.`); continue;
     }
     const restricted = account.restrictedCents ?? 0;
+    if (!account.isProjectDedicated && !text(account.sharedAccountKey)) warnings.push(`${account.name}: общий идентификатор счёта не задан; распределение между проектами не сверено.`);
     const balance = account.isProjectDedicated ? opening.amountCents - restricted : account.projectAllocationCents;
     if (!integer(balance)) { openingKnown = false; warnings.push(`${account.name}: средства общего счёта не распределены на проект.`); }
     else accountBalances.set(account.id, balance);
   }
   const configuration = treasury.scenarios;
   if (scenario !== 'base' && !configuration) warnings.push('Параметры сценария не заданы; изменения поступлений и цен не применены.');
-  const delay = scenario === 'cautious' ? configuration?.cautiousDelayDays ?? 0 : scenario === 'stress' ? configuration?.stressDelayDays ?? 0 : 0;
-  const costIncrease = scenario === 'stress' ? configuration?.stressCostIncreasePct ?? 0 : 0;
+  const delay = savedScenario?.incomeDelayDays ?? (scenario === 'cautious' ? configuration?.cautiousDelayDays ?? 0 : scenario === 'stress' ? configuration?.stressDelayDays ?? 0 : 0);
+  const costIncrease = savedScenario?.tentativeCostIncreasePct ?? (scenario === 'stress' ? configuration?.stressCostIncreasePct ?? 0 : 0);
+  const workDelayDays = savedScenario?.workDelayDays ?? 0;
   const review = treasury.cashScopeReview;
   const reviewAge = validTreasuryDate(review?.asOf) ? (Date.parse(`${today}T12:00:00Z`) - Date.parse(`${review.asOf}T12:00:00Z`)) / 86400000 : null;
   if (!review || !text(review.source) || review.fingerprint !== treasuryScopeFingerprint(state) || reviewAge === null || reviewAge < 0 || reviewAge > 7) {
     warnings.push('Полнота будущих поступлений и расходов не подтверждена для текущих данных; требуется сверка состава денежных событий.');
   }
-  if (!treasuryCostSummary(state).complete) warnings.push('Не завершена оценка всей оставшейся себестоимости; календарь не доказывает достаточность денег на достройку.');
+  if (!treasuryCostSummary(state, { today, workDelayDays }).complete) warnings.push('Не завершена оценка всей оставшейся себестоимости; календарь не доказывает достаточность денег на достройку.');
   // Uncontracted forecast costs need their own documented expected cash events.
   // Never add ETC to payable cash automatically: that would repay stocked goods/advances.
-  for (const line of state.budgetLines ?? []) {
+  for (const estimate of treasury.costEstimates) { if (!estimate.budgetLineId && (sum([estimate.recognizedCents, estimate.remainingWorkCents, estimate.stockToConsumeCents, estimate.otherRemainingCents, ...(treasury.inventoryLots ?? []).filter(lot => lot.costEstimateId === estimate.id).map(lot => lot.totalCostCents)]) ?? Infinity) > 0) warnings.push(`${estimate.name}: оценка не связана со статьёй бюджета; покрытие денежными событиями не проверено.`); }
+  for (const line of effectiveBudgetLines(state)) {
     const estimate = treasury.costEstimates.find(row => row.budgetLineId === line.id);
-    const estimated = estimate ? sum([estimate.recognizedCents, estimate.remainingWorkCents, estimate.stockToConsumeCents, estimate.otherRemainingCents])
+    const materialValue = sum((treasury.inventoryLots ?? []).filter(lot => lot.costEstimateId === estimate?.id).map(lot => lot.totalCostCents));
+    const estimated = estimate ? sum([estimate.recognizedCents, estimate.remainingWorkCents, estimate.stockToConsumeCents, estimate.otherRemainingCents, materialValue])
       : treasuryMoneyToCents(line.forecast === undefined ? line.plan : line.forecast);
-    const committed = sum((state.financeEntries ?? []).filter(entry => entry.kind === 'expense' && entry.budgetLineId === line.id).map(entry => treasuryMoneyToCents(entry.amount)));
+    const uncoveredPlans = sum((treasury.cashPlans ?? []).filter(plan => plan.kind === 'expense' && plan.budgetLineId === line.id).map(plan => plan.amountCents - (sum((plan.coverage ?? []).map(part => part.amountCents)) ?? 0)));
+    const committed = sum([...(state.financeEntries ?? []).filter(entry => entry.kind === 'expense' && entry.budgetLineId === line.id).map(entry => treasuryMoneyToCents(entry.amount)), uncoveredPlans]);
     if (estimated === null || committed === null) warnings.push(`${line.name ?? line.id}: покрытие оценки затрат денежным планом не установлено.`);
     else if (estimated > committed) warnings.push(`${line.name ?? line.id}: ${((estimated - committed) / 100).toLocaleString('ru-RU')} ₽ оценки затрат не связаны с денежными событиями; прогноз достройки неполон.`);
   }
@@ -234,6 +284,10 @@ export function treasuryProjection(state, { today, horizonDays = 91, scenario = 
       label: validTreasuryDate(tranche?.forecastDate) ? 'Фиксированная дата прогноза' : contractualDueDate ? 'Договорный срок' : 'Плановая дата обязательства',
       reason: fixedDate ? null : 'Дата денежного события не задана.', offsetDays: 0, calendar: 'calendar' };
     let date = dateResolution.date;
+    if (date && tranche?.dateRule && dateResolution.basis !== 'actual' && workDelayDays) {
+      date = shift(date, workDelayDays); dateResolution.date = date;
+      dateResolution.label += ` · сценарий: работы +${workDelayDays} дн.`;
+    }
     // Keep the original planned/derived date even when cash projection rolls overdue debt forward.
     const scheduledDate = date;
     const certainty = tranche?.certainty ?? 'expected';
@@ -246,44 +300,54 @@ export function treasuryProjection(state, { today, horizonDays = 91, scenario = 
     const contractDifference = dayDifference(scheduledDate, contractualDueDate);
     const scheduledDelayDays = contractDifference === null ? null : Math.max(0, contractDifference);
     if (date && date <= today) date = tomorrow(today); // Preserve original deadline; overdue remains explicit.
-    if (date && entry.kind === 'income' && delay) date = shift(date, delay);
+    if (date && entry.kind === 'income' && delay && !entry.financing) date = shift(date, delay);
     const forecastDifference = dayDifference(date, contractualDueDate);
     const forecastDelayDays = forecastDifference === null ? null : Math.max(0, forecastDifference);
     const excluded = outside || entry.kind === 'income' && certainty === 'tentative' && scenario !== 'base';
     // Contracted obligations do not increase in value just because a scenario changed.
-    const amount = entry.kind === 'expense' && certainty === 'tentative' && costIncrease ? percentAmount(amountCents, costIncrease) : amountCents;
+    const contracted = ['committed', 'accepted', 'paid'].includes(entry.status) || Boolean(entry.approvedAt) || entry.acceptedAmount > 0 || paidPositive(entry) || (ledgerSettlements.get(entry.id) ?? 0) !== 0;
+    const amount = entry.kind === 'expense' && certainty === 'tentative' && costIncrease && !contracted ? percentAmount(amountCents, costIncrease) : amountCents;
     if (amount === null) { warnings.push(`${entry.description}: сумма сценария выходит за точный диапазон.`); return; }
     events.push({ id: `${entry.id}:${suffix}`, entryId: entry.id, description: entry.description, kind: entry.kind,
       amountCents: amount, date, scheduledDate, contractualDueDate, accountId: sourceAccountId, trancheId: tranche?.id,
       certainty, overdue, contractOverdue, forecastDelayDays, scheduledDelayDays, dateResolution,
-      source: tranche?.source ?? plan?.source ?? 'Существующее обязательство', ...(excluded ? { excluded: true } : {}) });
+      source: tranche?.source ?? plan?.source ?? 'Существующее обязательство', sourceType: 'obligation', sourceId: entry.id, ...(excluded ? { excluded: true } : {}) });
     if (outside) warnings.push(`${entry.description}: будущая прямая оплата участником показана отдельно от счетов компании.`);
   };
   for (const entry of state.financeEntries ?? []) {
     const amount = treasuryMoneyToCents(entry.amount), paid = recordedPaid(entry), plan = plans.get(entry.id);
     if (amount === null || paid === null || amount < 0 || paid < 0) { warnings.push(`${entry.description}: некорректная исходная сумма.`); openingKnown = false; continue; }
     const references = treasuryPaymentReferences(entry), refMap = new Map(references.map(payment => [payment.id, payment]));
-    const factMap = new Map((plan?.paymentFacts ?? []).map(fact => [fact.paymentId, fact]));
+    const factMap = new Map([...(plan?.paymentFacts ?? []), ...ledger.legacyFacts.filter(fact => fact.entryId === entry.id)].map(fact => [fact.paymentId, fact]));
     const claimed = sum(references.filter(payment => factMap.get(payment.id)?.confirmation === 'claimed').map(payment => payment.amountCents)) ?? 0;
     for (const reference of references) {
       facts.push({ entry, reference, fact: factMap.get(reference.id) });
       if (reference.date && reference.date > today) warnings.push(`${entry.description}: записанный факт датирован после среза; прогноз требует сверки.`);
     }
     if (sum(references.map(reference => reference.amountCents)) !== paid) warnings.push(`${entry.description}: накопленная оплата и события платежей не сходятся.`);
-    const settled = Math.max(0, paid - claimed), remaining = Math.max(0, amount - settled);
-    if (paid > amount) warnings.push(`${entry.description}: есть переплата; она не потеряна и не считается отрицательным расходом.`);
+    const delta = ledgerSettlements.has(entry.id) ? ledgerSettlements.get(entry.id) : 0;
+    const settled = sum([paid - claimed, delta]);
+    if (settled === null || settled < 0) { warnings.push(`${entry.description}: итог погашений требует сверки.`); openingKnown = false; continue; }
+    const remaining = Math.max(0, amount - settled);
+    const retentionRows = ledger.retentionPlans.filter(row => row.entryId === entry.id && row.amountCents > 0);
+    const retained = sum(retentionRows.map(row => row.amountCents));
+    const unknownRemaining = reason => { addEvent(entry, { ...plan, source: reason }, { certainty: 'expected', source: reason }, remaining, 'unallocated-settlement'); const event = events.at(-1); if (event?.entryId === entry.id) { event.date = null; event.scheduledDate = null; event.dateResolution = { ...event.dateResolution, date: null, anchorDate: null, basis: 'unknown', reason }; } };
+    if (retained === null || retained > remaining) { warnings.push(`${entry.description}: удержания превышают непогашенный остаток; требуется распределение оплат.`); unknownRemaining('Удержания и погашения требуют сверки.'); continue; }
+    const addRetentions = () => { for (const row of retentionRows) { const before = events.length; addEvent(entry, plan, { id: row.trancheId, forecastDate: row.releaseDate, certainty: 'confirmed', source: row.source }, row.amountCents, `retention:${row.id}`); if (events.length > before) { const event = events.at(-1); event.sourceType = 'retention'; event.sourceId = row.id; event.contractualDueDate = null; if (!row.releaseDate) { event.date = null; event.scheduledDate = null; event.dateResolution = { ...event.dateResolution, date: null, anchorDate: null, basis: 'unknown', reason: 'Дата освобождения удержания не определена.' }; } } } };
+    if (settled > amount) warnings.push(`${entry.description}: есть переплата; она не потеряна и не считается отрицательным расходом.`);
     if (!remaining) continue;
-    if (!plan?.tranches?.length) { addEvent(entry, plan, null, remaining, 'remaining'); continue; }
+    if (!plan?.tranches?.length) { addEvent(entry, plan, null, remaining - retained, 'remaining'); addRetentions(); continue; }
     let allocated = 0;
     const pending = [];
     for (const tranche of plan.tranches) {
-      const applied = sum((tranche.paymentAllocations ?? []).map(allocation => factMap.get(allocation.paymentId)?.confirmation === 'claimed' || !refMap.has(allocation.paymentId) ? 0 : allocation.amountCents)) ?? 0;
+      const applied = sum([...(tranche.paymentAllocations ?? []).map(allocation => factMap.get(allocation.paymentId)?.confirmation === 'claimed' || !refMap.has(allocation.paymentId) ? 0 : allocation.amountCents), ...ledger.settlementsByTranche.filter(row => row.entryId === entry.id && row.trancheId === tranche.id).map(row => row.amountCents)]);
+      if (applied === null) { allocated = NaN; continue; }
       allocated += applied;
       pending.push({ tranche, amount: Math.max(0, tranche.amountCents - applied) });
     }
     if (settled !== allocated) {
       // Never guess which dated tranche a historical aggregate settled (no implicit FIFO).
-      unallocatedSettlementCents += Math.abs(settled - allocated);
+      unallocatedSettlementCents += Number.isFinite(allocated) ? Math.abs(settled - allocated) : remaining;
       warnings.push(`${entry.description}: распределите ${Math.abs(settled - allocated) / 100} ₽ записанных оплат по траншам.`);
       addEvent(entry, { ...plan, source: 'Остаток обязательства; распределение прошлых оплат не завершено' }, { certainty: 'expected', source: 'Нужна привязка оплат к траншам' }, remaining, 'unallocated-settlement');
       const last = events.at(-1); if (last?.entryId === entry.id) {
@@ -292,7 +356,39 @@ export function treasuryProjection(state, { today, horizonDays = 91, scenario = 
       }
       continue;
     }
-    for (const item of pending) addEvent(entry, plan, item.tranche, item.amount, item.tranche.id);
+    const retentionByTranche = new Map(pending.map(item => [item.tranche.id, sum(retentionRows.filter(row => row.trancheId === item.tranche.id).map(row => row.amountCents))]));
+    if (retentionRows.some(row => !row.trancheId) || pending.some(item => retentionByTranche.get(item.tranche.id) > item.amount)) { warnings.push(`${entry.description}: распределите удержания по остаткам траншей.`); unknownRemaining('Нужна привязка удержаний к остаткам траншей.'); continue; }
+    for (const item of pending) addEvent(entry, plan, item.tranche, item.amount - retentionByTranche.get(item.tranche.id), item.tranche.id);
+    addRetentions();
+  }
+  const addPlannedCash = (cashPlan, prefix = 'cash_plan') => {
+    const covered = sum((cashPlan.coverage ?? []).map(part => part.amountCents));
+    const remaining = covered === null || !integer(cashPlan.amountCents) ? null : Math.max(0, cashPlan.amountCents - covered);
+    if (remaining === null) { warnings.push(`${cashPlan.name}: плановая сумма некорректна.`); return; }
+    const beforeCount = events.length;
+    addEvent({ id: `${prefix}:${cashPlan.id}`, description: cashPlan.name, kind: cashPlan.kind, financing: prefix === 'loan' }, { sourceAccountId: cashPlan.accountId, source: cashPlan.source },
+      { id: cashPlan.id, forecastDate: cashPlan.date, dateRule: cashPlan.dateRule, certainty: cashPlan.certainty, source: cashPlan.source }, remaining, 'planned');
+    if (events.length > beforeCount) Object.assign(events.at(-1), { sourceType: prefix, sourceId: cashPlan.id, category: cashPlan.category, budgetLineId: cashPlan.budgetLineId });
+  };
+  for (const plan of treasury.cashPlans ?? []) addPlannedCash(plan);
+  for (const plan of savedScenario?.extraCashPlans ?? []) addPlannedCash(plan, 'scenario');
+  const delayCosts = treasuryDelaySummary(state, { today, workDelayDays });
+  for (const row of delayCosts.rows) {
+    const rate = treasury.delayRates.find(item => item.id === row.id);
+    if (row.reason) warnings.push(`${row.name}: ${row.reason}`);
+    if (row.remainingCents === null) { warnings.push(`${row.name}: стоимость задержки не определена; нужны ставка и окончание периода.`); continue; }
+    if (row.coveredCents > row.amountCents) warnings.push(`${row.name}: обязательства превышают пересчитанную стоимость задержки; проверьте основание.`);
+    addPlannedCash({ id: row.id, name: row.name, kind: 'expense', category: rate.category, amountCents: row.remainingCents, date: row.paymentDate, certainty: 'confirmed', source: rate.source, accountId: rate.accountId }, 'delay');
+  }
+  for (const row of ledger.futureEvents) { const before = events.length; addPlannedCash({ id: row.id, name: row.description, kind: row.direction === 'in' ? 'income' : 'expense', amountCents: row.amountCents, date: row.date, accountId: row.accountId, certainty: 'confirmed', source: row.source, category: row.kind }, 'loan'); if (events.length > before) events.at(-1).sourceId = row.sourceId; }
+  // New ledger cash is independent from its allocation to obligations. Offsets have no movement.
+  for (const movement of ledger.cashMovements) {
+    if (movement.date > today || accountId && movement.accountId && movement.accountId !== accountId) continue;
+    const account = accountMap.get(movement.accountId);
+    if (!account) { if (accounts.some(row => row.opening?.asOf < movement.date)) { openingKnown = false; warnings.push('Денежное движение журнала не связано со счётом; остаток требует сверки.'); } continue; }
+    if (!integer(accountBalances.get(account.id)) || movement.date <= account.opening.asOf) continue;
+    const balance = sum([accountBalances.get(account.id), movement.inflowCents, -movement.outflowCents]); accountBalances.set(account.id, balance);
+    if (balance === null) { openingKnown = false; warnings.push(`${account.name}: денежные движения выходят за точный диапазон.`); }
   }
   // Only confirmed, mapped existing payments move an account after its snapshot.
   for (const { entry, reference, fact } of facts) {
@@ -360,9 +456,20 @@ export function treasuryProjection(state, { today, horizonDays = 91, scenario = 
       }
     }
   }
-  return { today, scenario, days, events, openingKnown, openingCents, minBalanceCents: minimum, firstDeficitDate,
+  return { today, scenario, ...(savedScenario ? { savedScenarioId: savedScenario.id, scenarioName: savedScenario.name } : {}), delayCosts, days, events, openingKnown, openingCents, minBalanceCents: minimum, firstDeficitDate,
     peakFundingCents: minimum === null ? null : Math.max(0, -minimum), peakReserveFundingCents: minimum === null || !reserveKnown ? null : Math.max(0, reserve -minimum),
     unallocatedCents, unallocatedSettlementCents, warnings: unique(warnings), completeness };
+}
+
+/** A retained portion remains part of its tranche; it is not another obligation. */
+export function treasuryTrancheBalance(projection, entryId, trancheId) {
+  const unknown = projection.events.some(event => event.entryId === entryId && event.id.endsWith(':unallocated-settlement'));
+  const events = projection.events.filter(event => event.entryId === entryId && event.trancheId === trancheId);
+  const retentions = events.filter(event => event.sourceType === 'retention');
+  return { remainingCents: unknown ? null : sum(events.map(event => event.amountCents)),
+    heldCents: unknown ? null : sum(retentions.map(event => event.amountCents)),
+    payableCents: unknown ? null : sum(events.filter(event => event.sourceType !== 'retention').map(event => event.amountCents)),
+    unknown, retentions };
 }
 
 /** Pure preview: a PPR change recalculates expected cash, never edits deadlines or payment facts. */
@@ -414,6 +521,13 @@ export function validateTreasuryChanges(previous, next, identity, now) {
   for (const account of treasury.accounts) {
     if (!text(account?.id) || accountIds.has(account.id) || !text(account.name) || !text(account.legalEntityId) || account.currency !== 'RUB') return 'У счёта нужны уникальный ID, название, юрлицо и валюта RUB.';
     accountIds.add(account.id);
+    const oldAccount = old?.accounts?.find(row => row.id === account.id);
+    const importedAccount = (next.financeLedger?.operations ?? []).some(row => row.sourceKey && row.accountId === account.id) || (next.financeLedger?.confirmations ?? []).some(row => row.sourceKey && row.bankAccountId === account.id);
+    if (oldAccount && oldAccount.sharedAccountKey !== account.sharedAccountKey && importedAccount) return 'Общий идентификатор счёта после импорта банковских строк защищён от изменения, чтобы не повторить денежные движения.';
+    const referencedAccount = (next.financeLedger?.operations ?? []).some(row => row.accountId === account.id || row.toAccountId === account.id) || (next.financeLedger?.loans ?? []).some(row => row.accountId === account.id);
+    if (oldAccount && oldAccount.legalEntityId !== account.legalEntityId && referencedAccount) return 'Владелец счёта с зарегистрированными расчётами защищён; создайте счёт другого юридического лица отдельно.';
+    if (account.isProjectDedicated && account.sharedAccountKey !== undefined) return 'Счёт с общим идентификатором нельзя пометить как отдельный счёт проекта.';
+    if (account.sharedAccountKey !== undefined && (!text(account.sharedAccountKey) || account.sharedAccountKey.length > 160)) return 'Общий идентификатор счёта должен быть непустым и не длиннее 160 символов.';
     if (own(account, 'restrictedCents') && !nonnegative(account.restrictedCents) || own(account, 'projectAllocationCents') && !nonnegative(account.projectAllocationCents)) return 'Ограниченные и распределённые средства должны быть неотрицательными копейками.';
     if (account.opening) {
       const opening = account.opening;
@@ -422,6 +536,7 @@ export function validateTreasuryChanges(previous, next, identity, now) {
       if ((account.restrictedCents ?? 0) > Math.max(0, opening.amountCents)) return 'Ограниченная сумма превышает положительный остаток счёта.';
       if (own(account, 'projectAllocationCents') && account.projectAllocationCents > Math.max(0, opening.amountCents - (account.restrictedCents ?? 0))) return 'Проекту распределено больше доступных средств счёта.';
     } else if (own(account, 'projectAllocationCents')) return 'Для распределения средств сначала задайте начальный остаток.';
+    if (!account.isProjectDedicated && own(account, 'projectAllocationCents') && !text(account.sharedAccountKey) && stable(account) !== stable(oldAccount)) return 'Для распределения общего счёта задайте его общий идентификатор во всех проектах.';
   }
   const entries = new Map((next.financeEntries ?? []).map(entry => [entry.id, entry])), entryIds = new Set();
   for (const plan of treasury.entryPlans) {
@@ -466,9 +581,11 @@ export function validateTreasuryChanges(previous, next, identity, now) {
     if (!text(row?.id) || costIds.has(row.id) || !text(row.name) || !text(row.source)) return 'Оценке себестоимости нужны уникальный ID, название и источник.';
     costIds.add(row.id);
     if (['recognizedCents', 'remainingWorkCents', 'stockToConsumeCents', 'otherRemainingCents', 'approvedBudgetCents'].some(key => !nonnegative(row[key]))) return 'Все части себестоимости должны быть неотрицательными суммами в копейках.';
-    if (row.budgetLineId && (lineIds.has(row.budgetLineId) || !(next.budgetLines ?? []).some(line => line.id === row.budgetLineId))) return 'Одна статья бюджета может иметь только одну текущую оценку достройки.';
+    if (row.budgetLineId && (lineIds.has(row.budgetLineId) || !effectiveBudgetLines(next).some(line => line.id === row.budgetLineId))) return 'Одна статья бюджета может иметь только одну текущую оценку достройки.';
     if (row.budgetLineId) lineIds.add(row.budgetLineId);
   }
+  const planningError = validateTreasuryPlanning(previous, next, identity, now);
+  if (planningError) return planningError;
   if (own(treasury, 'scenarios') && treasury.scenarios !== undefined && (!treasury.scenarios || typeof treasury.scenarios !== 'object')) return 'Некорректные параметры сценариев.';
   if (treasury.scenarios) {
     const s = treasury.scenarios;
@@ -481,7 +598,7 @@ export function validateTreasuryChanges(previous, next, identity, now) {
     if (stable(review) !== stable(old?.cashScopeReview)) {
       if (review.fingerprint !== treasuryScopeFingerprint(next)) return 'Состав денежных событий изменился. Повторите сверку полноты.';
       if (today && review.asOf > today) return 'Сверка полноты не может быть датирована будущим днём.';
-      if (!treasuryCostSummary(next).complete) return 'Сначала заполните оценку достройки по всем статьям бюджета.';
+      if (!treasuryCostSummary(next, { today }).complete) return 'Сначала заполните оценку достройки по всем статьям бюджета.';
     }
   }
   const changed = fields.filter(field => stable(old?.[field]) !== stable(treasury[field]));

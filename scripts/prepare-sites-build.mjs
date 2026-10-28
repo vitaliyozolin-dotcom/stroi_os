@@ -24,6 +24,10 @@ await mkdir(`${projectRoot}dist/server/runtime`, { recursive: true });
 
 await Promise.all([
   copyFile(`${projectRoot}src/domain/treasury.js`, `${projectRoot}dist/src/domain/treasury.js`),
+  copyFile(`${projectRoot}src/domain/finance-ledger.js`, `${projectRoot}dist/src/domain/finance-ledger.js`),
+  copyFile(`${projectRoot}src/domain/finance-automation.js`, `${projectRoot}dist/src/domain/finance-automation.js`),
+  copyFile(`${projectRoot}src/domain/finance-portfolio.js`, `${projectRoot}dist/src/domain/finance-portfolio.js`),
+  copyFile(`${projectRoot}src/domain/treasury-planning.js`, `${projectRoot}dist/src/domain/treasury-planning.js`),
   copyFile(`${projectRoot}src/application/tasks-runtime.js`, `${projectRoot}dist/src/application/tasks-runtime.js`),
   copyFile(`${projectRoot}src/application/module-repository-runtime.js`, `${projectRoot}dist/src/application/module-repository-runtime.js`),
   copyFile(`${projectRoot}src/application/project-records.js`, `${projectRoot}dist/src/application/project-records.js`),
@@ -73,6 +77,8 @@ await Promise.all([
   copyFile(`${projectRoot}sites/lib/upload-admission.js`, `${projectRoot}dist/server/lib/upload-admission.js`),
   copyFile(`${projectRoot}sites/lib/validation.js`, `${projectRoot}dist/server/lib/validation.js`),
   copyFile(`${projectRoot}sites/projects/routes.js`, `${projectRoot}dist/server/projects/routes.js`),
+  copyFile(`${projectRoot}sites/projects/shared-finance-account.js`, `${projectRoot}dist/server/projects/shared-finance-account.js`),
+  copyFile(`${projectRoot}sites/projects/finance-portfolio.js`, `${projectRoot}dist/server/projects/finance-portfolio.js`),
   copyFile(`${projectRoot}sites/projects/finance.js`, `${projectRoot}dist/server/projects/finance.js`),
   copyFile(`${projectRoot}sites/projects/write.js`, `${projectRoot}dist/server/projects/write.js`),
   copyFile(`${projectRoot}sites/routes/api.js`, `${projectRoot}dist/server/routes/api.js`),

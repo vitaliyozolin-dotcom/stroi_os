@@ -32,7 +32,7 @@ export const applyFinancePlanningResult = (state: AppState, result: FinancePlann
 
 export const financeFactsSnapshot = (state: AppState): FinanceFactsSnapshot => ({
   ...financePlanningSnapshot(state), projectCode: state.project.code,
-  procurement: state.procurement, checkpoints: state.checkpoints, stages: state.stages, documents: state.documents,
+  procurement: state.procurement, checkpoints: state.checkpoints, stages: state.stages, documents: state.documents, financeLedger: state.financeLedger, treasury: state.treasury,
 });
 
 /** Append a finance document without replacing the document registry or unrelated contexts. */

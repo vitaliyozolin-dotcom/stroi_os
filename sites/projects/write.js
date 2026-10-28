@@ -11,6 +11,9 @@ import { validateFinanceChanges } from './finance.js';
 import { validateBaselineChanges } from './baseline.js';
 import { validateStageControl } from './stage-control.js';
 import { validateTreasuryChanges } from '../../src/domain/treasury.js';
+import { validateFinanceLedgerChanges, validateFinanceLedgerShape } from '../../src/domain/finance-ledger.js';
+import { validateFinanceAutomationChanges } from '../../src/domain/finance-automation.js';
+import { requiresPortfolioCheck, validatePortfolioWrite } from '../../src/domain/finance-portfolio.js';
 
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_JSON_BODY_BYTES = 32 * 1024;
@@ -22,7 +25,8 @@ export const createProjectWriteHandler = ({
   applyAutomations,
   buildNotificationPlan,
   dispatchNotifications,
-}) => async (request, env, context) => {
+}) => {
+const write = async (request, env, context, atomicFinance = false, afterCommit, notificationEnv = env) => {
   if (!env.DB) return json({ ok: false, error: 'storage_unavailable' }, 503);
   const projectId = clean(new URL(request.url).searchParams.get('projectId'), 100);
   if (!validProjectId(projectId)) return json({ ok: false, error: 'invalid_project' }, 422);
@@ -84,10 +88,25 @@ export const createProjectWriteHandler = ({
     if (stageError) return json({ ok: false, error: 'invalid_stage_transition', message: stageError }, 422);
     const baselineError = validateBaselineChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
     if (baselineError) return json({ ok: false, error: 'invalid_baseline_transition', message: baselineError }, 422);
+    // Shape validation protects the read calculations before legacy payment events
+    // are stamped. Full settlement validation must see those authoritative events.
+    const ledgerShapeError = validateFinanceLedgerShape(mergedState.financeLedger);
+    if (ledgerShapeError) return json({ ok: false, error: 'invalid_finance_ledger', message: ledgerShapeError }, 422);
     const financeError = validateFinanceChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
     if (financeError) return json({ ok: false, error: 'invalid_finance_transition', message: financeError }, 422);
+    const ledgerError = validateFinanceLedgerChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
+    if (ledgerError) return json({ ok: false, error: 'invalid_finance_ledger', message: ledgerError }, 422);
     const treasuryError = validateTreasuryChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
     if (treasuryError) return json({ ok: false, error: 'invalid_treasury_transition', message: treasuryError }, 422);
+    const automationError = validateFinanceAutomationChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
+    if (automationError) return json({ ok: false, error: 'invalid_finance_automation', message: automationError }, 422);
+    if (requiresPortfolioCheck(previousSnapshot?.state ?? null, mergedState)) {
+      if (!atomicFinance) return json({ ok: false, error: 'financial_transaction_unavailable', message: 'Хранилище не поддерживает атомарную сверку нескольких проектов.' }, 503);
+      const otherRows = await env.DB.prepare('SELECT state_json FROM project_state WHERE project_id <> ?').bind(projectId).all();
+      const others = (otherRows?.results ?? []).map(row => JSON.parse(row.state_json));
+      const portfolioError = validatePortfolioWrite(previousSnapshot?.state ?? null, mergedState, others);
+      if (portfolioError) return json({ ok: false, error: 'invalid_portfolio_finance', message: portfolioError }, 422);
+    }
     const state = applyAutomations(previousSnapshot?.state ?? null, mergedState, actor);
     let stateJson;
     try {
@@ -147,7 +166,12 @@ export const createProjectWriteHandler = ({
       return json({ ok: false, error: 'revision_conflict', current: safeCurrent }, 409);
     }
 
-    context.waitUntil(dispatchNotifications(previousSnapshot?.state ?? null, state, env, actor, new URL(request.url).origin, summary, nextRevision, notificationPlan).catch(() => null));
+    // Starting an async function starts its side effects immediately. Under the
+    // outer financial transaction, enqueue the callback until COMMIT succeeds and
+    // use the original pool, never a released transaction-scoped client.
+    const dispatch = () => dispatchNotifications(previousSnapshot?.state ?? null, state, notificationEnv, actor, new URL(request.url).origin, summary, nextRevision, notificationPlan).catch(() => null);
+    if (afterCommit) afterCommit.push(dispatch);
+    else context.waitUntil(dispatch());
     return json({
       ok: true,
       snapshot: {
@@ -163,4 +187,15 @@ export const createProjectWriteHandler = ({
   } catch {
     return json({ ok: false, error: 'storage_error' }, 500);
   }
+};
+return async (request, env, context) => {
+  if (!env.DB?.financialTransaction) return write(request, env, context);
+  try {
+    const afterCommit = [];
+    const response = await env.DB.financialTransaction(db => write(request, { ...env, DB: db }, context, true, afterCommit, env));
+    if (response.ok) for (const dispatch of afterCommit) context.waitUntil(dispatch());
+    return response;
+  }
+  catch { return json({ ok: false, error: 'storage_error' }, 500); }
+};
 };

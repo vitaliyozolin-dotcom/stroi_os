@@ -1,13 +1,15 @@
-import type { TreasuryState, TreasuryScenario, TreasuryDateRule, TreasuryCertainty } from '../entities/index';
+import type { TreasuryState, TreasuryScenario, TreasuryDateRule, TreasuryCertainty, FinanceLedgerState } from '../entities/index';
 export type { TreasuryState, TreasuryScenario, TreasuryDateRule, TreasuryCertainty } from '../entities/index';
 export interface TreasuryEntry {
   id: string; kind: 'expense' | 'income'; amount: number; status?: string;
   description: string; dueDate?: string; paidAmount?: number | null; paidAt?: string; budgetLineId?: string;
+  legacyPayment?: { amount: number; lastRecordedDate?: string; document?: string };
   payments?: { id: string; amount: number; date: string }[];
 }
 export interface TreasuryProject {
   project: { id: string };
   treasury?: TreasuryState;
+  financeLedger?: FinanceLedgerState;
   financeEntries: TreasuryEntry[];
   budgetLines?: { id: string; plan: number; forecast?: number; name?: string }[];
   stages?: { id: string; name?: string; shortName?: string; status?: string; planStart?: string; forecastEnd?: string; actualStart?: string; actualEnd?: string; completedOn?: string; acceptedAt?: string; schedule?: unknown; siteUpdate?: { readyOn?: string; acceptanceOn?: string } }[];
@@ -32,6 +34,8 @@ export interface TreasuryProjectionEvent {
   forecastDelayDays: number | null;
   /** Original fixed/PPR schedule minus contract, minimum zero; unknown = null. */
   scheduledDelayDays: number | null;
+  sourceType?: 'obligation' | 'cash_plan' | 'delay' | 'scenario' | 'loan' | 'transfer' | 'retention';
+  sourceId?: string; category?: string; budgetLineId?: string;
 }
 export interface TreasuryProjectionDay {
   date: string; inflowCents: number; outflowCents: number; balanceCents: number | null;
@@ -43,9 +47,12 @@ export interface TreasuryProjection {
   firstDeficitDate: string | null; peakFundingCents: number | null; peakReserveFundingCents: number | null;
   unallocatedCents: { income: number; expense: number }; unallocatedSettlementCents: number;
   warnings: string[]; completeness: boolean;
+  savedScenarioId?: string; scenarioName?: string;
+  delayCosts: TreasuryDelaySummary;
 }
 export function emptyTreasury(): TreasuryState;
 export function treasuryScopeFingerprint(state: TreasuryProject): string;
+export function treasuryScenarioFingerprint(state: TreasuryProject): string;
 export function treasuryMoneyToCents(value: unknown): number | null;
 export function validTreasuryDate(value: unknown): value is string;
 export function resolveTreasuryDateRule(state: TreasuryProject, rule: TreasuryDateRule, today?: string): string | null;
@@ -64,7 +71,11 @@ export interface TreasuryScheduleImpact {
 export function treasuryScheduleImpact(previous: TreasuryProject, next: TreasuryProject, options: { today: string; horizonDays?: number; accountId?: string }): TreasuryScheduleImpact;
 /** Existing ledger projection. Legacy aggregates have an explicit synthetic reference only. */
 export function treasuryPaymentReferences(entry: TreasuryEntry): { id: string; amountCents: number; date: string | null; legacy: boolean }[];
-export function treasuryProjection(state: TreasuryProject, options: { today: string; horizonDays?: number; scenario?: TreasuryScenario; accountId?: string }): TreasuryProjection;
-export function treasuryCostSummary(state: TreasuryProject): { recognizedCents: number | null; etcCents: number | null; eacCents: number | null; budgetCents: number | null; varianceCents: number | null; complete: boolean; warnings: string[] };
+export function treasuryProjection(state: TreasuryProject, options: { today: string; horizonDays?: number; scenario?: TreasuryScenario; accountId?: string; savedScenarioId?: string }): TreasuryProjection;
+export function treasuryTrancheBalance(projection: TreasuryProjection, entryId: string, trancheId: string): { remainingCents: number | null; heldCents: number | null; payableCents: number | null; unknown: boolean; retentions: TreasuryProjectionEvent[] };
+export function treasuryCostSummary(state: TreasuryProject, options?: { today?: string; workDelayDays?: number }): { recognizedCents: number | null; etcCents: number | null; eacCents: number | null; budgetCents: number | null; varianceCents: number | null; originalBudgetCents: number | null; originalVarianceCents: number | null; inventoryStockCents: number | null; inventoryConsumedCents: number | null; complete: boolean; warnings: string[] };
+export interface TreasuryDelaySummary { rows: { id: string; name: string; endDate: string | null; days: number | null; amountCents: number | null; coveredCents: number | null; recognizedCents: number; remainingCents: number | null; paymentDate: string | null; reason: string | null }[]; totalCents: number | null; remainingCents: number | null }
+export function treasuryDelaySummary(state: TreasuryProject, options?: { today?: string; workDelayDays?: number }): TreasuryDelaySummary;
+export { treasuryInventorySummary, treasuryBudgetComparison } from './treasury-planning.js';
 /** Validates without mutations when now is omitted; server stamps history after successful validation. */
 export function validateTreasuryChanges(previous: TreasuryProject | null, next: TreasuryProject, identity: { role: string; name?: string; id?: string; isOwner?: boolean }, now?: string): string;

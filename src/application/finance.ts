@@ -13,7 +13,7 @@ const planningSnapshot = (state: FinanceReadModel): FinancePlanningSnapshot => (
   projectId: state.project.id, budgetLines: state.budgetLines, budgetMeta: state.budgetMeta, financeEntries: state.financeEntries,
 });
 const factsSnapshot = (state: FinanceReadModel): FinanceFactsSnapshot => ({
-  ...planningSnapshot(state), projectCode: state.project.code, procurement: state.procurement, checkpoints: state.checkpoints, stages: state.stages, documents: state.documents,
+  ...planningSnapshot(state), projectCode: state.project.code, procurement: state.procurement, checkpoints: state.checkpoints, stages: state.stages, documents: state.documents, financeLedger: state.financeLedger, treasury: state.treasury,
 });
 
 /** Financial workflows depend only on the scoped repository, never the project write contract. */

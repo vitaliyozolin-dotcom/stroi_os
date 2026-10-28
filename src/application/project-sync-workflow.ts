@@ -48,6 +48,27 @@ export const applyProjectRemote = (workflow: ProjectSyncWorkflow, remote: Remote
   workflow.queueCache(cached(model));
 };
 
+/** External atomic commands must merge into local drafts, never discard them. */
+export const reconcileProjectExternalUpdate = (workflow: ProjectSyncWorkflow, remote: RemoteProjectSnapshot): 'ignored' | 'deferred' | 'applied' | 'conflict' => {
+  const current = workflow.readModel();
+  if (remote.projectId !== current.state.project.id || remote.revision <= current.revision) return 'ignored';
+  const conflict = workflow.conflict();
+  if (conflict?.projectId === remote.projectId && conflict.revision >= remote.revision) return 'ignored';
+  // During save, dirty=false can mean a submitted, unacknowledged local edit.
+  if (workflow.saving()) return 'deferred';
+  const resolution = reconcileRemoteSnapshot(conflict ? { ...current, dirty: true } : current, remote);
+  if (resolution.kind === 'conflict') {
+    workflow.setConflict(remote);
+    workflow.emit({ phase: 'conflict', revision: current.revision, updatedAt: current.updatedAt, conflicts: resolution.conflicts });
+    return 'conflict';
+  }
+  workflow.writeModel(resolution.model);
+  workflow.setConflict(null);
+  workflow.queueCache(cached(resolution.model));
+  workflow.emit({ phase: 'saved', revision: resolution.model.revision, updatedAt: resolution.model.updatedAt, dirty: resolution.model.dirty });
+  return 'applied';
+};
+
 export const flushProjectChanges = async (workflow: ProjectSyncWorkflow) => {
   let model = workflow.readModel();
   if (!model.ready || workflow.saving() || workflow.conflict() || !model.dirty) return;

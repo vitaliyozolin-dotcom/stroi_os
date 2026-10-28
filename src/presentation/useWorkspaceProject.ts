@@ -24,6 +24,7 @@ export function useWorkspaceProject(session: AuthenticatedUser | null, role: Use
     useServerVersion,
     keepLocalVersion,
     applyServerSnapshot,
+    reconcileServerSnapshot,
     projects,
     switchProject,
     createProject,
@@ -51,5 +52,5 @@ export function useWorkspaceProject(session: AuthenticatedUser | null, role: Use
     }
   }, [session, role, page, route, state.project.id, sync.phase, switchProject, changeLocation, location.pathname]);
 
-  return { state, updateState, sync, localCache, conflict, retry, useServerVersion, keepLocalVersion, applyServerSnapshot, projects, switchProject, createProject, route, page };
+  return { state, updateState, sync, localCache, conflict, retry, useServerVersion, keepLocalVersion, applyServerSnapshot, reconcileServerSnapshot, projects, switchProject, createProject, route, page };
 }

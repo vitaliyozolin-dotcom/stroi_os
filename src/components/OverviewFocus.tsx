@@ -32,7 +32,7 @@ export function OverviewFocus({ state, role, show, onNavigate }: {
   if (show('decisions')) state.decisions.filter(item => item.status === 'waiting').forEach(item => actions.push({ title: item.title, detail: `Ожидается решение${item.dueDate ? ` · до ${formatDate(item.dueDate)}` : ''}` }));
   const reviewTasks = state.tasks.filter(task => task.status === 'review' && !task.id.startsWith('auto-stage-') && !overdue.some(row => row.record.id === task.id));
   if (show('tasks') && reviewTasks.length) actions.push({ title: 'Проверить выполненные задачи', detail: `На проверке: ${reviewTasks.length}`, page: 'tasks' });
-  const expenses = state.financeEntries.filter(entry => entry.kind === 'expense' && paidAmountFor(entry) > 0)
+  const expenses = state.financeEntries.filter(entry => entry.kind === 'expense' && paidAmountFor(entry, state) > 0)
     .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
   const supplies = state.procurement.filter(item => ['ordered', 'in_transit'].includes(item.status))
     .sort((a, b) => a.neededBy.localeCompare(b.neededBy)).slice(0, 2);
@@ -56,14 +56,14 @@ export function OverviewFocus({ state, role, show, onNavigate }: {
       <header className="overview-focus__header"><h2>Последние расходы</h2><button type="button" className="text-button" onClick={() => onNavigate('finance')}>Все <ArrowUpRight size={16} /></button></header>
       <p className="overview-focus__hint">По дате записи · учтённые оплаты</p>
       <div className="overview-focus__expenses">{expenses.map(entry => {
-        const movements = paymentMovements(entry).filter(movement => movement.amount > 0);
+        const movements = paymentMovements(entry, state).filter(movement => movement.amount > 0);
         const date = movements.length === 1 ? movements[0].date : null;
         const prefix = `${entry.counterparty} · `;
         const description = entry.description.startsWith(prefix) ? entry.description.slice(prefix.length) : entry.description;
         const title = description.split('. ')[0] || entry.description;
         const counterparty = entry.counterparty.startsWith('Не указан в смете') ? '' : entry.counterparty;
         return <button className="overview-focus__expense" type="button" key={entry.id} onClick={() => onNavigate('finance', entry.id)}>
-          <span><strong>{title}</strong><small>{counterparty && `${counterparty} · `}{date ? `оплата ${formatDate(date)}` : movements.length > 1 ? 'Несколько оплат' : 'Дата оплаты не указана'}</small></span><b>{money(paidAmountFor(entry))}</b><ChevronRight size={16} />
+          <span><strong>{title}</strong><small>{counterparty && `${counterparty} · `}{date ? `оплата ${formatDate(date)}` : movements.length > 1 ? 'Несколько оплат' : 'Дата оплаты не указана'}</small></span><b>{money(paidAmountFor(entry, state))}</b><ChevronRight size={16} />
         </button>;
       })}</div>
       {!expenses.length && <p className="overview-focus__empty">Учтённых оплат пока нет.</p>}

@@ -1,4 +1,4 @@
-import type { ProjectDocument } from '../entities/index';
+import type { ProjectDocument, VerifiedDocumentMetadata } from '../entities/index';
 import { approveExpenseEntry, acceptExpenseEntry, recordPaymentEntry, recordReceiptEntry, type FinanceAcceptanceContext, type FinanceEntryResult, type FinanceFactInput, type FinancePlanningSnapshot } from '../domain/finance/index.js';
 import type { FinanceCommandContext } from './finance-context';
 import { financeOwnedSnapshot, type FinancePlanningChange } from './finance-context-planning.ts';
@@ -8,13 +8,13 @@ export type { UploadedDocumentFile } from '../domain/document-records.js';
 export interface FinanceFactsSnapshot extends FinancePlanningSnapshot, FinanceAcceptanceContext { projectCode: string; documents?: ProjectDocument[] }
 export interface FinanceFactsChange extends FinancePlanningChange { expectedReferences: string; appendDocument?: ProjectDocument; expectedDocument?: { id: string; value: string }; attachmentOnly?: boolean }
 export type FinanceFactsCommandResult = { ok: true; change: FinanceFactsChange | null } | { ok: false; error: string };
-export const financeAcceptanceSnapshot = (state: FinanceAcceptanceContext) => JSON.stringify([state.procurement, state.checkpoints, state.stages]);
+export const financeAcceptanceSnapshot = (state: FinanceAcceptanceContext) => JSON.stringify([state.procurement, state.checkpoints, state.stages, state.financeLedger, state.treasury]);
 
 /** Text is an explanation; only an uploaded file or existing private document is file evidence. */
 export type FactCommand = FinanceFactInput & { entryId: string; uploadedFile?: UploadedDocumentFile };
 export interface AttachFinanceDocumentCommand {
   entryId: string; category: 'invoice' | 'other'; document?: string;
-  uploadedFile?: UploadedDocumentFile; documentId?: string;
+  uploadedFile?: UploadedDocumentFile; documentId?: string; metadata?: VerifiedDocumentMetadata;
 }
 const missingEntry = (): FinanceFactsCommandResult => ({ ok: false, error: 'Финансовая операция не найдена. Обновите список.' });
 const money = (value: number) => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
@@ -55,6 +55,11 @@ export const attachFinanceDocument = (state: FinanceFactsSnapshot, input: Attach
   const entry = state.financeEntries.find(item => item.id === input.entryId);
   if (!entry) return missingEntry();
   if (!['invoice', 'other'].includes(input.category) || input.document !== undefined && (typeof input.document !== 'string' || input.document.trim().length > 500)) return { ok: false, error: 'Выберите тип документа и название до 500 символов.' };
+  if (input.metadata) {
+    const metadata = input.metadata, recognition = metadata.recognition;
+    if (!/^[a-f0-9]{64}$/.test(metadata.sourceSha256) || !recognition || recognition.sha256 !== metadata.sourceSha256 || recognition.reviewed !== true || !['pdf_text', 'image_ocr', 'mixed_pdf'].includes(recognition.method) || !Number.isInteger(recognition.pageCount) || recognition.pageCount < 1 || recognition.pageCount > 20 || recognition.confidence !== null && (!Number.isFinite(recognition.confidence) || recognition.confidence < 0 || recognition.confidence > 100) || recognition.amountCents !== undefined && (!Number.isSafeInteger(recognition.amountCents) || recognition.amountCents < 0)) return { ok: false, error: 'Проверьте реквизиты распознанного документа.' };
+    if (metadata.number !== undefined && (typeof metadata.number !== 'string' || metadata.number.length > 60) || metadata.documentDate && (!/^\d{4}-\d{2}-\d{2}$/.test(metadata.documentDate) || !Number.isFinite(Date.parse(metadata.documentDate)) || new Date(metadata.documentDate).toISOString().slice(0, 10) !== metadata.documentDate)) return { ok: false, error: 'Проверьте номер и дату документа.' };
+  }
   const evidence = resolveEvidence(state, input, true);
   if (!evidence.ok) return evidence;
   const reference = evidence.reference, file = input.uploadedFile;
@@ -67,7 +72,8 @@ export const attachFinanceDocument = (state: FinanceFactsSnapshot, input: Attach
     updatedAt: timestamp, clientVisible: false, status: 'current',
     direction: entry.kind === 'expense' ? 'incoming' : 'outgoing',
     counterpartyId: entry.counterpartyId, stageId: entry.stageId, financeEntryId: entry.id,
-    documentDate: reference?.documentDate, number: reference?.number,
+    documentDate: reference?.documentDate ?? input.metadata?.documentDate, number: reference?.number ?? input.metadata?.number,
+    sourceSha256: reference?.sourceSha256 ?? input.metadata?.sourceSha256, recognition: reference?.recognition ?? input.metadata?.recognition,
     receivedAt: entry.kind === 'expense' ? timestamp : undefined,
     sentAt: entry.kind === 'income' ? timestamp : undefined,
     storageLocation: `ИКИОМА ОС / ${state.projectCode} / Финансы`,

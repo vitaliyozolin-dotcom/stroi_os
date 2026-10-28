@@ -37,6 +37,12 @@ export const stageCanStart = (state, stage) => {
     if (!stage.schedule.updatedAt || stage.schedule.kind === 'summary') return false;
     return (stage.schedule.dependencies ?? []).every((dependency) => {
       const previous = (state.stages ?? []).find((s) => s.id === dependency.stageId);
+      const type = dependency.type ?? 'FS';
+      if (!previous || !['FS', 'SS', 'FF'].includes(type) || !['completed', 'accepted'].includes(dependency.gate) || type === 'SS' && previous.schedule?.kind === 'summary' || !Number.isInteger(dependency.lagDays) || dependency.lagDays < -365 || dependency.lagDays > 365
+        || dependency.gate === 'accepted' && (type === 'SS' || dependency.lagDays < 0)) return false;
+      // Finish-to-finish restricts completion, not permission to begin.
+      if (type === 'FF') return true;
+      if (type === 'SS') return validPlanDate(previous.actualStart) && planDays(planToday(), previous.actualStart) >= dependency.lagDays;
       const complete = (row, seen = new Set()) => {
         if (!row || seen.has(row.id)) return null;
         seen.add(row.id);

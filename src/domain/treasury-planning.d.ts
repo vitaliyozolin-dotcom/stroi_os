@@ -1,0 +1,6 @@
+import type { TreasuryState, TreasuryBudgetVersion } from '../entities/index';
+export interface InventorySummary { rows: { id: string; name: string; costEstimateId: string; unit: string; quantityMillis: number; consumedQuantityMillis: number | null; remainingQuantityMillis: number | null; receivedCents: number | null; consumedCents: number | null; stockCents: number | null }[]; receivedCents: number | null; consumedCents: number | null; stockCents: number | null; valid: boolean }
+export function treasuryInventorySummary(treasury?: TreasuryState): InventorySummary;
+export function treasuryBudgetComparison(state: { treasury?: TreasuryState; budgetLines?: { id: string; name?: string; plan: number }[] }, versionId?: string): { selected: TreasuryBudgetVersion | null; comparable: boolean; original: TreasuryBudgetVersion | null; rows: { id: string; name: string; originalCents: number | null; approvedCents: number | null; changeCents: number | null }[]; originalCents: number | null; approvedCents: number | null; changeCents: number | null };
+export function treasuryRateDays(baselineEnd: string, endDate: string | null, calendar: 'calendar' | 'workdays'): number | null;
+export function validateTreasuryPlanning(previous: unknown, next: unknown, identity: { name?: string; id?: string }, now?: string): string;

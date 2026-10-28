@@ -5,6 +5,8 @@ export type * from './counterparty';
 export type * from './decision';
 export type * from './finance';
 export type * from './treasury';
+export type * from './finance-ledger';
+export type * from './finance-automation';
 export type * from './lead';
 export type * from './procurement';
 export type * from './project';

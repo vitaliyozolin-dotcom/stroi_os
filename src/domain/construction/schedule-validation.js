@@ -24,7 +24,10 @@ export function validateScheduleReview(previous, next, identity, now = new Date(
       if (s.kind === 'summary' && (!s.summaryOf.length || s.dependencies.length) || s.kind !== 'summary' && s.summaryOf.length) return 'Сводная строка объединяет работы без собственной длительности и связей; связи задаются вложенным работам.';
       if (s.summaryOf.length > byId.size || new Set(s.summaryOf).size !== s.summaryOf.length || s.summaryOf.some((id) => !byId.has(id) || id === stage.id || byId.get(id).schedule?.kind === 'summary')) return 'Сводная строка должна ссылаться на разные существующие работы, а не на другую сводную строку.';
       if (s.dependencies.length > byId.size || new Set(s.dependencies.map((d) => d?.stageId)).size !== s.dependencies.length
-        || s.dependencies.some((d) => !d || !byId.has(d.stageId) || d.stageId === stage.id || !['completed', 'accepted'].includes(d.gate) || !Number.isInteger(d.lagDays) || d.lagDays < 0 || d.lagDays > 365)) return 'Проверьте предшественников, условие выполнения/приёмки и календарный лаг от 0 до 365 дней.';
+        || s.dependencies.some((d) => !d || !byId.has(d.stageId) || d.stageId === stage.id || !['FS', 'SS', 'FF'].includes(d.type ?? 'FS')
+          || !['completed', 'accepted'].includes(d.gate) || !Number.isInteger(d.lagDays) || d.lagDays < -365 || d.lagDays > 365
+          || d.gate === 'accepted' && (d.type === 'SS' || d.lagDays < 0)
+          || d.type === 'SS' && byId.get(d.stageId)?.schedule?.kind === 'summary')) return 'Проверьте связи FS/SS/FF и календарный лаг от −365 до 365 дней. Приёмка допускает только FS/FF без опережения; SS связывает отдельные работы.';
       if (s.daysOff.some((day) => !validPlanDate(day)) || new Set(s.daysOff).size !== s.daysOff.length) return 'Исключения календаря должны быть уникальными существующими датами.';
       stage.schedule = { ...s, phase: s.phase.trim(), crew: s.crew.trim(), updatedAt: now, updatedBy: identity.name };
       history.push({ at: now, actor: identity.name, kind: 'structure', note: `Структура ППР: ${s.phase}; ${s.kind}; связей: ${s.dependencies.length}; ресурс: ${s.crew || 'не указан'}`, before: schedulePayload(before?.schedule), after: schedulePayload(stage.schedule) });

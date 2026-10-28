@@ -3,7 +3,7 @@ import { treasurySnapshot, type TreasuryReadModel, type TreasuryRepository } fro
 import type { StateChangeSink } from '../application/state-change.ts';
 
 export const treasuryReadModel = (state: AppState): TreasuryReadModel => ({
-  project: { id: state.project.id }, treasury: state.treasury,
+  project: { id: state.project.id }, treasury: state.treasury, financeLedger: state.financeLedger,
   financeEntries: state.financeEntries, budgetLines: state.budgetLines, stages: state.stages, tasks: state.tasks,
 });
 

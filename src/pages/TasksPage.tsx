@@ -13,6 +13,7 @@ import {
   Clock3,
   History,
   Link2,
+  Kanban,
   MessageSquare,
   Pencil,
   Play,
@@ -26,6 +27,7 @@ import {
 import { isTaskClosed, isTaskOverdue } from '../domain/index';
 import { createTaskUseCases, taskSnapshot } from '../application/tasks';
 import { previewTaskSave, previewTaskStatus } from '../application/task-payment-preview';
+import { TaskKanban } from '../components/TaskKanban';
 import { SchedulePaymentImpact } from '../components/SchedulePaymentImpact';
 import { useModuleRepository } from '../useModuleRepository';
 import { createConstructionRepository } from '../infrastructure/module-project';
@@ -45,7 +47,7 @@ import type { PageId } from '../presentation/navigation';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 
 type TaskScope = 'all' | 'mine' | 'today' | 'overdue' | 'review' | 'done';
-type TaskView = 'tasks' | 'people';
+type TaskView = 'tasks' | 'kanban' | 'people';
 
 const today = planToday;
 const activeStatuses: TaskStatus[] = ['todo', 'in_progress', 'waiting', 'review'];
@@ -279,12 +281,13 @@ export function TasksPage({
         <div className="task-workspace__head">
           <div className="task-view-switch">
             <button type="button" className={view === 'tasks' ? 'active' : ''} onClick={() => setView('tasks')}><ClipboardList size={17} /> Задачи</button>
+            <button type="button" className={view === 'kanban' ? 'active' : ''} onClick={() => setView('kanban')}><Kanban size={17} /> Канбан</button>
             {role === 'management' && <button type="button" className={view === 'people' ? 'active' : ''} onClick={() => setView('people')}><UsersRound size={17} /> Ответственные</button>}
           </div>
-          {view === 'tasks' && <div className="task-search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Найти задачу, этап или человека" /></div>}
+          {view !== 'people' && <div className="task-search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Найти задачу, этап или человека" /></div>}
         </div>
 
-        {view === 'tasks' ? (
+        {view !== 'people' ? (
           <>
             <div className="task-filters">
               <div className="task-filter-chips">{scopes.filter((item) => role === 'management' || item.id !== 'all').map((item) => <button type="button" key={item.id} className={scope === item.id ? 'active' : ''} onClick={() => setScope(item.id)}>{item.label}{typeof item.count === 'number' && <span>{item.count}</span>}</button>)}</div>
@@ -294,7 +297,7 @@ export function TasksPage({
               </select>}
             </div>
 
-            <div className="task-list">
+            {view === 'kanban' ? <TaskKanban tasks={filteredTasks} stages={state.stages} today={todayKey} onOpen={id => { const task = filteredTasks.find(item => item.id === id); setSelectedId(id); setComment(''); setCompletionNote(task?.completionNote ?? ''); }} /> : <div className="task-list">
               {filteredTasks.map((task) => {
                 const stage = state.stages.find((item) => item.id === task.stageId);
                 const overdue = isTaskOverdue(task, todayKey);
@@ -311,7 +314,7 @@ export function TasksPage({
                 );
               })}
               {!filteredTasks.length && <div className="task-empty"><CheckCircle2 size={28} /><strong>В этом фильтре задач нет</strong><p>Измените фильтр или создайте новую задачу.</p></div>}
-            </div>
+            </div>}
           </>
         ) : (
           <div className="responsibility-grid">

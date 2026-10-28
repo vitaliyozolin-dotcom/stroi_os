@@ -72,6 +72,8 @@ export const mergeProjectStates = (base: AppState, local: AppState, remote: AppS
     project: mergeObject('project', base.project, local.project, remote.project, conflicts),
     budgetMeta: mergeObject('budgetMeta', base.budgetMeta, local.budgetMeta, remote.budgetMeta, conflicts),
     treasury: mergeObject('treasury', base.treasury, local.treasury, remote.treasury, conflicts),
+    financeLedger: mergeObject('financeLedger', base.financeLedger, local.financeLedger, remote.financeLedger, conflicts),
+    financeAutomation: mergeObject('financeAutomation', base.financeAutomation, local.financeAutomation, remote.financeAutomation, conflicts),
     settings: mergeObject('settings', base.settings, local.settings, remote.settings, conflicts),
     stages: mergeCollection('stages', base.stages, local.stages, remote.stages, conflicts, equalStage),
     activity: [...local.activity, ...remote.activity]

@@ -1,3 +1,5 @@
+import type { DocumentRecognitionEvidence } from './finance-automation';
+
 export interface ProjectAttachment {
   id: string;
   key: string;
@@ -37,6 +39,8 @@ export interface EvidencePhoto {
 }
 
 export interface ProjectDocument {
+  recognition?: DocumentRecognitionEvidence;
+  sourceSha256?: string;
   sourceDraftId?: string;
   id: string;
   name: string;

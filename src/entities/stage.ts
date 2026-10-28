@@ -4,7 +4,8 @@ export interface StageSchedule {
   kind: 'work' | 'supply' | 'control' | 'summary';
   phase: string;
   summaryOf: string[];
-  dependencies: { stageId: string; gate: 'completed' | 'accepted'; lagDays: number }[];
+  /** Missing type is the original finish-to-start relation. Lags are calendar days. */
+  dependencies: { stageId: string; type?: 'FS' | 'SS' | 'FF'; gate: 'completed' | 'accepted'; lagDays: number }[];
   calendar: 'daily' | 'weekdays' | 'six-day';
   daysOff: string[];
   crew: string;

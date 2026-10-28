@@ -1,5 +1,5 @@
 import type { AppState, FinanceEntry } from '../entities/index';
-import { paymentMovements } from '../domain/finance';
+import { paymentMovements } from '../domain/finance.ts';
 
 /** Display-only label. Original descriptions and source documents are untouched. */
 export function financeEntryTitle(entry: Pick<FinanceEntry, 'description' | 'counterparty'>) {
@@ -18,10 +18,16 @@ export function financeEntryTitle(entry: Pick<FinanceEntry, 'description' | 'cou
 }
 
 export function financeMovementRows(state: AppState) {
-  return state.financeEntries.flatMap(entry => paymentMovements(entry)
-    .filter(movement => movement.amount > 0)
+  return state.financeEntries.flatMap(entry => paymentMovements(entry, state)
+    .filter(movement => movement.amount !== 0)
     .map((movement, index) => ({ ...movement, entry, id: `${entry.id}:movement:${index}` })))
     .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || a.id.localeCompare(b.id));
 }
 
-export { financeCalendarToday as financeToday } from '../domain/finance-calendar';
+export function financeMovementDisplay(row: { entry: Pick<FinanceEntry, 'kind'>; amount: number }) {
+  const cashKind = (row.entry.kind === 'income') === (row.amount > 0) ? 'income' : 'expense';
+  return { cashKind, amount: Math.abs(row.amount), sign: cashKind === 'income' ? '+' : '−',
+    label: row.amount < 0 ? row.entry.kind === 'expense' ? 'Возврат от поставщика' : 'Возврат заказчику' : row.entry.kind === 'income' ? 'Получено' : 'Оплачено' };
+}
+
+export { financeCalendarToday as financeToday } from '../domain/finance-calendar.ts';

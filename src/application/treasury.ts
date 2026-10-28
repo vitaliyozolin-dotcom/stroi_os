@@ -1,9 +1,10 @@
-import type { BudgetLine, FinanceEntry, ProjectTask, Stage, TreasuryState, UserRole } from '../entities/index';
+import type { BudgetLine, FinanceEntry, FinanceLedgerState, ProjectTask, Stage, TreasuryState, UserRole } from '../entities/index';
 import { validateTreasuryChanges } from '../domain/treasury.js';
 
 export interface TreasuryReadModel {
   project: { id: string };
   treasury?: TreasuryState;
+  financeLedger?: FinanceLedgerState;
   financeEntries: FinanceEntry[];
   budgetLines: BudgetLine[];
   stages: Stage[];
@@ -23,7 +24,7 @@ export interface TreasuryRepository {
 }
 /** Includes referenced facts: an open plan form cannot unknowingly reuse a settled tranche. */
 export const treasurySnapshot = (state: TreasuryReadModel) => JSON.stringify([
-  state.project.id, state.treasury ?? null, state.financeEntries, state.budgetLines, state.stages, state.tasks,
+  state.project.id, state.treasury ?? null, state.financeLedger ?? null, state.financeEntries, state.budgetLines, state.stages, state.tasks,
 ]);
 
 export const createTreasuryUseCases = (repository: TreasuryRepository, identity: { name: string; role: UserRole; id?: string }) => ({

@@ -8,7 +8,7 @@ test('the financial domain has no UI, transport, SQL or runtime adapter dependen
   for (const file of readdirSync(new URL('../src/domain/finance/', import.meta.url)).filter(file => file.endsWith('.js'))) {
     const code = source(`src/domain/finance/${file}`);
     const imports = [...code.matchAll(/from\s+['"]([^'"]+)['"]/g)].map(match => match[1]);
-    assert.ok(imports.every(path => path.startsWith('./') || path === '../finance-totals.js'), file);
+    assert.ok(imports.every(path => path.startsWith('./') || ['../finance-totals.js', '../finance-ledger.js'].includes(path)), file);
     assert.doesNotMatch(code, /\bfetch\(|\bwindow\.|\bdocument\.(?:querySelector|getElementById|createElement|body|head)\b|\.DB\b|\.prepare\(|process\.env|from ['"]react/, file);
   }
 });

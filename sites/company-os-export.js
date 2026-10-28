@@ -111,7 +111,7 @@ const treasuryExport = (state, generatedAt) => {
     // Deliberate allowlist: descriptions, sources, accounts, legal entities,
     // documents and warning texts remain inside the construction workspace.
     events: projection.events.map(event => ({
-      id: event.id, entry_id: event.entryId, ...(event.trancheId ? { tranche_id: event.trancheId } : {}),
+      id: event.id, entry_id: event.entryId, source_type: event.sourceType ?? 'obligation', source_id: event.sourceId ?? event.entryId, category: event.category ?? null, ...(event.trancheId ? { tranche_id: event.trancheId } : {}),
       kind: event.kind, amount_rub: rubles(event.amountCents), date: event.date,
       scheduled_date: event.scheduledDate, contractual_due_date: event.contractualDueDate, certainty: event.certainty,
       overdue: event.overdue, excluded: event.excluded === true,
@@ -134,7 +134,7 @@ const treasuryExport = (state, generatedAt) => {
 const financeProject = ({ row, state }, generatedAt) => {
   const commitments = (state.financeEntries ?? []).flatMap((entry) => {
     if (entry?.kind !== 'expense') return [];
-    const remaining = outstandingAmountFor(entry);
+    const remaining = outstandingAmountFor(entry, state);
     if (!remaining) return [];
     return [{
       id: String(entry.id), amount_rub: Math.round(remaining), due_date: paymentDueDate(entry.dueDate),
@@ -146,7 +146,7 @@ const financeProject = ({ row, state }, generatedAt) => {
     if (entry?.kind !== 'income') return [];
     return [{
       id: String(entry.id),
-      amount_rub: Math.round(outstandingAmountFor(entry)),
+      amount_rub: Math.round(outstandingAmountFor(entry, state)),
       due_date: paymentDueDate(entry.dueDate), confirmed: false, status: 'expected',
       source_ref: `ikioma:${state.project.id}:finance:${entry.id}`,
     }];

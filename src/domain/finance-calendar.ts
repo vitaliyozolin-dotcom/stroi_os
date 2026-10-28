@@ -1,11 +1,14 @@
 import type { AppState, FinanceEntry } from '../entities/index';
-import { paidAmountFor } from './finance.ts';
+import { outstandingAmountFor } from './finance-totals.js';
 import { treasuryProjection, type TreasuryProjectionEvent } from './treasury.js';
 
 export type FinanceCalendarGroup = 'overdue' | 'next7' | 'later' | 'undated';
 export interface FinanceCalendarItem {
   id: string;
-  entry: FinanceEntry;
+  entry?: FinanceEntry;
+  kind: 'expense' | 'income';
+  title: string;
+  counterparty?: string;
   remaining: number;
   /** Original scheduled date; never the overdue roll-forward used by the cash forecast. */
   dueDate: string | null;
@@ -22,7 +25,7 @@ export const validFinanceDueDate = (value: unknown): value is string => {
 };
 
 // Legacy dates include today; treasury shows the seven days after its end-of-day cutoff.
-export function financeCalendarItems(state: AppState | Pick<AppState, 'financeEntries'>, today = financeCalendarToday()): FinanceCalendarItem[] {
+export function financeCalendarItems(state: AppState | Pick<AppState, 'financeEntries'> & Partial<Pick<AppState, 'financeLedger'>>, today = financeCalendarToday()): FinanceCalendarItem[] {
   if (!validFinanceDueDate(today)) throw new Error('Invalid calendar date');
   const end = new Date(`${today}T12:00:00Z`);
   end.setUTCDate(end.getUTCDate() + ('treasury' in state && state.treasury?.enabled ? 7 : 6));
@@ -35,23 +38,22 @@ export function financeCalendarItems(state: AppState | Pick<AppState, 'financeEn
     // The base scenario includes every remaining obligation, even those paid directly by a participant.
     items = treasuryProjection(state, { today, horizonDays: 1, scenario: 'base' }).events.flatMap(event => {
       const entry = byId.get(event.entryId);
-      if (!entry) return [];
       const dueDate = event.scheduledDate;
       const group: FinanceCalendarGroup = !dueDate ? 'undated' : event.overdue ? 'overdue' : dueDate <= cutoff ? 'next7' : 'later';
-      return [{ id: event.id, entry, remaining: event.amountCents / 100, dueDate, group, projectionEvent: event }];
+      return [{ id: event.id, entry, kind: event.kind, title: event.description, counterparty: entry?.counterparty, remaining: event.amountCents / 100, dueDate, group, projectionEvent: event }];
     });
   } else {
     items = state.financeEntries.flatMap(entry => {
-      const remaining = Math.max(0, Math.round(entry.amount * 100) - Math.round(paidAmountFor(entry) * 100)) / 100;
+      const remaining = outstandingAmountFor(entry, state);
       if (!Number.isFinite(remaining) || remaining <= 0) return [];
       const dueDate = validFinanceDueDate(entry.dueDate) ? entry.dueDate : null;
       const group: FinanceCalendarGroup = !dueDate ? 'undated' : dueDate < today ? 'overdue' : dueDate <= cutoff ? 'next7' : 'later';
-      return [{ id: entry.id, entry, remaining, dueDate, group }];
+      return [{ id: entry.id, entry, kind: entry.kind, title: entry.description, counterparty: entry.counterparty, remaining, dueDate, group }];
     });
   }
   return items.sort((a, b) => groups.indexOf(a.group) - groups.indexOf(b.group)
     || (a.dueDate ?? '').localeCompare(b.dueDate ?? '')
-    || a.entry.description.localeCompare(b.entry.description, 'ru')
+    || a.title.localeCompare(b.title, 'ru')
     || a.id.localeCompare(b.id));
 }
 

@@ -1,3 +1,4 @@
+import { ledgerEntryBalance } from '../finance-ledger.js';
 import { cents, recordedAcceptedAmount as accepted, recordedPaidAmount as paid, text, validDate, hasFinanceAcceptanceSource } from './policy.js';
 import { validateBudgetPlanningChanges } from './planning.js';
 
@@ -65,6 +66,8 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
         || !text(entry.paymentDocument) || !text(h.confirmation) || !text(h.sourceUniqueKey) || h.sourceUniqueKey.length > 250
         || !/^[a-f0-9]{64}$/.test(h.sourceSha256 ?? '')
         || !doc?.fileKey?.startsWith(`${state.project.id}/`) || doc.clientVisible !== false) return 'Для исторической оплаты нужны исходный документ, подтверждение владельца и точная сумма; приёмка отдельно.';
+      const balance = state.financeLedger || state.treasury ? ledgerEntryBalance(state, entry.id) : null;
+      if (balance && (Object.values(balance).some(value => value === null) || balance.overpaidCents > 0 || balance.heldCents > balance.remainingCents)) return 'Историческая оплата превышает остаток обязательства с учётом журнала и удержаний.';
       if (!old) entry.createdBy = identity.name;
       h.recordedAt = now;
       h.recordedBy = identity.name;
@@ -74,6 +77,7 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
     }
     const paidAmount = paid(entry);
     const pays = paidAmount > (old ? paid(old) : 0);
+    if (pays && (state.financeLedger?.loans ?? []).some(loan => loan.status !== 'draft' && loan.schedule.some(item => item.kind === 'interest' && item.entryId === entry.id))) return 'Проценты по займу оформляются в финансовом журнале: выберите заём и строку графика.';
     // Legacy paid records remain readable as-is. A new payment must explicitly
     // carry the prior acceptance so status='paid' cannot invent work acceptance.
     if (pays && entry.acceptedAmount == null) entry.acceptedAmount = old ? accepted(old) : 0;
@@ -83,7 +87,7 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
       || !Number.isFinite(acceptedAmount) || !Number.isFinite(paidAmount)
       || [entry.amount, acceptedAmount, paidAmount].some(amount => !Number.isSafeInteger(cents(amount)) || Math.abs(amount - cents(amount) / 100) > 0.000001)
       || acceptedAmount < 0 || paidAmount < 0 || cents(acceptedAmount) > cents(entry.amount)
-      || cents(paidAmount) > cents(entry.amount)) return 'Суммы приёмки и оплаты должны быть неотрицательными, с точностью до копеек и не больше обязательства.';
+      || !state.financeLedger && !state.treasury && cents(paidAmount) > cents(entry.amount)) return 'Суммы приёмки и оплаты должны быть неотрицательными, с точностью до копеек и не больше обязательства.';
     if (old && (cents(acceptedAmount) < cents(accepted(old)) || cents(paidAmount) < cents(paid(old)))) return 'Нельзя уменьшить ранее записанную приёмку или оплату.';
     const accepts = entry.kind === 'expense' && acceptedAmount > (old ? accepted(old) : 0);
     const approves = !old?.approvedAt && text(entry.approvedAt);
@@ -110,6 +114,18 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
     else { delete entry.approvedAt; delete entry.approvedBy; }
     if (accepts) entry.acceptedBy = identity.name;
     else if (old?.acceptedBy) entry.acceptedBy = old.acceptedBy;
+    // Simulate the authoritative append before checking net settlement, so a
+    // claimed aggregate cannot swallow the new payment and failed validation
+    // never appends a payment event to the candidate.
+    if (state.financeLedger || state.treasury) {
+      const projectedEntry = pays ? { ...entry,
+        ...(!old?.payments?.length && paid(old) > 0 ? { legacyPayment: { amount: paid(old), lastRecordedDate: old.paidAt, document: old.paymentDocument } } : {}),
+        payments: [...(old?.payments ?? []), { id: `${entry.id}:payment:${cents(paidAmount)}`, amount: (cents(paidAmount) - cents(old ? paid(old) : 0)) / 100, date: entry.paidAt }],
+      } : entry;
+      const balance = ledgerEntryBalance({ ...state, financeEntries: state.financeEntries.map(row => row.id === entry.id ? projectedEntry : row) }, entry.id);
+      if (!balance || Object.values(balance).some(value => value === null) || balance.settledCents < 0 || balance.cashSettledCents < 0 || balance.overpaidCents > 0) return 'Оплата превышает остаток обязательства с учётом расчётов и возвратов.';
+      if (pays && balance.heldCents > balance.remainingCents) return 'Оплата использует удержанную сумму; сначала разрешите удержание.';
+    }
     if (pays) {
       entry.paidBy = identity.name;
       if (!old?.payments?.length && paid(old) > 0) entry.legacyPayment = {
@@ -126,6 +142,15 @@ export const validateFinanceChanges = (previous, state, identity, now) => {
       }];
     }
     else if (old?.paidBy) entry.paidBy = old.paidBy;
+  }
+  // Confirmation changes alone can increase net settlement without changing the
+  // legacy entry. Preserve old overpayment as history, prohibit new overpayment.
+  if (JSON.stringify(previous?.treasury) !== JSON.stringify(state.treasury) || JSON.stringify(previous?.financeLedger) !== JSON.stringify(state.financeLedger)) {
+    for (const entry of state.financeEntries ?? []) {
+      const balance = ledgerEntryBalance(state, entry.id), prior = previous ? ledgerEntryBalance(previous, entry.id) : null;
+      if (!balance || Object.values(balance).some(value => value === null) || balance.settledCents < 0 || balance.cashSettledCents < 0 || balance.overpaidCents > (prior?.overpaidCents ?? 0)) return 'Подтверждение расчёта превышает обязательство или доступный возврат.';
+      if (balance.heldCents > balance.remainingCents) return 'Оплата использует удержанную сумму; сначала разрешите удержание.';
+    }
   }
   for (const old of oldEntries.values()) {
     if (!ids.has(old.id) && (old.approvedAt || accepted(old) > 0 || paid(old) > 0)) return 'Нельзя удалить утверждённый, принятый или оплаченный расход.';

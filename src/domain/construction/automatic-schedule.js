@@ -1,5 +1,5 @@
 import { baselineOverview, planDays, planToday, validPlanDate } from './plan-baseline.js';
-import { addScheduleDays, confirmedSiteUpdate, forecastSchedule } from './schedule-forecast.js';
+import { addScheduleDays, confirmedSiteUpdate, forecastSchedule, scheduleStartForFinish } from './schedule-forecast.js';
 
 const finished = (stage) => ['accepted', 'awaiting_inspection'].includes(stage.status);
 const normalize = (value) => String(value || '').toLocaleLowerCase('ru').replace(/ё/g, 'е').replace(/[^а-яa-z0-9]+/g, ' ').trim();
@@ -80,11 +80,17 @@ export function automaticSchedule(state, today = planToday()) {
         .map(previous => ({ stageId: previous.id, gate: 'completed', lagDays: planDays(stage.planStart, previous.planEnd) - 1 }));
     }
     for (const dependency of dependencies) {
-      if (!dependency || !byId.has(dependency.stageId) || !['completed', 'accepted'].includes(dependency.gate) || !Number.isInteger(dependency.lagDays) || dependency.lagDays < 0 || dependency.lagDays > 730) { issue(stage, 'Некорректная зависимость'); continue; }
+      if (!dependency || !byId.has(dependency.stageId) || !['FS', 'SS', 'FF'].includes(dependency.type ?? 'FS') || !['completed', 'accepted'].includes(dependency.gate)
+        || !Number.isInteger(dependency.lagDays) || dependency.lagDays < -365 || dependency.lagDays > 730
+        || dependency.gate === 'accepted' && (dependency.type === 'SS' || dependency.lagDays < 0)) { issue(stage, 'Некорректная зависимость'); continue; }
       const previous = byId.get(dependency.stageId), row = calculate(dependency.stageId);
       if (!row) { issue(stage, 'Не хватает срока предшествующей работы'); continue; }
+      const type = dependency.type ?? 'FS';
       let gate = row.end;
-      if (dependency.gate === 'accepted') {
+      if (type === 'SS') {
+        if (previous.schedule?.kind === 'summary' || finished(previous) && !validPlanDate(previous.actualStart)) { issue(stage, 'Для связи по началу нужна дата начала отдельной работы'); continue; }
+        gate = validPlanDate(previous.actualStart) ? previous.actualStart : row.start;
+      } else if (dependency.gate === 'accepted') {
         const acceptance = Number.isFinite(Date.parse(previous.acceptedAt || '')) ? planToday(new Date(previous.acceptedAt)) : null;
         if (previous.status === 'accepted' && validPlanDate(acceptance) && acceptance <= today && acceptance >= row.end) gate = acceptance;
         else if (previous.status === 'accepted' && previous.acceptedAt) { issue(stage, `Проверьте дату приёмки: ${previous.shortName || previous.name}`); continue; }
@@ -92,7 +98,8 @@ export function automaticSchedule(state, today = planToday()) {
         else if (confirmedSiteUpdate(previous, today) && validPlanDate(previous.siteUpdate.acceptanceOn) && previous.siteUpdate.acceptanceOn >= row.end && previous.siteUpdate.acceptanceOn >= today) gate = previous.siteUpdate.acceptanceOn;
         else { issue(stage, `Нужен срок приёмки: ${previous.shortName || previous.name}`); continue; }
       }
-      start = [start, addScheduleDays(gate, dependency.lagDays + 1)].sort().at(-1);
+      const constraint = addScheduleDays(gate, dependency.lagDays + (type === 'FS' ? 1 : 0));
+      start = [start, type === 'FF' ? scheduleStartForFinish(constraint, duration, { calendar, daysOff }) : constraint].sort().at(-1);
     }
     if (issues.some(item => item.stageId === id)) return finish(null);
     const workDates = [];
