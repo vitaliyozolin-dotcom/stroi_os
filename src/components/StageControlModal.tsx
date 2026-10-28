@@ -9,6 +9,8 @@ import { planToday } from '../domain/construction/index.js';
 import { stageCanStart, stageGaps } from '../domain/construction/index.js';
 import { Field, Modal } from './Ui';
 import { money } from '../presentation/formatting';
+import { SchedulePaymentImpact } from './SchedulePaymentImpact';
+import { previewStageControl } from '../application/schedule-payment-preview';
 
 export function StageControlModal(props: { state: AppState; stageId: string; action: StageAction; actor: string; role: UserRole; userId?: string; onChange: (s: AppState) => void; onClose: () => void; onNavigate?: (p: PageId) => void }) {
   const stage = props.state.stages.find((s) => s.id === props.stageId);
@@ -27,6 +29,7 @@ function OwnerAcceptanceForm({ state, stageId, actor, role, userId, onChange, on
   const [openedState, setOpenedState] = useState(() => stageCommandSnapshot(state, stageId));
   const [error, setError] = useState('');
   const changed = stageCommandSnapshot(state, stageId) !== openedState;
+  const preview = role === 'management' && state.treasury?.enabled ? previewStageControl(state, { stageId, action: 'owner_accept', input: { date: exactDate ? date : planToday(), note, tasks: [], completionDateUnknown: !exactDate }, expected: openedState }, { name: actor, role, id: userId }, systemClock.now()) : null;
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (changed) { setError('Сведения об этапе изменились. Проверьте обновление перед подтверждением.'); return; }
@@ -45,6 +48,7 @@ function OwnerAcceptanceForm({ state, stageId, actor, role, userId, onChange, on
       {!exactDate && <p className="muted">Точная дата выполнения останется неизвестной.</p>}
       <Field label="Комментарий · необязательно"><textarea rows={2} maxLength={2000} value={note} onChange={e => setNote(e.target.value)} placeholder="Что проверил или что важно сохранить" /></Field>
       <p className="muted">Фото и отчёт прораба не нужны для этого подтверждения. Задачи, контроль качества и оплаты сохраняют свои записи.</p>
+      <SchedulePaymentImpact before={state} preview={preview} role={role} />
       {error && <p className="danger-text" role="alert">{error}</p>}
       {changed && <div className="stage-control-list"><p>Текущий результат: {stage.completionNote || 'пока не указан'}{stage.blocker ? ` · ${stage.blocker}` : ''}</p><button className="text-button" type="button" onClick={() => { setOpenedState(stageCommandSnapshot(state, stageId)); setExactDate(Boolean(stage.completedOn)); setDate(stage.completedOn || stage.completionObservedOn || planToday()); setError(''); }}>Обновить сведения, сохранив комментарий</button></div>}
       <div className="modal__actions"><button type="button" className="button button--ghost" onClick={onClose}>Отмена</button><button type="submit" className="button button--primary">Подтверждаю, этап выполнен</button></div>
@@ -65,7 +69,8 @@ function StageForm({ state, stageId, action, actor, role, userId, onChange, onCl
   const [openedState] = useState(() => stageCommandSnapshot(state, stageId));
   const hasRemaining = Boolean(stage.schedule && ['start', 'delay'].includes(action));
   const gaps = stageGaps(state, stageId);
-  const expenses = state.financeEntries.filter((e) => e.stageId === stageId && e.kind === 'expense');
+  const expenses = role === 'management' ? state.financeEntries.filter((e) => e.stageId === stageId && e.kind === 'expense') : [];
+  const preview = role === 'management' && state.treasury?.enabled ? previewStageControl(state, { stageId, action, input: { date, note, tasks: unknownDate ? [] : tasks, completionDateUnknown: unknownDate, blockerResolved: resolved, ...(hasRemaining ? { remainingDays: Number(remaining), readyOn, nextAction, issueOwner } : {}) }, expected: openedState }, { name: actor, role, id: userId }, systemClock.now()) : null;
   const labels = { start: 'Работы начались', not_started: 'Работы ещё не начались', complete: 'Этап выполнен?', accept: 'Приёмка этапа', owner_accept: 'Подтвердить выполнение', delay: 'Что задерживает этап?', rework: 'Вернуть на доработку' };
   const submit = (event: FormEvent) => { event.preventDefault(); try {
     if (stageCommandSnapshot(state, stageId) !== openedState) throw new Error('Этап обновился, пока форма была открыта. Откройте его заново перед сохранением.');
@@ -92,6 +97,7 @@ function StageForm({ state, stageId, action, actor, role, userId, onChange, onCl
       <p className="muted">{action === 'complete' ? 'Запишем выполнение и отправим этап на приёмку. Неподтверждённые задачи не закроются.' : 'Приёмка откроет зависимые этапы для начала. Уже идущие параллельные работы сохранят свой статус.'} Расходы и оплаты автоматически не проводятся.</p>
       {expenses.length > 0 && <div className="stage-control-list"><strong>Связанные расходы</strong>{expenses.map((e) => <p key={e.id}>{e.description} · {money(e.amount)}</p>)}{onNavigate && <button type="button" className="text-button" onClick={() => open('finance')}>Открыть расходы</button>}</div>}
     </>}
+    <SchedulePaymentImpact before={state} preview={preview} role={role} />
     {error && <p className="danger-text" role="alert">{error}</p>}
     <div className="modal__actions"><button type="button" className="button button--ghost" onClick={onClose}>Отмена</button><button className="button button--primary" type="submit">{action === 'complete' ? 'Да, выполнен — на приёмку' : action === 'accept' ? 'Подтвердить приёмку' : 'Сохранить'}</button></div>
   </form></Modal>;

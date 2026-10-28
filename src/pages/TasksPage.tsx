@@ -1,4 +1,4 @@
-import { planDays, taskBaselineDelay, taskBaselineEnd } from '../domain/construction/index.js';
+import { planDays, planToday, taskBaselineDelay, taskBaselineEnd } from '../domain/construction/index.js';
 import { planShiftLabel } from '../components/BaselinePanel';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import { isTaskClosed, isTaskOverdue } from '../domain/index';
 import { createTaskUseCases, taskSnapshot } from '../application/tasks';
+import { previewTaskSave, previewTaskStatus } from '../application/task-payment-preview';
+import { SchedulePaymentImpact } from '../components/SchedulePaymentImpact';
 import { useModuleRepository } from '../useModuleRepository';
 import { createConstructionRepository } from '../infrastructure/module-project';
 import { formatDate, formatDateTime } from '../presentation/formatting';
@@ -45,7 +47,7 @@ import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 type TaskScope = 'all' | 'mine' | 'today' | 'overdue' | 'review' | 'done';
 type TaskView = 'tasks' | 'people';
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = planToday;
 const activeStatuses: TaskStatus[] = ['todo', 'in_progress', 'waiting', 'review'];
 const priorityWeight: Record<TaskPriority, number> = { critical: 4, high: 3, normal: 2, low: 1 };
 const roleLabels: Record<UserRole, string> = { management: 'Управление', foreman: 'Прораб', client: 'Клиент' };
@@ -169,6 +171,18 @@ export function TasksPage({
 
   const selected = visibleTasks.find((task) => task.id === selectedId) ?? null;
   const editingTask = state.tasks.find((task) => task.id === editingId);
+  const hasLinkedPayments = (taskId: string) => role === 'management' && state.treasury?.enabled
+    && state.treasury.entryPlans.some(plan => plan.tranches.some(tranche => tranche.dateRule?.taskId === taskId));
+  const savePaymentPreview = showForm && editingTask && hasLinkedPayments(editingTask.id)
+    ? previewTaskSave(state, { name: actor, role, id: session.id }, systemClock.now(), { taskId: editingTask.id, expected: openedTask, draft: form }) : null;
+  const statusPaymentAction = selected?.status === 'done' ? 'in_progress'
+    : selected?.status === 'review' || selected?.status === 'in_progress' && !selected.reviewerId ? 'done' : null;
+  const statusPaymentPreview = selected && statusPaymentAction && hasLinkedPayments(selected.id)
+    ? previewTaskStatus(state, { name: actor, role, id: session.id }, systemClock.now(), {
+      taskId: selected.id, expected: taskSnapshot(state, selected.id), status: statusPaymentAction,
+      text: statusPaymentAction === 'done' ? 'Задача выполнена' : 'Задача открыта повторно',
+      extra: { completionNote: statusPaymentAction === 'done' ? completionNote.trim() || 'Выполнено ответственным' : undefined },
+    }) : null;
 
   const openCreate = () => {
     if (role !== 'management') return;
@@ -342,6 +356,7 @@ export function TasksPage({
                 <Field label="Проверка качества"><select value={form.checkpointId} onChange={(event) => setForm({ ...form, checkpointId: event.target.value })}><option value="">Без проверки</option>{state.checkpoints.filter((item) => !form.stageId || item.stageId === form.stageId).map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></Field>
               </div>
             </div>
+            {savePaymentPreview && <SchedulePaymentImpact before={state} preview={savePaymentPreview} role={role} today={todayKey} />}
             {formError && <p role="alert" className="danger-text">{formError}</p>}
             <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowForm(false)}>Отмена</button><button type="submit" className="button button--primary">{editingId ? 'Сохранить изменения' : 'Создать задачу'}</button></div>
           </form>
@@ -375,6 +390,7 @@ export function TasksPage({
             {selected.blockerReason && <div className="task-blocker"><CirclePause size={18} /><span><strong>Задача в ожидании</strong><p>{selected.blockerReason}</p></span></div>}
             {selected.completionNote && <div className="task-result"><CheckCircle2 size={18} /><span><strong>Результат выполнения</strong><p>{selected.completionNote}</p></span></div>}
 
+            {statusPaymentPreview && <section><p className="muted">{statusPaymentAction === 'done' ? 'Если закрыть задачу сегодня:' : 'Если открыть задачу повторно:'}</p><SchedulePaymentImpact before={state} preview={statusPaymentPreview} role={role} today={todayKey} /></section>}
             <div className="task-detail__actions">
               {role === 'management' && <button type="button" className="button button--secondary" onClick={() => openEdit(selected)}><Pencil size={16} /> Редактировать</button>}
               {selected.status === 'todo' && <button type="button" className="button button--primary" onClick={() => changeStatus(selected, 'in_progress', 'Задача взята в работу')}><Play size={16} /> Начать</button>}

@@ -48,24 +48,97 @@ function shift(date, days, calendar = 'calendar') {
   }
   return value.toISOString().slice(0, 10);
 }
-function resolveRule(state, rule, today, schedule) {
+const ruleTitles = { stage_start: 'Начало этапа', stage_end: 'Окончание этапа', stage_acceptance: 'Приёмка этапа', task_start: 'Начало задачи', task_end: 'Окончание задачи' };
+const dayDifference = (after, before) => validTreasuryDate(after) && validTreasuryDate(before)
+  ? Math.round((Date.parse(`${after}T12:00:00Z`) - Date.parse(`${before}T12:00:00Z`)) / 86400000) : null;
+function scheduleIssues(state, schedule, stageId) {
+  const included = new Set();
+  const visit = id => {
+    if (included.has(id)) return;
+    included.add(id);
+    const value = (state.stages ?? []).find(stage => stage.id === id)?.schedule;
+    for (const dependency of value?.dependencies ?? []) visit(dependency.stageId);
+    for (const child of value?.summaryOf ?? []) visit(child);
+  };
+  visit(stageId);
+  return (schedule?.issues ?? []).filter(issue => included.has(issue.stageId));
+}
+function resolveRuleDetails(state, rule, today, schedule) {
   const stage = (state.stages ?? []).find(item => item.id === rule.stageId);
   const task = (state.tasks ?? []).find(item => item.id === rule.taskId);
+  const taskRule = ['task_start', 'task_end'].includes(rule.kind), target = taskRule ? task : stage;
+  const name = taskRule ? task?.title : stage?.shortName || stage?.name;
+  const suffix = rule.offsetDays ? ` ${rule.offsetDays > 0 ? '+' : '−'} ${Math.abs(rule.offsetDays)} ${rule.calendar === 'workdays' ? 'будн. дн.' : 'календ. дн.'}` : '';
+  const detail = { date: null, anchorDate: null, basis: 'unknown', label: `${ruleTitles[rule.kind] ?? 'Неизвестное правило'}${name ? ` «${name}»` : ''}${suffix}`,
+    reason: null, offsetDays: rule.offsetDays, calendar: rule.calendar,
+    ...(taskRule ? { taskId: rule.taskId, ...(task?.stageId ? { linkedStageId: task.stageId } : {}) } : { stageId: rule.stageId }) };
+  const unknown = reason => ({ ...detail, reason });
+  const resolved = (anchorDate, basis, reason = null) => {
+    const date = shift(anchorDate, rule.offsetDays, rule.calendar);
+    return date ? { ...detail, date, anchorDate, basis, reason } : unknown('Дата или смещение платежа некорректны.');
+  };
+  if (!target) return unknown(taskRule ? 'Связанная задача не найдена.' : 'Связанный этап не найден.');
+  if (!own(ruleTitles, rule.kind) || !integer(rule.offsetDays) || Math.abs(rule.offsetDays) > 3650 || !['calendar', 'workdays'].includes(rule.calendar)) return unknown('Правило даты некорректно.');
   const actual = value => { const day = datePart(value); return day && (!today || day <= today) ? day : null; };
-  const derived = schedule?.rows.find(row => row.id === stage?.id);
-  const start = today && stage?.schedule ? derived?.start ?? null : datePart(stage?.siteUpdate?.readyOn) ?? datePart(stage?.planStart);
-  const end = today && stage?.schedule ? derived?.end ?? null : datePart(stage?.forecastEnd);
-  const acceptedForecast = !today || !stage?.schedule || confirmedSiteUpdate(stage, today) ? datePart(stage?.siteUpdate?.acceptanceOn) : null;
-  const base = rule.kind === 'stage_start' ? actual(stage?.actualStart) ?? start
-    : rule.kind === 'stage_end' ? actual(stage?.actualEnd) ?? actual(stage?.completedOn) ?? end
-      : rule.kind === 'stage_acceptance' ? actual(stage?.acceptedAt) ?? acceptedForecast
-        : rule.kind === 'task_start' ? datePart(task?.plannedStart)
-          : rule.kind === 'task_end' ? actual(task?.completedAt) ?? datePart(task?.dueDate) : null;
-  return base ? shift(base, rule.offsetDays, rule.calendar) : null;
+  if (taskRule) {
+    if (task.status === 'canceled') return unknown('Задача отменена; выберите действующее основание платежа.');
+    if (rule.kind === 'task_end' && (!task.status || task.status === 'done')) {
+      const completed = actual(task.completedAt);
+      if (completed) return resolved(completed, 'actual');
+      if (task.status === 'done' || task.completedAt) return unknown('Выполнение задачи отмечено, но подтверждённая фактическая дата неизвестна или указана в будущем.');
+    }
+    const anchor = datePart(rule.kind === 'task_start' ? task.plannedStart : task.dueDate);
+    if (!anchor) return unknown(rule.kind === 'task_start' ? 'У задачи не задана плановая дата начала.' : 'У задачи не задан срок выполнения.');
+    const reasons = [];
+    if (today && anchor <= today) reasons.push('Записанный срок задачи уже наступил; фактическое событие не подтверждено, дату нужно уточнить.');
+    if (task.stageId) {
+      const linked = (state.stages ?? []).find(item => item.id === task.stageId);
+      const linkedRow = schedule?.rows.find(row => row.id === task.stageId);
+      if (!linked) reasons.push('Связанный с задачей этап не найден.');
+      else if (linked.schedule && (!linkedRow || scheduleIssues(state, schedule, linked.id).length)) reasons.push('Прогноз связанного этапа требует сверки.');
+      else if (linkedRow?.start && anchor < linkedRow.start) reasons.push('Срок задачи раньше прогнозного начала связанного этапа; согласуйте даты.');
+      // A task's stageId is a grouping link, not an invented time dependency.
+      detail.label += ' (срок задачи задан отдельно)';
+    }
+    return resolved(anchor, 'recorded_plan', reasons.join(' ') || null);
+  }
+  const closed = !stage.status || ['accepted', 'awaiting_inspection'].includes(stage.status);
+  const factValue = rule.kind === 'stage_start' ? stage.actualStart
+    : rule.kind === 'stage_end' && closed ? stage.completedOn || stage.actualEnd
+      : rule.kind === 'stage_acceptance' && (!stage.status || stage.status === 'accepted') ? stage.acceptedAt : null;
+  if (factValue) {
+    const fact = actual(factValue);
+    if (!fact) return unknown('Фактическая дата этапа некорректна или находится после даты среза.');
+    if (rule.kind === 'stage_acceptance') {
+      const end = actual(stage.completedOn || stage.actualEnd);
+      if (end && fact < end) return unknown('Фактическая приёмка указана раньше выполнения этапа.');
+    }
+    return resolved(fact, 'actual');
+  }
+  if (rule.kind === 'stage_end' && ['accepted', 'awaiting_inspection'].includes(stage.status)) return unknown('Выполнение этапа отмечено, но его фактическая дата неизвестна.');
+  if (rule.kind === 'stage_acceptance' && stage.status === 'accepted') return unknown('Приёмка этапа отмечена, но её фактическая дата неизвестна.');
+  const derived = schedule?.rows.find(row => row.id === stage.id), issues = scheduleIssues(state, schedule, stage.id);
+  if (today && stage.schedule && (!derived || issues.length)) return unknown(issues.map(issue => issue.message).join('. ') || 'Прогноз связанного этапа не рассчитан.');
+  if (rule.kind === 'stage_acceptance') {
+    const acceptance = datePart(stage.siteUpdate?.acceptanceOn);
+    if (!today || !stage.schedule || !derived || !confirmedSiteUpdate(stage, today)) return unknown('Для прогнозной приёмки нужна актуальная подтверждённая сверка ППР.');
+    if (!acceptance || acceptance < today || acceptance < derived.end) return unknown('Уточните ожидаемую приёмку: дата должна быть не раньше выполнения этапа и даты среза.');
+    return resolved(acceptance, 'forecast');
+  }
+  if (today && stage.schedule) {
+    if (rule.kind === 'stage_start' && derived.source === 'fact') return unknown('Этап выполнен, но фактическая дата начала неизвестна.');
+    return resolved(rule.kind === 'stage_start' ? derived.start : derived.end, derived.source === 'fact' ? 'actual' : 'forecast');
+  }
+  const recorded = rule.kind === 'stage_start' ? datePart(stage.siteUpdate?.readyOn) ?? datePart(stage.planStart) : datePart(stage.forecastEnd);
+  return recorded ? resolved(recorded, 'recorded_plan', 'Используется записанная дата этапа; зависимости и актуальность ППР не подтверждены.')
+    : unknown(rule.kind === 'stage_start' ? 'У этапа не задана дата начала.' : 'У этапа не задана дата окончания.');
+}
+export function resolveTreasuryDateRuleDetails(state, rule, today) {
+  const schedule = today && (state.stages ?? []).some(stage => stage.schedule) ? forecastSchedule(state, today) : null;
+  return resolveRuleDetails(state, rule, today, schedule);
 }
 export function resolveTreasuryDateRule(state, rule, today) {
-  const schedule = today && (state.stages ?? []).some(stage => stage.schedule) ? forecastSchedule(state, today) : null;
-  return resolveRule(state, rule, today, schedule);
+  return resolveTreasuryDateRuleDetails(state, rule, today).date;
 }
 const recordedPaid = entry => treasuryMoneyToCents(entry.paidAmount ?? (entry.status === 'paid' ? entry.amount : 0));
 export function treasuryPaymentReferences(entry) {
@@ -154,28 +227,36 @@ export function treasuryProjection(state, { today, horizonDays = 91, scenario = 
   const addEvent = (entry, plan, tranche, amountCents, suffix) => {
     if (amountCents <= 0) return;
     const contractualDueDate = validTreasuryDate(tranche?.contractualDueDate) ? tranche.contractualDueDate : null;
-    let date = tranche?.dateRule ? resolveRule(state, tranche.dateRule, today, schedule)
-      : validTreasuryDate(tranche?.forecastDate) ? tranche.forecastDate
-        : contractualDueDate ?? (validTreasuryDate(entry.dueDate) ? entry.dueDate : null);
+    const fixedDate = validTreasuryDate(tranche?.forecastDate) ? tranche.forecastDate
+      : contractualDueDate ?? (validTreasuryDate(entry.dueDate) ? entry.dueDate : null);
+    const dateResolution = tranche?.dateRule ? resolveRuleDetails(state, tranche.dateRule, today, schedule) : {
+      date: fixedDate, anchorDate: fixedDate, basis: fixedDate ? 'fixed' : 'unknown',
+      label: validTreasuryDate(tranche?.forecastDate) ? 'Фиксированная дата прогноза' : contractualDueDate ? 'Договорный срок' : 'Плановая дата обязательства',
+      reason: fixedDate ? null : 'Дата денежного события не задана.', offsetDays: 0, calendar: 'calendar' };
+    let date = dateResolution.date;
     // Keep the original planned/derived date even when cash projection rolls overdue debt forward.
     const scheduledDate = date;
     const certainty = tranche?.certainty ?? 'expected';
-    if (tranche?.dateRule?.kind.startsWith('stage_') && !(state.stages ?? []).find(stage => stage.id === tranche.dateRule.stageId)?.schedule) {
-      warnings.push(`${entry.description}: используется записанная дата этапа; зависимости ППР не подтверждены.`);
-    }
+    if (dateResolution.reason) warnings.push(`${entry.description}: ${dateResolution.reason}`);
     const sourceAccountId = plan?.cashTreatment === 'unassigned' ? null : tranche?.sourceAccountId ?? plan?.sourceAccountId ?? null;
     const outside = plan?.cashTreatment === 'participant_direct';
     if (accountId && sourceAccountId && accountId !== sourceAccountId) return;
     const overdue = Boolean(contractualDueDate && contractualDueDate <= today || !contractualDueDate && date && date <= today);
+    const contractOverdue = Boolean(contractualDueDate && contractualDueDate <= today);
+    const contractDifference = dayDifference(scheduledDate, contractualDueDate);
+    const scheduledDelayDays = contractDifference === null ? null : Math.max(0, contractDifference);
     if (date && date <= today) date = tomorrow(today); // Preserve original deadline; overdue remains explicit.
     if (date && entry.kind === 'income' && delay) date = shift(date, delay);
+    const forecastDifference = dayDifference(date, contractualDueDate);
+    const forecastDelayDays = forecastDifference === null ? null : Math.max(0, forecastDifference);
     const excluded = outside || entry.kind === 'income' && certainty === 'tentative' && scenario !== 'base';
     // Contracted obligations do not increase in value just because a scenario changed.
     const amount = entry.kind === 'expense' && certainty === 'tentative' && costIncrease ? percentAmount(amountCents, costIncrease) : amountCents;
     if (amount === null) { warnings.push(`${entry.description}: сумма сценария выходит за точный диапазон.`); return; }
     events.push({ id: `${entry.id}:${suffix}`, entryId: entry.id, description: entry.description, kind: entry.kind,
       amountCents: amount, date, scheduledDate, contractualDueDate, accountId: sourceAccountId, trancheId: tranche?.id,
-      certainty, overdue, source: tranche?.source ?? plan?.source ?? 'Существующее обязательство', ...(excluded ? { excluded: true } : {}) });
+      certainty, overdue, contractOverdue, forecastDelayDays, scheduledDelayDays, dateResolution,
+      source: tranche?.source ?? plan?.source ?? 'Существующее обязательство', ...(excluded ? { excluded: true } : {}) });
     if (outside) warnings.push(`${entry.description}: будущая прямая оплата участником показана отдельно от счетов компании.`);
   };
   for (const entry of state.financeEntries ?? []) {
@@ -205,7 +286,10 @@ export function treasuryProjection(state, { today, horizonDays = 91, scenario = 
       unallocatedSettlementCents += Math.abs(settled - allocated);
       warnings.push(`${entry.description}: распределите ${Math.abs(settled - allocated) / 100} ₽ записанных оплат по траншам.`);
       addEvent(entry, { ...plan, source: 'Остаток обязательства; распределение прошлых оплат не завершено' }, { certainty: 'expected', source: 'Нужна привязка оплат к траншам' }, remaining, 'unallocated-settlement');
-      const last = events.at(-1); if (last?.entryId === entry.id) { last.date = null; last.scheduledDate = null; }
+      const last = events.at(-1); if (last?.entryId === entry.id) {
+        last.date = null; last.scheduledDate = null; last.forecastDelayDays = null; last.scheduledDelayDays = null;
+        last.dateResolution = { ...last.dateResolution, date: null, anchorDate: null, basis: 'unknown', reason: 'Распределите записанные оплаты по траншам; дата оставшейся суммы пока неизвестна.' };
+      }
       continue;
     }
     for (const item of pending) addEvent(entry, plan, item.tranche, item.amount, item.tranche.id);
@@ -279,6 +363,37 @@ export function treasuryProjection(state, { today, horizonDays = 91, scenario = 
   return { today, scenario, days, events, openingKnown, openingCents, minBalanceCents: minimum, firstDeficitDate,
     peakFundingCents: minimum === null ? null : Math.max(0, -minimum), peakReserveFundingCents: minimum === null || !reserveKnown ? null : Math.max(0, reserve -minimum),
     unallocatedCents, unallocatedSettlementCents, warnings: unique(warnings), completeness };
+}
+
+/** Pure preview: a PPR change recalculates expected cash, never edits deadlines or payment facts. */
+export function treasuryScheduleImpact(previous, next, { today, horizonDays = 91, accountId } = {}) {
+  if (previous.project.id !== next.project.id) throw new Error('Сравнивать изменения ППР можно только внутри одного проекта.');
+  const options = { today, horizonDays, accountId, scenario: 'base' };
+  const before = treasuryProjection(previous, options), after = treasuryProjection(next, options);
+  const oldEvents = new Map(before.events.map(event => [event.id, event]));
+  const nextEvents = new Map(after.events.map(event => [event.id, event]));
+  const changes = [];
+  for (const id of unique([...oldEvents.keys(), ...nextEvents.keys()])) {
+    const old = oldEvents.get(id), current = nextEvents.get(id), event = current ?? old;
+    // Include changed explanations (e.g. unknown -> fact), even when the date itself is equal.
+    if (old && current && old.scheduledDate === current.scheduledDate && old.amountCents === current.amountCents
+      && stable(old.dateResolution) === stable(current.dateResolution) && Boolean(old.excluded) === Boolean(current.excluded)) continue;
+    const beforeDate = old?.scheduledDate ?? null, afterDate = current?.scheduledDate ?? null;
+    const fallback = { date: null, anchorDate: null, basis: 'unknown', label: 'Событие отсутствует', reason: 'Остаток обязательства отсутствует.', offsetDays: 0, calendar: 'calendar' };
+    const beforeResolution = old?.dateResolution ?? fallback, afterResolution = current?.dateResolution ?? fallback;
+    changes.push({ id, entryId: event.entryId, trancheId: event.trancheId, description: event.description, kind: event.kind,
+      amountCents: event.amountCents, beforeDate, afterDate, shiftDays: dayDifference(afterDate, beforeDate),
+      contractualDueDate: event.contractualDueDate, beforeResolution, afterResolution,
+      reason: afterResolution.reason || afterResolution.label, affectsCash: !event.excluded });
+  }
+  const dated = projection => projection.openingKnown && projection.unallocatedSettlementCents === 0
+    && projection.unallocatedCents.income === 0 && projection.unallocatedCents.expense === 0;
+  const comparable = previous.treasury?.enabled === true && next.treasury?.enabled === true && dated(before) && dated(after);
+  return { before, after, changes,
+    shiftedIncomeCents: sum(changes.filter(change => change.kind === 'income' && change.beforeDate !== change.afterDate).map(change => change.amountCents)),
+    shiftedExpenseCents: sum(changes.filter(change => change.kind === 'expense' && change.beforeDate !== change.afterDate).map(change => change.amountCents)),
+    peakFundingDeltaCents: comparable && before.peakFundingCents !== null && after.peakFundingCents !== null ? after.peakFundingCents - before.peakFundingCents : null,
+    comparable, complete: comparable && before.completeness && after.completeness };
 }
 
 export function validateTreasuryChanges(previous, next, identity, now) {

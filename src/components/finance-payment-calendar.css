@@ -48,3 +48,15 @@
   .finance-calendar__editor label { width: 100%; }
   .finance-calendar__switch button { padding: 9px 10px; font-size: 12px; }
 }
+.finance-calendar__row--synced { grid-template-columns: minmax(0, 1fr) auto minmax(190px, 240px); }
+.finance-calendar__dates { display: grid; justify-items: end; gap: 5px; color: #50594a; font-size: 12px; line-height: 1.5; text-align: right; }
+.finance-calendar__dates strong { font-weight: 600; }
+.finance-calendar__dates .finance-calendar__date { color: #405334; padding: 5px 0; }
+.finance-calendar__source { grid-column: 1 / -1; display: grid; gap: 5px; color: #50594a; font-size: 12px; line-height: 1.5; margin-top: -8px; overflow-wrap: anywhere; }
+.finance-calendar__risk { color: #914533; }
+.finance-calendar__note { line-height: 1.6; color: #596150; }
+@media (max-width: 700px) {
+  .finance-calendar__row--synced { grid-template-columns: minmax(0, 1fr) auto; }
+  .finance-calendar__dates { grid-column: 1 / -1; justify-items: start; text-align: left; }
+  .finance-calendar__source { margin-top: 0; }
+}

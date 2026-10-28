@@ -11,6 +11,8 @@ import { formatDate } from '../presentation/formatting';
 import { stageStatusLabel } from '../presentation/status-labels';
 import { Field, Modal } from './Ui';
 import { StageControlModal } from './StageControlModal';
+import { SchedulePaymentImpact } from './SchedulePaymentImpact';
+import { previewScheduleEdit } from '../application/schedule-payment-preview';
 
 type Props = { state: AppState; role: UserRole; actor: string; userId?: string; initialId?: string; onChange: (state: AppState) => void; onClose: () => void };
 export function ScheduleReconciliation(props: Props) {
@@ -47,6 +49,9 @@ function RowReview({ state, stage, role, actor, userId, onChange, onAction }: Pr
   const finished = ['accepted', 'awaiting_inspection'].includes(stage.status), summary = stage.schedule?.kind === 'summary';
   const today = planToday(), fresh = confirmedSiteUpdate(stage, today);
   const changedElsewhere = structureBase !== scheduleEditSnapshot(state, 'structure', stage.id) || reviewBase !== scheduleEditSnapshot(state, 'review', stage.id);
+  const previewIdentity = { name: actor, role, id: userId };
+  const structurePreview = manager && state.treasury?.enabled ? previewScheduleEdit(state, { kind: 'structure', stageId: stage.id, expected: structureBase, structure, daysOff, checked }, previewIdentity, systemClock.now()) : null;
+  const reviewPreview = manager && state.treasury?.enabled ? previewScheduleEdit(state, { kind: 'review', stageId: stage.id, expected: reviewBase, form }, previewIdentity, systemClock.now()) : null;
   const patchStructure = (patch: Partial<StageSchedule>) => { setStructure({ ...structure, ...patch }); setChecked(false); setMessage(''); };
   const patchForm = (patch: Partial<StageSiteUpdate>) => { setForm({ ...form, ...patch }); setMessage(''); };
   const saveStructure = (event: FormEvent) => {
@@ -102,6 +107,7 @@ function RowReview({ state, stage, role, actor, userId, onChange, onAction }: Pr
         </>}
         <Field label="Кто подтверждает состояние"><select value={structure.reporterId} onChange={(e) => patchStructure({ reporterId: e.target.value })}><option value="">Только управление</option>{state.settings.users.filter((u) => u.status === 'active' && u.role !== 'client').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
         <label className="stage-check"><input required type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /><span>Подтверждаю состав, связи, календарь и ресурс. Пустой список связей означает независимый старт.</span></label>
+        <SchedulePaymentImpact before={state} preview={structurePreview} role={role} today={today} />
         <button className="button button--secondary" type="submit">Сохранить структуру</button>
       </form> : <p>Структуру сверяет управление. Назначенный сотрудник: {reporter?.name || 'управление'}.</p>}
     </details>
@@ -122,6 +128,7 @@ function RowReview({ state, stage, role, actor, userId, onChange, onAction }: Pr
         <Field label="На чём основано подтверждение"><textarea required maxLength={2000} value={form.note} onChange={(e) => patchForm({ note: e.target.value })} placeholder="Что проверили на объекте, оставшийся объём, акт или ссылка" /></Field>
         <Field label="Ближайшее действие"><input required={Boolean(stage.blocker)} maxLength={1000} value={form.nextAction} onChange={(e) => patchForm({ nextAction: e.target.value })} placeholder="Например: согласовать дату поставки" /></Field>
         <Field label="Кто отвечает за решение"><input required={Boolean(stage.blocker)} maxLength={120} value={form.issueOwner} onChange={(e) => patchForm({ issueOwner: e.target.value })} /></Field>
+        <SchedulePaymentImpact before={state} preview={reviewPreview} role={role} today={today} />
         <button className="button button--primary" type="submit">Подтвердить сведения · {actor}</button>
       </form>
     </section>}
@@ -137,10 +144,11 @@ function FactRecovery({ state, stage, actor, role, userId, onChange }: { state: 
   const [expected] = useState(() => scheduleEditSnapshot(state, 'facts', stage.id));
   const knownEnd = stage.completedOn || stage.actualEnd;
   const [end, setEnd] = useState(knownEnd || ''), [accepted, setAccepted] = useState(''), [note, setNote] = useState(''), [message, setMessage] = useState('');
+  const preview = role === 'management' && state.treasury?.enabled ? previewScheduleEdit(state, { kind: 'facts', stageId: stage.id, expected, end, accepted, note }, { name: actor, role, id: userId }, systemClock.now()) : null;
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const result = commands.execute({ kind: 'facts', stageId: stage.id, expected, end, accepted, note });
     setMessage(result.ok ? 'Уточнение передано на сохранение. Затем обновите сверку остатка / приёмки.' : result.error);
   };
-  return <details className="schedule-review__section"><summary>Уточнить неизвестную фактическую дату</summary><p className="muted">Только управление и только по подтверждению: акту, журналу или проверенному сообщению. Известные даты не заменяются. Если дата неизвестна — оставьте запись без неё, не подставляйте сегодня.</p><form className="modal-form" onSubmit={submit}><Field label="Фактическое выполнение"><input required type="date" max={planToday()} disabled={Boolean(knownEnd)} value={knownEnd || end} onChange={(e) => setEnd(e.target.value)} /></Field>{stage.status === 'accepted' && !stage.acceptedAt && <Field label="Дата уже состоявшейся приёмки, если известна"><input type="date" min={knownEnd || end || undefined} max={planToday()} value={accepted} onChange={(e) => setAccepted(e.target.value)} /></Field>}<Field label="Основание уточнения"><textarea required maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Документ, журнал или ссылка на подтверждение" /></Field><button type="submit" className="button button--secondary">Записать неизвестные даты с основанием</button>{message && <p role="status">{message}</p>}</form></details>;
+  return <details className="schedule-review__section"><summary>Уточнить неизвестную фактическую дату</summary><p className="muted">Только управление и только по подтверждению: акту, журналу или проверенному сообщению. Известные даты не заменяются. Если дата неизвестна — оставьте запись без неё, не подставляйте сегодня.</p><form className="modal-form" onSubmit={submit}><Field label="Фактическое выполнение"><input required type="date" max={planToday()} disabled={Boolean(knownEnd)} value={knownEnd || end} onChange={(e) => setEnd(e.target.value)} /></Field>{stage.status === 'accepted' && !stage.acceptedAt && <Field label="Дата уже состоявшейся приёмки, если известна"><input type="date" min={knownEnd || end || undefined} max={planToday()} value={accepted} onChange={(e) => setAccepted(e.target.value)} /></Field>}<Field label="Основание уточнения"><textarea required maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Документ, журнал или ссылка на подтверждение" /></Field><SchedulePaymentImpact before={state} preview={preview} role={role} /><button type="submit" className="button button--secondary">Записать неизвестные даты с основанием</button>{message && <p role="status">{message}</p>}</form></details>;
 }

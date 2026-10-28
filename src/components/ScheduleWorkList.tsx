@@ -33,9 +33,15 @@ export function ScheduleTaskList({ tasks, onOpenTask }: { tasks: ProjectTask[]; 
 
 export function SchedulePaymentList({ payments, onOpen }: { payments: SchedulePaymentMarker[]; onOpen: (id: string, stageId: string) => void }) {
   if (!payments.length) return null;
-  return <div className="schedule-linked-payments">{payments.map(payment => <button key={payment.id} type="button" className={`schedule-payment schedule-payment--${payment.kind}`} onClick={() => onOpen(payment.entryId, payment.stageId)} title={`${payment.title}${payment.contractualDueDate ? ` · По договору ${formatDate(payment.contractualDueDate)}` : ''}`}>
+  return <div className="schedule-linked-payments">{payments.map(payment => <button key={payment.id} type="button" className={`schedule-payment schedule-payment--${payment.kind}`} onClick={() => onOpen(payment.entryId, payment.stageId)} title={[payment.title, payment.dateLabel, payment.dateReason, payment.contractualDueDate ? `По договору ${formatDate(payment.contractualDueDate)}` : '', payment.excludedFromCash ? 'Прямая оплата участником; не меняет счета компании' : ''].filter(Boolean).join(' · ')}>
     {payment.kind === 'income' ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}
-    <span>{payment.kind === 'income' ? 'Поступление' : 'Оплата'}<small>{payment.source === 'treasury' ? 'Прогноз · ' : ''}{payment.date ? formatDate(payment.date) : 'Без даты'}{payment.overdue ? ' · просрочено' : ''}</small></span>
+    <span>{payment.kind === 'income' ? 'Поступление' : 'Оплата'}<small>{payment.source === 'treasury' ? 'По правилу / плану · ' : ''}{payment.date ? formatDate(payment.date) : 'Без даты'}{payment.overdue ? payment.contractOverdue ? ' · договорный срок прошёл' : ' · плановый срок прошёл' : ''}</small>
+      {payment.dateLabel && <small>{payment.dateLabel}</small>}
+      {payment.forecastDate && payment.forecastDate !== payment.date && <small>В денежном прогнозе: {formatDate(payment.forecastDate)}</small>}
+      {payment.forecastDelayDays !== undefined && payment.forecastDelayDays !== null && payment.forecastDelayDays > 0 && <small>Прогноз позже договора на {payment.forecastDelayDays} дн.</small>}
+      {payment.excludedFromCash && <small>Оплата участником · вне счетов компании</small>}
+      {!payment.date && payment.dateReason && <small>{payment.dateReason}</small>}
+    </span>
     <strong>{payment.kind === 'income' ? '+' : '−'}{money(payment.amount)}</strong>
   </button>)}</div>;
 }

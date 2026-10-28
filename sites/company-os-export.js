@@ -115,6 +115,8 @@ const treasuryExport = (state, generatedAt) => {
       kind: event.kind, amount_rub: rubles(event.amountCents), date: event.date,
       scheduled_date: event.scheduledDate, contractual_due_date: event.contractualDueDate, certainty: event.certainty,
       overdue: event.overdue, excluded: event.excluded === true,
+      date_basis: event.dateResolution.basis, date_requires_review: !event.dateResolution.date || Boolean(event.dateResolution.reason),
+      contract_overdue: event.contractOverdue, forecast_delay_days: event.forecastDelayDays,
     })),
     days: projection.days.map(day => ({
       date: day.date, inflow_rub: rubles(day.inflowCents), outflow_rub: rubles(day.outflowCents),
