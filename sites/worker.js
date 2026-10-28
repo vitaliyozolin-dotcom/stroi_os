@@ -1,4 +1,4 @@
-import { ensureSchema, ensureBattleReady, battleReadiness, initializeBattleRuntime } from './runtime/initialization.js';
+import { ensureSchema, ensureBattleReady, battleReadiness, initializeBattleRuntime, BATTLE_RESET_KEY as RUNTIME_BATTLE_RESET_KEY } from './runtime/initialization.js';
 import { readSnapshot } from './projects/snapshot.js';
 import { telegramFileToR2, resolveTelegramDraftFile } from './telegram/files.js';
 import { telegramAnswerCallback, telegramConfirmVisible, telegramDurableVisibility, requireTelegramVisibility, telegramSendPhoto } from './telegram/visibility.js';
@@ -77,6 +77,11 @@ import {
 } from './telegram/rendering.js';
 
 export { battleReadiness, initializeBattleRuntime, resolveTelegramDraftFile, telegramMessageMentionsBot };
+
+// The installed deployment gate reads this literal before touching live services.
+// Keep its compatibility manifest tied to the actual runtime readiness marker.
+const BATTLE_RESET_KEY = 'battle_v17_reset';
+if (BATTLE_RESET_KEY !== RUNTIME_BATTLE_RESET_KEY) throw new Error('deployment_runtime_marker_mismatch');
 
 const TELEGRAM_MUTATION_NOOP = Symbol('telegram_mutation_noop');
 
