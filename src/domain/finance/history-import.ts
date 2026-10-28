@@ -1,4 +1,5 @@
 import type { ActivityEvent, BudgetLine, FinanceEntry, ProjectDocument, CounterpartyProfile } from '../../entities/index';
+import { settledAmountFor } from '../finance-totals.js';
 import type { FinanceHistorySnapshot, FinanceOwnedState } from './context';
 
 /** Explicit read projection; unrelated project fields never enter the import calculation. */
@@ -6,7 +7,7 @@ export const financeHistoryState = (state: FinanceHistorySnapshot): FinanceHisto
   project: { id: state.project.id, targetCost: state.project.targetCost },
   budgetLines: state.budgetLines, budgetMeta: state.budgetMeta, financeEntries: state.financeEntries,
   documents: state.documents, counterparties: state.counterparties, stages: state.stages,
-  procurement: state.procurement, checkpoints: state.checkpoints,
+  procurement: state.procurement, checkpoints: state.checkpoints, financeLedger: state.financeLedger, treasury: state.treasury,
 });
 
 export interface FinanceHistoryPreparation {
@@ -154,7 +155,7 @@ export function prepareFinanceHistoryImport(current: FinanceHistorySnapshot, inp
     if (record.existingOperation) {
       const matches = next.financeEntries.filter((entry) => entry.kind === 'expense' && normalized(entry.counterparty) === normalized(record.vendor) && entry.description === record.description && entry.date === record.documentDate && Math.round(entry.amount * 100) === Math.round(record.amount * 100));
       const entry = matches[0];
-      if (matches.length !== 1 || entry.status !== 'committed' || entry.historicalPayment || (entry.paidAmount ?? 0) !== 0 || (entry.acceptedAmount ?? 0) !== 0) throw new Error(`Сначала сверьте существующий расход: ${record.description}.`);
+      if (matches.length !== 1 || entry.status !== 'committed' || entry.historicalPayment || settledAmountFor(entry, next) !== 0 || (entry.acceptedAmount ?? 0) !== 0) throw new Error(`Сначала сверьте существующий расход: ${record.description}.`);
       checkPaymentDate(entry, record);
       const doc = matchingDocument(record.file)!, source = input.sources.find((item) => item.fileName === record.file)!;
       entry.status = 'paid'; entry.paidAmount = entry.amount; entry.acceptedAmount = 0;

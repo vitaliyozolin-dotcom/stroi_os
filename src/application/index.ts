@@ -20,7 +20,7 @@ export type { HistoryImportCommand, FinanceHistoryCommandResult as HistoryImport
 export type { CreateCommitmentInput } from './finance-context-commitment.js';
 export { applyLocalChange, applyRemoteSnapshot, createSyncModel, reconcileRemoteSnapshot, reconcileRevisionConflict, reconcileSavedSnapshot } from './project-sync.ts';
 export type { RemoteReconciliation, SaveReconciliation, SyncModel, SyncSnapshot } from './project-sync.ts';
-export { applyProjectRemote, createProjectWorkflow, flushProjectChanges, hydrateProject, keepProjectLocalVersion, retryProjectSync, switchProjectWorkflow, useProjectServerVersion } from './project-sync-workflow.ts';
+export { applyProjectRemote, reconcileProjectExternalUpdate, createProjectWorkflow, flushProjectChanges, hydrateProject, keepProjectLocalVersion, retryProjectSync, switchProjectWorkflow, useProjectServerVersion } from './project-sync-workflow.ts';
 export type { ProjectSyncEvent, ProjectSyncWorkflow } from './project-sync-workflow.ts';
 export type { StateChangeSink } from './state-change.ts';
 export { ProjectCacheError, ProjectRevisionConflict } from './ports.ts';

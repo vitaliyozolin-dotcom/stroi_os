@@ -78,7 +78,7 @@ function App() {
   const location = useLocation();
   const changeLocation = useNavigate();
   const { session, role, sessionError } = useSession();
-  const { state, updateState, sync, localCache, conflict, retry, useServerVersion, keepLocalVersion, applyServerSnapshot, projects, createProject, route, page } = useWorkspaceProject(session, role);
+  const { state, updateState, sync, localCache, conflict, retry, useServerVersion, keepLocalVersion, applyServerSnapshot, reconcileServerSnapshot, projects, createProject, route, page } = useWorkspaceProject(session, role);
   const focusEntityId = route.entityId;
   const [mobileMenu, setMobileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -223,7 +223,7 @@ function App() {
             : !allowedPages(role).includes(page) ? <div role="status">Открываем доступный раздел…</div>
             : route.projectId && route.projectId !== state.project.id ? <div className="task-empty" role="status" aria-live="polite"><strong>{sync.phase === 'loading' ? 'Загружаем проект…' : 'Не удалось открыть проект'}</strong>{sync.phase !== 'loading' && <><p>{sync.message || 'Проверьте доступ к проекту или подключение к сети.'}</p><button type="button" className="button button--primary" onClick={() => navigate(role === 'client' ? 'client' : 'overview')}>К текущему проекту</button></>}</div>
             : location.pathname === '/' ? <div role="status">Открываем раздел…</div>
-            : <WorkspacePages key={`${state.project.id}:${page}`} state={state} session={session} role={role} focusEntityId={focusEntityId} updateState={updateState} navigate={navigate} applyServerSnapshot={applyServerSnapshot} openQuestions={() => setQuestionsOpen(true)} openProjects={() => setCreateProjectOpen(true)} />}
+            : <WorkspacePages key={`${state.project.id}:${page}`} state={state} session={session} role={role} focusEntityId={focusEntityId} updateState={updateState} navigate={navigate} applyServerSnapshot={applyServerSnapshot} reconcileServerSnapshot={reconcileServerSnapshot} openQuestions={() => setQuestionsOpen(true)} openProjects={() => setCreateProjectOpen(true)} />}
         </main>
       </div>
 

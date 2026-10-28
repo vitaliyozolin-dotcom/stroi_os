@@ -21,7 +21,7 @@ export class StorageRequestError extends Error {
   code: string;
 
   constructor(code: string, detail?: string) {
-    super(['invalid_finance_transition', 'invalid_baseline_transition', 'invalid_stage_transition'].includes(code) && detail ? `${code}: ${detail}` : code);
+    super(['invalid_finance_transition', 'invalid_baseline_transition', 'invalid_stage_transition', 'invalid_treasury_transition', 'invalid_finance_ledger', 'invalid_finance_automation', 'invalid_portfolio_finance', 'financial_transaction_unavailable'].includes(code) && detail ? `${code}: ${detail}` : code);
     this.name = 'StorageRequestError';
     this.code = code;
   }

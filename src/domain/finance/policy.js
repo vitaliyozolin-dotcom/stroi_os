@@ -1,4 +1,4 @@
-import { acceptedAmountFor, paidAmountFor } from '../finance-totals.js';
+import { acceptedAmountFor, paidAmountFor, payableAmountFor } from '../finance-totals.js';
 
 export const financeMoney = (value) => Math.round(value * 100) / 100;
 
@@ -19,7 +19,8 @@ export const expenseAcceptanceSources = (state, entry) => {
 };
 
 export const financeActionError = (state, entry, kind, amount, date, document, source) => {
-  const limit = financeMoney(kind === 'accept' ? entry.amount - acceptedAmountFor(entry) : entry.amount - paidAmountFor(entry));
+  if (['pay', 'receive'].includes(kind) && (state.financeLedger?.loans ?? []).some(loan => loan.status !== 'draft' && loan.schedule.some(item => item.kind === 'interest' && item.entryId === entry.id))) return 'Проценты по займу оформляются в финансовом журнале: выберите заём и строку графика.';
+  const limit = financeMoney(kind === 'accept' ? entry.amount - acceptedAmountFor(entry) : payableAmountFor(entry, state));
   if (!Number.isFinite(amount) || !Number.isSafeInteger(Math.round(amount * 100)) || Math.abs(amount - financeMoney(amount)) > 0.000001 || amount <= 0 || amount > limit) return 'Укажите сумму больше нуля и не больше доступного остатка.';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date || !document.trim()) return 'Укажите фактическую дату и документ-основание.';
   if ((kind === 'receive') !== (entry.kind === 'income')) return 'Это действие недоступно для данной операции.';

@@ -8,8 +8,13 @@ export {
   unallocatedExpenseTotals,
   paymentDate,
   paymentMovements,
+  financeCashMovementRows,
   undatedPayments,
   paidAmountFor,
+  settledAmountFor,
+  outstandingAmountFor,
+  payableAmountFor,
+  effectiveBudgetLines,
   stageFinanceTotals,
 } from './finance.ts';
 export { mergeProjectStates } from './merge.ts';

@@ -11,6 +11,8 @@ import type { Stage } from './stage';
 import type { ProjectTask } from './task';
 import type { AppSettings } from './user';
 import type { TreasuryState } from './treasury';
+import type { FinanceLedgerState } from './finance-ledger';
+import type { FinanceAutomationState } from './finance-automation';
 
 export interface AppState {
   version: 1;
@@ -22,6 +24,8 @@ export interface AppState {
   financeEntries: FinanceEntry[];
   /** Optional pilot planning layer; existing payment events remain authoritative. */
   treasury?: TreasuryState;
+  financeLedger?: FinanceLedgerState;
+  financeAutomation?: FinanceAutomationState;
   procurement: ProcurementItem[];
   counterparties: CounterpartyProfile[];
   supplierQuotes: SupplierQuote[];

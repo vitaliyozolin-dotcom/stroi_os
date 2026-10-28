@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { paymentEvidence } from '../src/domain/payment-evidence.ts';
+import { paymentEvidence, financeEntryEvidenceDocuments } from '../src/domain/payment-evidence.ts';
 import type { FinanceEntry, ProjectDocument } from '../src/entities/index.ts';
+import { emptyFinanceLedger } from '../src/domain/finance-ledger.js';
 
 const entry = { id: 'expense', kind: 'expense', status: 'paid', amount: 100, paidAmount: 100, paymentDocument: 'Оплата подтверждена', historicalPayment: { sourceDocumentId: 'source' } } as FinanceEntry;
 const doc = (values: Partial<ProjectDocument>) => ({ id: 'source', fileKey: 'project/source', fileName: 'estimate.xlsx', category: 'specification', ...values }) as ProjectDocument;
@@ -38,4 +39,46 @@ test('an earlier partial payment retains evidence after a later text-only paymen
   assert.equal(paymentEvidence(current, documents).documentLabel, 'Файл приложен · тип не проверен');
   assert.equal(paymentEvidence(current, []).documentLabel, 'Счёт / чек / накладная не приложены');
   assert.equal(paymentEvidence(current, [{ ...documents[0], fileKey: undefined }]).documentLabel, 'Счёт / чек / накладная не приложены');
+});
+
+test('ledger-only confirmed and reconciled payments show their actual evidence level', () => {
+  const current = { ...entry, status: 'committed' as const, paidAmount: 0, historicalPayment: undefined };
+  const state = { financeLedger: emptyFinanceLedger() };
+  state.financeLedger.operations.push({ id: 'journal', kind: 'payment', amountCents: 10000, date: '2026-10-20', accountId: 'bank', counterparty: 'Vendor', description: 'Payment', source: 'Evidence', confirmation: 'confirmed', allocations: [{ entryId: current.id, amountCents: 10000 }] });
+  assert.equal(paymentEvidence(current, [], state).sourceLabel, 'По журналу расчётов');
+  assert.equal(paymentEvidence(current, [], state).paymentLabel, 'Записана в журнале; банковская сверка не завершена');
+  state.financeLedger.confirmations.push({ id: 'bank-match', operationId: 'journal', confirmation: 'reconciled', source: 'Statement', sourceKey: 'bank-key', bankAccountId: 'bank' });
+  assert.equal(paymentEvidence(current, [], state).paymentLabel, 'Сверена с банком');
+});
+
+test('claimed journal or legacy payments are never labeled as paid or bank verified', () => {
+  const current = { ...entry, historicalPayment: undefined };
+  const state = { financeLedger: emptyFinanceLedger(), treasury: { version: 1 as const, enabled: true, accounts: [], costEstimates: [], entryPlans: [{ entryId: current.id, source: 'Review', tranches: [], paymentFacts: [{ paymentId: 'legacy:expense', cashTreatment: 'account' as const, confirmation: 'claimed' as const, source: 'Unverified' }] }] } };
+  assert.equal(paymentEvidence(current, [doc({ fileName: 'paid.pdf', category: 'invoice' })], state).paymentLabel, 'Заявлена, не подтверждена');
+  state.financeLedger.operations.push({ id: 'journal', kind: 'payment', amountCents: 10000, date: '2026-10-20', accountId: 'bank', counterparty: 'Vendor', description: 'Payment', source: 'Evidence', confirmation: 'claimed', allocations: [{ entryId: current.id, amountCents: 10000 }] });
+  assert.equal(paymentEvidence(current, [], state).paymentLabel, 'Заявлена, не подтверждена');
+  state.financeLedger.operations = [{ ...state.financeLedger.operations[0], confirmation: 'reconciled', allocations: [], legacyPayment: { entryId: current.id, paymentId: 'legacy:expense' } }];
+  assert.equal(paymentEvidence(current, [], state).paymentLabel, 'Сверена с банком', 'exact same legacy movement can be corroborated, never duplicated');
+});
+
+test('one reconciled partial payment does not imply all other payments or refunds were reconciled', () => {
+  const current = { ...entry, status: 'committed' as const, paidAmount: 0, historicalPayment: undefined };
+  const state = { financeLedger: emptyFinanceLedger() };
+  state.financeLedger.operations = [
+    { id: 'cash', kind: 'payment', amountCents: 10000, date: '2026-10-20', accountId: 'bank', counterparty: 'Vendor', description: 'Payment', source: 'Evidence', confirmation: 'reconciled', allocations: [{ entryId: current.id, amountCents: 10000 }] },
+    { id: 'refund', kind: 'supplier_refund', amountCents: 3000, date: '2026-10-21', accountId: 'bank', counterparty: 'Vendor', description: 'Refund', source: 'Evidence', confirmation: 'confirmed', allocations: [{ entryId: current.id, amountCents: 3000 }], refundOfOperationId: 'cash' },
+  ];
+  assert.equal(paymentEvidence(current, [], state).paymentLabel, 'Часть движений сверена с банком');
+});
+
+test('split payment originals and later allocation events are visible from every affected obligation', () => {
+  const current = { ...entry, status: 'committed' as const, paidAmount: 0, historicalPayment: undefined }, second = { ...current, id: 'second' };
+  const state = { financeLedger: emptyFinanceLedger() };
+  state.financeLedger.operations = [{ id: 'split', kind: 'payment', amountCents: 10000, date: '2026-10-20', accountId: 'bank', counterparty: 'Vendor', description: 'Payment', source: 'Evidence', confirmation: 'confirmed', documentId: 'pp', documentIds: ['invoice'], allocations: [{ entryId: current.id, amountCents: 5000 }] }];
+  state.financeLedger.allocationEvents = [{ id: 'allocate-later', operationId: 'split', allocations: [{ entryId: second.id, amountCents: 5000 }], source: 'Review' }];
+  const documents = [doc({ id: 'pp', fileName: 'pp.pdf', category: 'other' }), doc({ id: 'invoice', fileName: 'invoice.pdf', category: 'invoice' }), doc({ id: 'unrelated', fileName: 'other.pdf' })];
+  for (const item of [current, second]) {
+    assert.deepEqual(financeEntryEvidenceDocuments(item, documents, state).map(document => document.id), ['pp', 'invoice']);
+    assert.equal(paymentEvidence(item, documents, state).documentLabel, 'Счёт · приложено');
+  }
 });

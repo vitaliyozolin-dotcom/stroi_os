@@ -9,6 +9,8 @@ import { applyBattleAutomations } from './automations/battle.js';
 import { createFileHandlers } from './files/routes.js';
 import { createDeveloperFeedbackHandler } from './feedback/routes.js';
 import { createProjectReadHandlers } from './projects/routes.js';
+import { createFinancePortfolioHandler } from './projects/finance-portfolio.js';
+import { createSharedFinanceAccountHandler } from './projects/shared-finance-account.js';
 import { createProjectWriteHandler } from './projects/write.js';
 import { createSessionHandler } from './access/session.js';
 import { createAccessUsersHandler } from './access/users.js';
@@ -116,6 +118,8 @@ const {
 } = createTelegramConnection({ ensureSchema, readSnapshot, reviveTelegramOutbox });
 
 const { getState: handleGetState, audit: handleAudit, projects: handleProjects } = createProjectReadHandlers({ ensureSchema, readSnapshot });
+const handleFinancePortfolio = createFinancePortfolioHandler({ ensureSchema });
+const handleSharedFinanceAccount = createSharedFinanceAccountHandler({ ensureSchema });
 const handleSession = createSessionHandler({ ensureSchema });
 const handleAccessUsers = createAccessUsersHandler({ ensureSchema, readSnapshot });
 const { status: handleCameraStatus, view: handleCameraView } = createCameraHandlers({ ensureSchema, readSnapshot });
@@ -281,6 +285,8 @@ const handleApi = createApiHandler({
   getState: handleGetState,
   putState: handlePutState,
   projects: handleProjects,
+  financePortfolio: handleFinancePortfolio,
+  sharedFinanceAccount: handleSharedFinanceAccount,
   integrationStatus: handleIntegrationStatus,
   integrationTest: handleIntegrationTest,
   telegramChatSelect: handleTelegramChatSelect,

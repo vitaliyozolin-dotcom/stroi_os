@@ -75,6 +75,34 @@ export class PostgresDatabase {
     }
   }
 
+  /** Serialize cross-project finance checks and the revisioned write in one transaction. */
+  async financialTransaction(work) {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      // One workspace lock also covers newly created projects, which have no row to lock yet.
+      await client.query("SELECT pg_advisory_xact_lock(731104, 280026)");
+      const scoped = {
+        prepare: sql => new Statement({ pool: client }, sql),
+        batch: async statements => {
+          const results = [];
+          for (const statement of statements) {
+            const result = await statement.execute(client);
+            results.push({ changes: result.rowCount, meta: { changes: result.rowCount }, results: result.rows });
+          }
+          return results;
+        },
+      };
+      const result = await work(scoped);
+      // HTTP validation failures do not keep partial preparatory writes.
+      await client.query(result instanceof Response && result.status >= 400 ? 'ROLLBACK' : 'COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
   async close() {
     await this.pool.end();
   }

@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   Truck,
 } from 'lucide-react';
-import { acceptedAmountFor, paidAmountFor } from '../domain/index';
+import { acceptedAmountFor, paidAmountFor, outstandingAmountFor } from '../domain/index';
 import { formatDate, money } from '../presentation/formatting';
 import type { AppState, ExpenseStatus, ProcurementStatus, StageStatus } from '../entities/index';
 import { Modal, StatusBadge } from './Ui';
@@ -44,9 +44,9 @@ export function CounterpartyModal({ state, counterpartyId, name, onClose, onOpen
   const stages = state.stages.filter((stage) => linked(stage.responsibleId, stage.responsible));
   const stageIds = new Set(stages.map((stage) => stage.id));
   const reworkCount = state.checkpoints.filter((item) => stageIds.has(item.stageId) && item.status === 'rework').length;
-  const paid = financeEntries.filter((item) => item.kind === 'expense').reduce((sum, item) => sum + paidAmountFor(item), 0);
+  const paid = financeEntries.filter((item) => item.kind === 'expense').reduce((sum, item) => sum + paidAmountFor(item, state), 0);
   const accepted = financeEntries.filter((item) => item.kind === 'expense').reduce((sum, item) => sum + acceptedAmountFor(item), 0);
-  const obligations = financeEntries.filter((item) => item.kind === 'expense').reduce((sum, item) => sum + Math.max(0, item.amount - paidAmountFor(item)), 0);
+  const obligations = financeEntries.filter((item) => item.kind === 'expense').reduce((sum, item) => sum + outstandingAmountFor(item, state), 0);
   const ordered = procurement.reduce((sum, item) => sum + item.budget, 0);
   const completedStages = stages.filter((stage) => stage.status === 'accepted' && stage.actualEnd);
   const measurableDeliveries = procurement.filter((item) => item.deliveredAt && ['delivered', 'accepted', 'issued'].includes(item.status));

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ArrowDownLeft, ArrowUpRight, Search } from 'lucide-react';
 import type { AppState } from '../entities/index';
 import { paymentEvidence } from '../domain/payment-evidence';
-import { financeEntryTitle, financeMovementRows, financeToday } from '../presentation/finance-view';
+import { financeEntryTitle, financeMovementRows, financeMovementDisplay, financeToday } from '../presentation/finance-view';
 import { formatDate, money } from '../presentation/formatting';
 
 export function FinanceOperations({ state, onOpenEntry }: { state: AppState; onOpenEntry: (id: string) => void }) {
@@ -10,7 +10,7 @@ export function FinanceOperations({ state, onOpenEntry }: { state: AppState; onO
   const [query, setQuery] = useState('');
   const [period, setPeriod] = useState('all');
   const [limit, setLimit] = useState(20);
-  const movements = useMemo(() => financeMovementRows(state), [state.financeEntries]);
+  const movements = useMemo(() => financeMovementRows(state), [state.financeEntries, state.financeLedger, state.treasury]);
   const today = financeToday();
   const cutoff = new Date(`${today}T12:00:00Z`);
   cutoff.setUTCDate(cutoff.getUTCDate() - 29);
@@ -35,12 +35,12 @@ export function FinanceOperations({ state, onOpenEntry }: { state: AppState; onO
     <div className="finance-operations__caption"><span>{rows.length} записей</span><span>{kind !== 'expense' && `Поступило ${money(income)}`}{kind === 'all' && ' · '}{kind !== 'income' && `Оплачено ${money(expense)}`}</span></div>
     {period !== 'all' && period !== 'undated' && undated > 0 && <p className="finance-inline-note">В этот период не включены оплаты без даты. <button type="button" onClick={() => { setPeriod('undated'); reset(); }}>Посмотреть {undated}</button></p>}
     <div className="finance-operation-list">{rows.slice(0, limit).map(row => {
-      const evidence = paymentEvidence(row.entry, state.documents);
+      const evidence = paymentEvidence(row.entry, state.documents, state), display = financeMovementDisplay(row);
       return <button className="finance-operation" type="button" key={row.id} onClick={() => onOpenEntry(row.entry.id)}>
-        <span className={`finance-operation__icon finance-operation__icon--${row.entry.kind}`}>{row.entry.kind === 'income' ? <ArrowDownLeft size={19} /> : <ArrowUpRight size={19} />}</span>
+        <span className={`finance-operation__icon finance-operation__icon--${display.cashKind}`}>{display.cashKind === 'income' ? <ArrowDownLeft size={19} /> : <ArrowUpRight size={19} />}</span>
         <span className="finance-operation__description"><strong>{financeEntryTitle(row.entry)}</strong><span>{row.entry.counterparty.startsWith('Не указан в смете') ? 'Контрагент не уточнён' : row.entry.counterparty}{row.legacy && <small> · из прежнего учёта</small>}</span></span>
         <span className="finance-operation__date">{row.date ? formatDate(row.date, true) : 'Дата оплаты неизвестна'}</span>
-        <span className="finance-operation__amount"><strong>{row.entry.kind === 'income' ? '+' : '−'}{money(row.amount)}</strong><small>{row.entry.kind === 'income' ? 'Получено' : evidence.sourceLabel}</small></span>
+        <span className="finance-operation__amount"><strong>{display.sign}{money(display.amount)}</strong><small>{row.amount < 0 ? display.label : evidence.paymentLabel}</small></span>
       </button>;
     })}</div>
     {!rows.length && <div className="finance-empty"><strong>{movements.length ? 'Ничего не найдено' : 'Записанных оплат пока нет'}</strong><p>{movements.length ? 'Измените поиск или период.' : 'Будущие расходы и поступления находятся в платёжном календаре.'}</p></div>}

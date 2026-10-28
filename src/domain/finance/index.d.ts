@@ -1,10 +1,10 @@
 import type { FinanceState, FinanceOwnedState, FinancePatch } from './context';
-export type { FinanceState, FinanceOwnedState, FinancePatch, FinancePlanningSnapshot, FinanceHistorySnapshot } from './context';
+export type { FinanceState, FinanceOwnedState, FinancePatch, FinancePlanningSnapshot, FinanceHistorySnapshot, FinanceSettlementContext } from './context';
 import type { FinanceEntry, UserRole } from '../../entities/index';
 
 export interface FinanceActor { name: string; role: UserRole }
 /** Explicit module context: tasks, marketing, settings and UI state stay outside finance. */
-export type FinanceAcceptanceContext = Pick<FinanceState, 'procurement' | 'checkpoints' | 'stages'>;
+export type FinanceAcceptanceContext = Pick<FinanceState, 'procurement' | 'checkpoints' | 'stages' | 'financeLedger' | 'treasury'>;
 export interface FinanceFactInput { amount: number; date: string; document: string; source?: string; documentId?: string }
 export type FinanceEntryResult = { ok: true; entry: FinanceEntry; changed: boolean } | { ok: false; error: string };
 export type FinanceAction = 'accept' | 'pay' | 'receive';

@@ -1,0 +1,7 @@
+.treasury-planning { display: grid; gap: 12px; min-width: 0; }
+.treasury-planning .treasury-settings-row { gap: 16px; }
+.treasury-planning .treasury-settings-row > div { min-width: 0; overflow-wrap: anywhere; }
+.treasury-planning .treasury-settings-row .text-button { flex-shrink: 0; }
+.treasury-planning .treasury-day-table { margin: 12px 0; }
+.treasury-scenario-extra { border: 1px solid var(--border, #ddd); border-radius: 10px; padding: 14px; display: grid; gap: 12px; }
+@media (max-width: 600px) { .treasury-planning .treasury-settings-row { align-items: flex-start; flex-direction: column; } }

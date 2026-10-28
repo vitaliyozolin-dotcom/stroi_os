@@ -3,7 +3,7 @@ import { outstandingAmountFor } from '../domain/finance-totals.js';
 import { planDays, validPlanDate } from '../domain/construction/plan-baseline.js';
 import { treasuryProjection } from '../domain/treasury.js';
 
-export type ScheduleView = 'auto' | 'gantt' | 'list' | 'kanban';
+export type ScheduleView = 'auto' | 'gantt' | 'list' | 'kanban' | 'tasks';
 export interface SchedulePreferences {
   view: ScheduleView;
   compare: boolean;
@@ -18,7 +18,7 @@ export const defaultSchedulePreferences: SchedulePreferences = {
 export function normalizeSchedulePreferences(value: unknown): SchedulePreferences {
   const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   return {
-    view: ['auto', 'gantt', 'list', 'kanban'].includes(String(input.view)) ? input.view as ScheduleView : 'auto',
+    view: ['auto', 'gantt', 'list', 'kanban', 'tasks'].includes(String(input.view)) ? input.view as ScheduleView : 'auto',
     ...Object.fromEntries(Object.entries(defaultSchedulePreferences).filter(([key]) => key !== 'view').map(([key, fallback]) => [key, typeof input[key] === 'boolean' ? input[key] : fallback])),
   } as SchedulePreferences;
 }
@@ -43,10 +43,10 @@ export interface SchedulePaymentMarker {
   contractualDueDate?: string | null; overdue?: boolean; contractOverdue?: boolean; source: 'legacy' | 'treasury';
   /** The cash forecast may roll a missed scheduled date forward; it does not move the PPR marker. */
   forecastDate?: string | null; dateLabel?: string; dateReason?: string | null; forecastDelayDays?: number | null;
-  excludedFromCash?: boolean;
+  excludedFromCash?: boolean; sourceType?: string; sourceId?: string;
 }
 /** Read-only projection: document dates and paid amounts never become future payments. */
-export function schedulePaymentMarkers(source: FinanceEntry[] | Pick<AppState, 'project' | 'financeEntries' | 'treasury' | 'stages' | 'tasks'>, role: UserRole, today?: string): SchedulePaymentMarker[] {
+export function schedulePaymentMarkers(source: FinanceEntry[] | Pick<AppState, 'project' | 'financeEntries' | 'treasury' | 'stages' | 'tasks' | 'financeLedger'>, role: UserRole, today?: string): SchedulePaymentMarker[] {
   if (role !== 'management') return [];
   const entries = Array.isArray(source) ? source : source.financeEntries;
   if (!Array.isArray(source) && source.treasury?.enabled) {
@@ -61,13 +61,13 @@ export function schedulePaymentMarkers(source: FinanceEntry[] | Pick<AppState, '
       if (!stageId || event.amountCents <= 0) return [];
       return [{ id: event.id, entryId: event.entryId, stageId, kind: event.kind, amount: event.amountCents / 100, date: event.scheduledDate, title: event.description,
         contractualDueDate: event.contractualDueDate, overdue: event.overdue || Boolean(event.scheduledDate && event.scheduledDate <= today),
-        contractOverdue: event.contractOverdue, source: 'treasury' as const,
+        contractOverdue: event.contractOverdue, sourceType: event.sourceType, sourceId: event.sourceId, source: 'treasury' as const,
         forecastDate: event.date, dateLabel: resolution?.label, dateReason: resolution?.reason ?? null,
         forecastDelayDays: event.forecastDelayDays, excludedFromCash: Boolean(event.excluded) }];
     }).sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999') || a.id.localeCompare(b.id));
   }
   return entries.flatMap(entry => {
-    const amount = outstandingAmountFor(entry);
+    const amount = outstandingAmountFor(entry, Array.isArray(source) ? undefined : source);
     if (!entry.stageId || amount <= 0) return [];
     return [{ id: entry.id, entryId: entry.id, stageId: entry.stageId, kind: entry.kind, amount, date: validPlanDate(entry.dueDate) ? entry.dueDate! : null, title: entry.description, source: 'legacy' as const }];
   }).sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999') || a.id.localeCompare(b.id));

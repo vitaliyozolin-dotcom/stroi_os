@@ -162,6 +162,49 @@ const acknowledgeServerFields = (sent: AppState, local: AppState, server: AppSta
     delete base.treasury.changeReason;
     if (!changed) delete current.treasury.changeReason;
   }
+  // Advanced journals keep business fields from any newer local action; only
+  // server-owned receipt fields are acknowledged by stable record identity.
+  const acknowledgeRecords = (before: unknown, local: unknown, saved: unknown, key = 'id') => {
+    if (!Array.isArray(before) || !Array.isArray(local) || !Array.isArray(saved)) return;
+    for (const receipt of saved as Record<string, unknown>[]) {
+      const first = before.find(row => row[key] === receipt[key]) as Record<string, unknown> | undefined;
+      const latest = local.find(row => row[key] === receipt[key]) as Record<string, unknown> | undefined;
+      if (!first || !latest) continue;
+      if (key === 'riskId') {
+        for (const field of ['acknowledged', 'snoozedUntil']) {
+          const locallyChanged = first[field] !== latest[field];
+          if (receipt[field] !== undefined) {
+            first[field] = structuredClone(receipt[field]);
+            if (!locallyChanged) latest[field] = structuredClone(receipt[field]);
+          } else { delete first[field]; if (!locallyChanged) delete latest[field]; }
+        }
+      }
+      for (const field of ['recordedAt', 'recordedBy', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'approvedAt', 'approvedBy', 'firstSeenAt', 'lastSeenAt', 'resolvedAt', 'snapshot', 'history']) {
+        if (receipt[field] !== undefined) { first[field] = structuredClone(receipt[field]); latest[field] = structuredClone(receipt[field]); }
+        else if (field === 'resolvedAt') { delete first[field]; delete latest[field]; }
+      }
+    }
+  };
+  if (base.treasury && current.treasury && server.treasury) {
+    for (const collection of ['inventoryLots', 'inventoryMovements', 'budgetVersions', 'savedScenarios'] as const) {
+      acknowledgeRecords(base.treasury[collection], current.treasury[collection], server.treasury[collection]);
+    }
+  }
+  if (base.financeLedger && current.financeLedger && server.financeLedger) {
+    const changed = JSON.stringify(base.financeLedger) !== JSON.stringify(current.financeLedger);
+    for (const collection of ['operations', 'confirmations', 'allocationEvents', 'requests', 'retentions', 'loans'] as const) {
+      acknowledgeRecords(base.financeLedger[collection], current.financeLedger[collection], server.financeLedger[collection]);
+    }
+    if (server.financeLedger.history) {
+      base.financeLedger.history = structuredClone(server.financeLedger.history);
+      current.financeLedger.history = structuredClone(server.financeLedger.history);
+    }
+    delete base.financeLedger.changeReason;
+    if (!changed) delete current.financeLedger.changeReason;
+  }
+  if (base.financeAutomation && current.financeAutomation && server.financeAutomation) {
+    acknowledgeRecords(base.financeAutomation.reviews, current.financeAutomation.reviews, server.financeAutomation.reviews, 'riskId');
+  }
   return { base, current };
 };
 

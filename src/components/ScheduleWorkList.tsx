@@ -52,15 +52,24 @@ export function ScheduleDeviation({ row }: { row: ScheduleDisplayRow }) {
   return <span className={`schedule-deviation${variance.days && variance.days > 0 ? ' schedule-deviation--late' : ''}`}><small>{label}</small><strong>{variance.days === null ? '—' : `${variance.days > 0 ? '+' : ''}${variance.days} кал. дн.`}</strong></span>;
 }
 
+export function ScheduleDependencies({ row }: { row: ScheduleDisplayRow }) {
+  return row.dependencyLabels?.length ? <small className="schedule-dependencies" title="Связи с предшественниками; лаг указан в календарных днях">{row.dependencyLabels.join(' · ')}</small> : null;
+}
+
+export function ScheduleFloat({ row }: { row: ScheduleDisplayRow }) {
+  if (row.stage.schedule?.kind === 'summary' || ['accepted', 'awaiting_inspection'].includes(row.stage.status)) return null;
+  return <small className="schedule-float" title="Общий — без переноса окончания проекта; свободный — без сдвига ближайших последующих работ. Календарные дни, рабочий календарь учтён.">{row.totalFloatDays == null ? 'Резерв не рассчитан' : `Резерв: общий ${row.totalFloatDays} · свободный ${row.freeFloatDays} кал. дн.`}</small>;
+}
+
 export function ScheduleWorkList(props: ScheduleWorkViewProps) {
   return <div className="schedule-work-list">
     <div className="schedule-work-list__head" aria-hidden="true"><span>Этап и задачи</span><span>Сроки</span><span>Отклонение</span>{props.payments.length > 0 && <span>Осталось оплатить / получить</span>}</div>
     {props.rows.map(row => <article className={`schedule-work-list__row${props.payments.length ? ' has-payments' : ''}`} key={row.stage.id}>
       <div><button type="button" className="schedule-stage-link" onClick={() => props.onSelect(row.stage.id)}><strong>{scheduleStageTitle(row.stage)}</strong><ChevronRight size={16} /></button>
         <span className={`schedule-status schedule-status--${row.stage.status}`}>{stageStatusLabel[row.stage.status]}</span>
-        {props.drivingIds.has(row.stage.id) && <span className="schedule-driving">Определяет срок</span>}
+        {props.drivingIds.has(row.stage.id) && <span className="schedule-driving">Критический путь</span>}
         <small className="schedule-stage-owner">{row.stage.responsible || 'Ответственный не назначен'}</small>
-        <ScheduleWorkProgress value={row.stage.progress} />
+        <ScheduleDependencies row={row} /><ScheduleWorkProgress value={row.stage.progress} />
         {row.stage.blocker && <p className="schedule-stage-blocker">{row.stage.blocker}</p>}
         {props.showTasks && <ScheduleTaskList tasks={linkedStageTasks(props.tasks, row.stage.id)} onOpenTask={props.onOpenTask} />}
       </div>
@@ -68,7 +77,7 @@ export function ScheduleWorkList(props: ScheduleWorkViewProps) {
         {props.compare && <span><small>План 0</small><strong>{row.stage.baseline?.end ? formatDate(row.stage.baseline.end, true) : 'Не зафиксирован'}</strong></span>}
         {row.duration && <small>{row.duration}</small>}
       </div>
-      <ScheduleDeviation row={row} />
+      <div><ScheduleDeviation row={row} /><ScheduleFloat row={row} /></div>
       {props.payments.length > 0 && <SchedulePaymentList payments={props.payments.filter(payment => payment.stageId === row.stage.id)} onOpen={props.onOpenFinance} />}
     </article>)}
   </div>;

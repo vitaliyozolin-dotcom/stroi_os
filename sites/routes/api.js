@@ -8,6 +8,8 @@ export const createApiHandler = (handlers) => {
     ['/api/access/users', route(['GET'], handlers.accessUsers)],
     ['/api/state', route(['GET'], handlers.getState)],
     ['/api/projects', route(['GET'], handlers.projects)],
+    ['/api/finance/portfolio', route(['GET'], handlers.financePortfolio)],
+    ['/api/finance/shared-account', route(['GET', 'POST'], handlers.sharedFinanceAccount)],
     ['/api/integrations/status', route(['GET'], handlers.integrationStatus)],
     ['/api/integrations/test', route(['POST'], handlers.integrationTest)],
     ['/api/integrations/telegram/select', route(['POST'], handlers.telegramChatSelect)],

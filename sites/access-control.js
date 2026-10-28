@@ -77,6 +77,11 @@ export const documentVisibilityForRole = (state, identity) => {
     for (const id of [entry.acceptanceDocumentId, entry.paymentDocumentId, entry.historicalPayment?.sourceDocumentId,
       ...(entry.payments ?? []).map(payment => payment.documentId)]) remember(id, entry.kind);
   }
+  // Ledger evidence can exist before an obligation, or cover several obligations.
+  for (const record of [...(state.financeLedger?.operations ?? []), ...(state.financeLedger?.requests ?? []),
+    ...(state.financeLedger?.loans ?? []), ...(state.financeLedger?.retentions ?? [])]) {
+    for (const id of [record.documentId, ...(record.documentIds ?? [])]) remember(id, 'private-finance');
+  }
   for (const document of state.documents ?? []) {
     if (document.financeEntryId) remember(document.id, entries.get(document.financeEntryId)?.kind ?? 'unknown');
   }
@@ -102,6 +107,8 @@ export const stateForRole = (state, identity) => {
   const safe = JSON.parse(JSON.stringify(state));
   // Treasury contains private balances, account and contract evidence.
   delete safe.treasury;
+  delete safe.financeLedger;
+  delete safe.financeAutomation;
   safe.documents = (safe.documents ?? []).filter(documentVisibilityForRole(state, identity));
 
   if (role === 'foreman') {
@@ -159,7 +166,9 @@ export const stateForRole = (state, identity) => {
 export const mergeStateForRole = (previous, incoming, identity, { serverManagedRoster = false } = {}) => {
   const role = identity.role;
   // Additive pilot data survives saves by an older client that has never seen it.
-  if (previous?.treasury && !Object.hasOwn(incoming, 'treasury')) incoming = { ...incoming, treasury: previous.treasury };
+  for (const field of ['treasury', 'financeLedger', 'financeAutomation']) {
+    if (previous?.[field] && !Object.hasOwn(incoming, field)) incoming = { ...incoming, [field]: previous[field] };
+  }
   if (!previous || (role === 'management' && identity.isOwner && !serverManagedRoster)) return incoming;
   if (role === 'management') {
     return {

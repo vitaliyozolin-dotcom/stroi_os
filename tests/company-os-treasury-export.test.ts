@@ -94,7 +94,7 @@ test('treasury uses explicit safe fields: no descriptions, evidence, account ide
   assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
   assert.equal(JSON.stringify(result).includes('+79990000000'), false);
   for (const event of result.events) {
-    assert.deepEqual(Object.keys(event).sort(), ['id', 'entry_id', ...(event.tranche_id ? ['tranche_id'] : []), 'kind', 'amount_rub', 'date', 'scheduled_date', 'contractual_due_date', 'certainty', 'overdue', 'excluded', 'date_basis', 'date_requires_review', 'contract_overdue', 'forecast_delay_days'].sort());
+    assert.deepEqual(Object.keys(event).sort(), ['id', 'entry_id', 'source_id', 'source_type', 'category', ...(event.tranche_id ? ['tranche_id'] : []), 'kind', 'amount_rub', 'date', 'scheduled_date', 'contractual_due_date', 'certainty', 'overdue', 'excluded', 'date_basis', 'date_requires_review', 'contract_overdue', 'forecast_delay_days'].sort());
   }
   assert.equal(result.events.find((event: { entry_id: string }) => event.entry_id === 'direct').excluded, true);
   assert.ok(result.days.every((day: { event_ids: string[] }) => !day.event_ids.includes('direct:remaining')));
