@@ -1098,3 +1098,48 @@ project:
     completion_boundary: "Изготовлен и проверен AI-агентами пакет первых трёх публикаций. Это не профильное заключение инженера или юриста, не публикация и не включение автоматического расписания."
     next_step: "Рассмотреть готовые первые три комплекта и выбрать дату старта и порядок публикации"
     next_step_status: proposed_not_assigned
+
+  social_media_revision_2_2026_10_30:
+    record_type: factual_checkpoint
+    project_id: IKIOMA
+    as_of: "2026-10-30"
+    follows_checkpoint: social_media_production_2026_10_30
+    status: awaiting_owner_review
+    previous_version:
+      checkpoint: social_media_production_2026_10_30
+      owner_status: rejected
+      feedback: "Владелец отклонил прежние 18 карточек по стилю, уникальности, человечности и привлекательности."
+      acceptance_gap: "Прежняя AI-проверка читаемости и корректности не подтвердила соответствие коммерческому и визуальному ожиданию владельца."
+    history_boundary: "Первая версия и результаты её проверок сохранены как история; она не считается одобренной владельцем или готовой к публикации."
+    revision_2:
+      post_packages: 3
+      image_files: 4
+      designed_images: 3
+      additional_original_photos: 1
+      caption_files: 3
+      editorial_direction: "Образ жизни в доме, бюджет до переезда и реальная стройка; одна мысль на обложке, практическое содержание в подписи."
+      image_provenance: "Первые два изображения — обозначенные визуализации по VELA-референсам. Третий выпуск использует две реальные фотографии Келози от 02.10.2026; строительные детали не дорисованы."
+      archive_library_file_id: libfile_d677b40856b481919bb5ac986586f900
+      archive_library_version: 1
+      preview_library_file_id: libfile_06b161dbf7ac8191b641f90225386742
+      preview_library_version: 1
+      covers_library_file_id: libfile_c2720541645c819196974974b5342808
+      covers_library_version: 1
+      launch_record_library_file_id: libfile_56b3262cc51c819185c035bee822934c
+      launch_record_library_version: 6
+      owner_approval: not_received
+    verification:
+      scope: "Независимая AI-проверка коммерческого смысла, понятности, соответствия источникам, конкретных обещаний и мобильной читаемости."
+      result: editorial_review_passed
+      corrected_issue: "Маркировка визуализаций увеличена и повторно прочитана на превью шириной 390 px."
+      captions_utf16_trimmed: [659, 774, 758]
+      captions_utf16_with_final_newline: [660, 775, 759]
+      caption_limit: 1024
+      claims: "Опыт более 10 лет относится к команде. Нет выдуманных клиентов, цен, гарантий, измерений и отзывов; визуализация не определяет комплектацию; внедрение камеры у ИКИОМА не заявлено."
+      professional_expert_review: not_performed
+    publication_status: not_published
+    autoposting_status: not_enabled
+    start_date: null
+    completion_boundary: "Изготовлена новая редакция первых трёх публикаций и пройдена внутренняя AI-проверка. Одобрение новой версии владельцем отсутствует; публикация и автоматический запуск не выполнялись."
+    next_step: "Показать владельцу новую редакцию и получить оценку соответствия его ожиданиям"
+    next_step_status: proposed_not_assigned
