@@ -1051,3 +1051,50 @@ project:
     completion_boundary: "Завершена подготовка редакционного результата. Медиа не изготовлены, публикации не выполнены, публичная очередь и автоматическое расписание не включены. Принятие плана к публикации и точная дата старта не подтверждены."
     next_step: "Изготовить и проверить на телефоне медиа первых трёх выпусков по подготовленным заданиям"
     next_step_status: proposed_not_assigned
+
+  social_media_production_2026_10_30:
+    record_type: factual_checkpoint
+    project_id: IKIOMA
+    as_of: "2026-10-30"
+    extends: IKIOMA-SOCIAL-EDITORIAL-BRIEF-2026-10-29
+    follows_checkpoint: social_editorial_result_2026_10_29
+    status: media_package_created
+    source: "Поручение владельца: изготовить первые три публикации по подготовленному медиаплану"
+    history_boundary: "Предыдущие записи сохранены. Этот checkpoint фиксирует изготовление медиа первых трёх выпусков; остальные публикации плана не считаются изготовленными."
+    result:
+      publication_packages: 3
+      png_cards: 18
+      cards_by_package: {intro: 5, budget: 7, camera: 6}
+      dimensions_px: [1080, 1350]
+      caption_files: 3
+      svg_sources: 18
+      preview_pdf:
+        filename: IKIOMA_first_3_posts_preview.pdf
+        pages: 18
+        sha256: 5928cbf6614ab6997ed4baf083c64317329e535c251f780bbf664f62b2c1d102
+        library_file_id: libfile_06b161dbf7ac8191b641f90225386742
+      production_archive:
+        filename: IKIOMA_first_3_posts.zip
+        files: 49
+        sha256: ca9843a9af5239d11f32fe867918df4aeb9bd03f3075c05e52c6b1e2287bc0f0
+        library_file_id: libfile_d677b40856b481919bb5ac986586f900
+      covers_library_file_id: libfile_c2720541645c819196974974b5342808
+      launch_record_library_file_id: libfile_56b3262cc51c819185c035bee822934c
+      launch_record_library_version: 5
+    verification:
+      reviewer_type: independent_ai_review
+      professional_expert_review: not_performed
+      visual: "Осмотрены 18 карточек: существенных ошибок, обрезок и наложений не выявлено; текст читается"
+      brand: "Утверждённый SVG-знак совпадает с оригиналом и встроен без изменения во все 18 карточек"
+      editorial: "Более 10 лет опыта относится к команде; вымышленных объектов, подписанных актов и измерений нет; учебные схемы обозначены; технология не заявлена внедрением ИКИОМА"
+      caption_lengths_utf16_trimmed: [795, 855, 811]
+      caption_lengths_utf16_with_final_newline: [796, 856, 812]
+      caption_limit: 1024
+      pdf: "18 страниц; ведущий агент отрендерил и осмотрел страницы 1, 6 и 13"
+      zip: "49 файлов; проверка целостности архива пройдена"
+    publication_status: not_published
+    autoposting_status: not_enabled
+    start_date: null
+    completion_boundary: "Изготовлен и проверен AI-агентами пакет первых трёх публикаций. Это не профильное заключение инженера или юриста, не публикация и не включение автоматического расписания."
+    next_step: "Рассмотреть готовые первые три комплекта и выбрать дату старта и порядок публикации"
+    next_step_status: proposed_not_assigned
