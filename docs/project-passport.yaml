@@ -1015,3 +1015,39 @@ project:
       value_metric: "Понятная практическая польза клиенту и проверяемость утверждений"
       auto_stop: "Недостоверный источник, существенный пробел в фактах или неясные права на медиа"
       opt_out: "Сохранить черновики и историю, прекратить новые задания и публикации"
+
+  social_editorial_result_2026_10_29:
+    record_type: factual_checkpoint
+    project_id: IKIOMA
+    as_of: "2026-10-29"
+    extends: IKIOMA-SOCIAL-EDITORIAL-BRIEF-2026-10-29
+    status: editorial_task_completed
+    source: "Владелец применил полный редакционный промт: рабочий медиаплан на 30 дней с одним основным выпуском в день и окном 19–21 МСК."
+    history_boundary: "Предыдущий brief сохранён. Частота ниже уточняет только параметры запрошенного рабочего плана; старое отсутствие частоты остаётся историческим снимком."
+    result:
+      artifact: IKIOMA_mediaplan_30_days_2026-10-29.md
+      editorial_status: working_draft
+      production_cards: 30
+      sequence: "День 1–30; дата старта не назначена"
+      topic_counts: {customer_choice: 15, company: 9, technologies: 6}
+      complete_post_texts: 3
+      media_briefs_status: prepared
+      final_images_and_videos_status: not_created
+      publication_plan:
+        timezone: Europe/Moscow
+        window_start: "19:00"
+        window_end: "21:00"
+        vary_time_by_day: true
+        primary_releases_per_day: 1
+        frequency_source: "Параметр рабочего плана из полного промта владельца"
+        start_date: null
+        activation_status: not_activated
+      additional_outputs: ["Недельный план производства", "Источники и статусы проверки", "Метрики пользы, обращений и производства"]
+    verification:
+      structure: "30 карточек; доли 15/9/6; времена в окне 19:00–21:00; технологический материал в день 3"
+      editorial: "Независимая смысловая проверка: существенных противоречий и неподтверждённых обещаний не выявлено; превышение лимита подписей первых трёх альбомов исправлено"
+      caption_lengths_utf16: [795, 855, 811]
+      caption_limit: 1024
+    completion_boundary: "Завершена подготовка редакционного результата. Медиа не изготовлены, публикации не выполнены, публичная очередь и автоматическое расписание не включены. Принятие плана к публикации и точная дата старта не подтверждены."
+    next_step: "Изготовить и проверить на телефоне медиа первых трёх выпусков по подготовленным заданиям"
+    next_step_status: proposed_not_assigned
