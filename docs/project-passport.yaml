@@ -937,3 +937,209 @@ project:
       value_metric: "Одинаковые денежные остатки во всех представлениях, отсутствие дублей и ложных фактов, проверяемые действия по рискам"
       auto_stop: "Неоднозначный источник, конфликт версии, ошибка арифметики, нарушение приватности или неуспешная проверка выпуска"
       opt_out: "Распознавание запускается только по кнопке и отменяется; ручной ввод и обычный учёт сохраняются; скрыть действующий риск отметкой ознакомления нельзя"
+
+  social_launch_status_2026_10_29:
+    record_type: factual_checkpoint
+    project_id: IKIOMA
+    as_of: "2026-10-29"
+    extends: IKIOMA-SOCIAL-LAUNCH-2026-10-28
+    status: partially_completed
+    history_boundary: "Снимок от 28.10 сохранён. Этот checkpoint заменяет только прежнее наблюдение о невозможности входа и отсутствии Telegram-канала; исходное решение и чужие ветки не меняются."
+    telegram:
+      status: channel_created_and_branded
+      username: ikioma_ru
+      url: "https://t.me/ikioma_ru"
+      chat_id: -1004352134894
+      title: "ИКИОМА | По-настоящему свой дом"
+      description_saved: true
+      bot_username: NewProject_OSbot
+      bot_id: 8876214686
+      bot_status: administrator
+      granted_rights: [can_change_info, can_post_messages, can_edit_messages]
+      implied_rights: [can_manage_chat]
+      can_manage_direct_messages: false
+      other_optional_admin_rights: false
+      avatar:
+        status: verified
+        source: "Утверждённый знак ИКИОМА из двух половин; ikioma-symbol-rounded-preview.png"
+        source_sha256: c07b2e198d2d321247d44d65229972b191d11e8d3ba2c2b89b9602f452bf4718
+        evidence: "Один setChatPhoto: ok=true, result=true; последующий getChat: photo_present=true"
+        big_file_unique_id: AQADcSJrG2RyIEsB
+      evidence: "getChat подтвердил канал; getChatMember подтвердил administrator и окончательные права после выключения Manage Direct Messages."
+    introductory_post_status: draft
+    autoposting:
+      status: not_enabled
+      current_sender_boundary: "Действующий отправитель допускает group/supergroup; новая ветка channel ещё не реализована и не принята."
+      new_services_or_schedules_created: false
+    instagram:
+      status: suspended
+      evidence: "Экран ограничения и отправленной апелляции в сообщениях владельца; восстановление аккаунта не подтверждено."
+    completion_boundary: "Права бота и оформление канала не доказывают публикацию поста, работу расписания или синхронизацию площадок."
+    next_step: "Подготовить варианты редакционного плана и промт; правила запуска публичной очереди и её приёмка остаются отдельным шагом."
+
+  social_editorial_brief_2026_10_29:
+    decision_id: IKIOMA-SOCIAL-EDITORIAL-BRIEF-2026-10-29
+    project_id: IKIOMA
+    status: approved
+    approved_by: "Виталий Озолин"
+    approved_at: "2026-10-29"
+    source: "Текущее поручение владельца: время публикаций 19–21 МСК с разным временем по дням; подготовить варианты полезного клиентам контент-плана и сильный промт с экспертными AI-ролями, медиа и технологиями."
+    extends: IKIOMA-SOCIAL-LAUNCH-2026-10-28
+    statement: "Подготовить редакционные варианты и рабочий промт для публичного канала ИКИОМА; использовать заданное владельцем вечернее окно при последующем согласованном планировании."
+    owner: "Виталий Озолин"
+    executor: "Codex"
+    affected_stages: [social-editorial-design]
+    publication_preferences:
+      timezone: Europe/Moscow
+      window_start: "19:00"
+      window_end: "21:00"
+      vary_time_by_day: true
+      frequency: null
+      exact_dates_and_times_status: not_approved
+    requested_outputs:
+      - "Варианты контент-плана, помогающего будущему заказчику принимать решения о доме и строительстве"
+      - "Рабочий промт с экспертными AI-ролями, проверкой фактов, выбором подходящих медиа и объяснением технологий"
+    draft_boundary: "Подготовленные промт, рубрики, доли форматов, частота и календарь остаются черновиками до отдельного решения владельца."
+    authorization_boundary: "Заданное временное окно не является включением автопостинга или согласием на самостоятельную публикацию произвольного контента. Старые полномочия и расписание внутреннего рабочего чата не переносятся в публичный канал."
+    budget: "Новые сервисы и расходы не утверждены"
+    deadline: null
+    current_step: "Подготовить варианты и промт на рассмотрение"
+    acceptance: ["Контент отвечает на практические вопросы клиента", "Факты и обещания отделены от допущений", "AI-роли не выдаются за реально проверивших материал специалистов", "Нет выдуманного опыта, цен, сроков или результатов строительства", "Точное расписание и режим согласования не объявлены включёнными"]
+    ai_contract:
+      input: "Поручение владельца, проверенные материалы ИКИОМА и источники по темам"
+      expected_result: "Черновые варианты контент-плана и рабочий редакционный промт"
+      allowed_actions: ["Исследование", "Подготовка и редактирование черновиков", "Фиксация заданного окна публикаций"]
+      forbidden_actions: ["Публикация или активация автоматики по этому редакционному поручению", "Перенос частных переписок в публичные материалы", "Новые платные сервисы", "Изменение прав", "Выдуманные подтверждения экспертной проверки"]
+      responsible_human: "Виталий Озолин"
+      execution_cost: "Существующие инструменты; новые расходы не согласованы"
+      value_metric: "Понятная практическая польза клиенту и проверяемость утверждений"
+      auto_stop: "Недостоверный источник, существенный пробел в фактах или неясные права на медиа"
+      opt_out: "Сохранить черновики и историю, прекратить новые задания и публикации"
+
+  social_editorial_result_2026_10_29:
+    record_type: factual_checkpoint
+    project_id: IKIOMA
+    as_of: "2026-10-29"
+    extends: IKIOMA-SOCIAL-EDITORIAL-BRIEF-2026-10-29
+    status: editorial_task_completed
+    source: "Владелец применил полный редакционный промт: рабочий медиаплан на 30 дней с одним основным выпуском в день и окном 19–21 МСК."
+    history_boundary: "Предыдущий brief сохранён. Частота ниже уточняет только параметры запрошенного рабочего плана; старое отсутствие частоты остаётся историческим снимком."
+    result:
+      artifact: IKIOMA_mediaplan_30_days_2026-10-29.md
+      editorial_status: working_draft
+      production_cards: 30
+      sequence: "День 1–30; дата старта не назначена"
+      topic_counts: {customer_choice: 15, company: 9, technologies: 6}
+      complete_post_texts: 3
+      media_briefs_status: prepared
+      final_images_and_videos_status: not_created
+      publication_plan:
+        timezone: Europe/Moscow
+        window_start: "19:00"
+        window_end: "21:00"
+        vary_time_by_day: true
+        primary_releases_per_day: 1
+        frequency_source: "Параметр рабочего плана из полного промта владельца"
+        start_date: null
+        activation_status: not_activated
+      additional_outputs: ["Недельный план производства", "Источники и статусы проверки", "Метрики пользы, обращений и производства"]
+    verification:
+      structure: "30 карточек; доли 15/9/6; времена в окне 19:00–21:00; технологический материал в день 3"
+      editorial: "Независимая смысловая проверка: существенных противоречий и неподтверждённых обещаний не выявлено; превышение лимита подписей первых трёх альбомов исправлено"
+      caption_lengths_utf16: [795, 855, 811]
+      caption_limit: 1024
+    completion_boundary: "Завершена подготовка редакционного результата. Медиа не изготовлены, публикации не выполнены, публичная очередь и автоматическое расписание не включены. Принятие плана к публикации и точная дата старта не подтверждены."
+    next_step: "Изготовить и проверить на телефоне медиа первых трёх выпусков по подготовленным заданиям"
+    next_step_status: proposed_not_assigned
+
+  social_media_production_2026_10_30:
+    record_type: factual_checkpoint
+    project_id: IKIOMA
+    as_of: "2026-10-30"
+    extends: IKIOMA-SOCIAL-EDITORIAL-BRIEF-2026-10-29
+    follows_checkpoint: social_editorial_result_2026_10_29
+    status: media_package_created
+    source: "Поручение владельца: изготовить первые три публикации по подготовленному медиаплану"
+    history_boundary: "Предыдущие записи сохранены. Этот checkpoint фиксирует изготовление медиа первых трёх выпусков; остальные публикации плана не считаются изготовленными."
+    result:
+      publication_packages: 3
+      png_cards: 18
+      cards_by_package: {intro: 5, budget: 7, camera: 6}
+      dimensions_px: [1080, 1350]
+      caption_files: 3
+      svg_sources: 18
+      preview_pdf:
+        filename: IKIOMA_first_3_posts_preview.pdf
+        pages: 18
+        sha256: 5928cbf6614ab6997ed4baf083c64317329e535c251f780bbf664f62b2c1d102
+        library_file_id: libfile_06b161dbf7ac8191b641f90225386742
+      production_archive:
+        filename: IKIOMA_first_3_posts.zip
+        files: 49
+        sha256: ca9843a9af5239d11f32fe867918df4aeb9bd03f3075c05e52c6b1e2287bc0f0
+        library_file_id: libfile_d677b40856b481919bb5ac986586f900
+      covers_library_file_id: libfile_c2720541645c819196974974b5342808
+      launch_record_library_file_id: libfile_56b3262cc51c819185c035bee822934c
+      launch_record_library_version: 5
+    verification:
+      reviewer_type: independent_ai_review
+      professional_expert_review: not_performed
+      visual: "Осмотрены 18 карточек: существенных ошибок, обрезок и наложений не выявлено; текст читается"
+      brand: "Утверждённый SVG-знак совпадает с оригиналом и встроен без изменения во все 18 карточек"
+      editorial: "Более 10 лет опыта относится к команде; вымышленных объектов, подписанных актов и измерений нет; учебные схемы обозначены; технология не заявлена внедрением ИКИОМА"
+      caption_lengths_utf16_trimmed: [795, 855, 811]
+      caption_lengths_utf16_with_final_newline: [796, 856, 812]
+      caption_limit: 1024
+      pdf: "18 страниц; ведущий агент отрендерил и осмотрел страницы 1, 6 и 13"
+      zip: "49 файлов; проверка целостности архива пройдена"
+    publication_status: not_published
+    autoposting_status: not_enabled
+    start_date: null
+    completion_boundary: "Изготовлен и проверен AI-агентами пакет первых трёх публикаций. Это не профильное заключение инженера или юриста, не публикация и не включение автоматического расписания."
+    next_step: "Рассмотреть готовые первые три комплекта и выбрать дату старта и порядок публикации"
+    next_step_status: proposed_not_assigned
+
+  social_media_revision_2_2026_10_30:
+    record_type: factual_checkpoint
+    project_id: IKIOMA
+    as_of: "2026-10-30"
+    follows_checkpoint: social_media_production_2026_10_30
+    status: awaiting_owner_review
+    previous_version:
+      checkpoint: social_media_production_2026_10_30
+      owner_status: rejected
+      feedback: "Владелец отклонил прежние 18 карточек по стилю, уникальности, человечности и привлекательности."
+      acceptance_gap: "Прежняя AI-проверка читаемости и корректности не подтвердила соответствие коммерческому и визуальному ожиданию владельца."
+    history_boundary: "Первая версия и результаты её проверок сохранены как история; она не считается одобренной владельцем или готовой к публикации."
+    revision_2:
+      post_packages: 3
+      image_files: 4
+      designed_images: 3
+      additional_original_photos: 1
+      caption_files: 3
+      editorial_direction: "Образ жизни в доме, бюджет до переезда и реальная стройка; одна мысль на обложке, практическое содержание в подписи."
+      image_provenance: "Первые два изображения — обозначенные визуализации по VELA-референсам. Третий выпуск использует две реальные фотографии Келози от 02.10.2026; строительные детали не дорисованы."
+      archive_library_file_id: libfile_d677b40856b481919bb5ac986586f900
+      archive_library_version: 1
+      preview_library_file_id: libfile_06b161dbf7ac8191b641f90225386742
+      preview_library_version: 1
+      covers_library_file_id: libfile_c2720541645c819196974974b5342808
+      covers_library_version: 1
+      launch_record_library_file_id: libfile_56b3262cc51c819185c035bee822934c
+      launch_record_library_version: 6
+      owner_approval: not_received
+    verification:
+      scope: "Независимая AI-проверка коммерческого смысла, понятности, соответствия источникам, конкретных обещаний и мобильной читаемости."
+      result: editorial_review_passed
+      corrected_issue: "Маркировка визуализаций увеличена и повторно прочитана на превью шириной 390 px."
+      captions_utf16_trimmed: [659, 774, 758]
+      captions_utf16_with_final_newline: [660, 775, 759]
+      caption_limit: 1024
+      claims: "Опыт более 10 лет относится к команде. Нет выдуманных клиентов, цен, гарантий, измерений и отзывов; визуализация не определяет комплектацию; внедрение камеры у ИКИОМА не заявлено."
+      professional_expert_review: not_performed
+    publication_status: not_published
+    autoposting_status: not_enabled
+    start_date: null
+    completion_boundary: "Изготовлена новая редакция первых трёх публикаций и пройдена внутренняя AI-проверка. Одобрение новой версии владельцем отсутствует; публикация и автоматический запуск не выполнялись."
+    next_step: "Показать владельцу новую редакцию и получить оценку соответствия его ожиданиям"
+    next_step_status: proposed_not_assigned
