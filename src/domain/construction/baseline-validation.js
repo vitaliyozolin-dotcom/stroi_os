@@ -36,7 +36,11 @@ export function validateBaselineChanges(previous, next, identity, now = new Date
     }
     if (before?.plannedStart && item.plannedStart === undefined) item.plannedStart = before.plannedStart;
     const changed = fields.filter((key) => !same(before?.[key], item[key]));
-    for (const key of changed) if (!(key === 'plannedStart' && !item[key]) && !validPlanDate(item[key])) return 'Укажите существующую календарную дату.';
+    for (const key of changed) {
+      const unknownOrderDate = kind === 'project' && next.orderRelations?.version === 1 && !item.baseline
+        && (item[key] === '' || item[key] === undefined) && (before?.[key] === '' || before?.[key] === undefined);
+      if (!unknownOrderDate && !(key === 'plannedStart' && !item[key]) && !validPlanDate(item[key])) return 'Укажите существующую календарную дату.';
+    }
     const start = item[fields[0]], end = item[fields[1]];
     if (start && end && start > end) return 'Плановое окончание не может быть раньше начала.';
     if (before && changed.length) {

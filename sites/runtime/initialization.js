@@ -1,6 +1,6 @@
 import { clean } from '../lib/validation.js';
 
-const BATTLE_SCHEMA_VERSION = 17;
+const BATTLE_SCHEMA_VERSION = 18;
 export const BATTLE_RESET_KEY = 'battle_v17_reset';
 const BATTLE_SCHEMA_KEY = 'battle_schema_version';
 let schemaPromise;
@@ -17,6 +17,20 @@ const ensureTelegramClaimColumn = async (db) => {
 export const ensureSchema = async (db) => {
   if (!schemaPromise) {
     schemaPromise = Promise.all([
+      db.prepare(`CREATE TABLE IF NOT EXISTS order_directory_records (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('party','plot','asset','agreement')),
+        origin_project_id TEXT NOT NULL, payload_json TEXT NOT NULL, revision INTEGER NOT NULL,
+        created_at TEXT NOT NULL, created_by TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL
+      )`).run(),
+      db.prepare(`CREATE TABLE IF NOT EXISTS order_directory_audit (
+        id TEXT PRIMARY KEY, record_id TEXT NOT NULL, kind TEXT NOT NULL, revision INTEGER NOT NULL,
+        project_id TEXT NOT NULL, created_at TEXT NOT NULL, actor TEXT NOT NULL, actor_name TEXT NOT NULL,
+        reason TEXT NOT NULL, payload_json TEXT NOT NULL
+      )`).run(),
+      db.prepare(`CREATE TABLE IF NOT EXISTS shared_payment_records (
+        id TEXT PRIMARY KEY, source_key TEXT NOT NULL UNIQUE, payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL, created_by TEXT NOT NULL
+      )`).run(),
       db.prepare(`
         CREATE TABLE IF NOT EXISTS project_state (
           project_id TEXT PRIMARY KEY,
@@ -179,7 +193,17 @@ export const ensureSchema = async (db) => {
           reason TEXT NOT NULL
         )
       `).run(),
-    ]).then(() => ensureTelegramClaimColumn(db)).then(() => Promise.all([
+    ]).then(() => ensureTelegramClaimColumn(db)).then(() => db.prepare(`
+      CREATE TABLE IF NOT EXISTS shared_payment_project_shares (
+        payment_id TEXT NOT NULL REFERENCES shared_payment_records(id),
+        project_id TEXT NOT NULL REFERENCES project_state(project_id),
+        operation_id TEXT NOT NULL, amount_cents BIGINT NOT NULL CHECK(amount_cents > 0),
+        PRIMARY KEY(payment_id, project_id), UNIQUE(project_id, operation_id)
+      )
+    `).run()).then(() => Promise.all([
+      db.prepare('CREATE INDEX IF NOT EXISTS order_directory_origin ON order_directory_records(origin_project_id)').run(),
+      db.prepare('CREATE INDEX IF NOT EXISTS order_directory_audit_record ON order_directory_audit(record_id,revision)').run(),
+      db.prepare('CREATE INDEX IF NOT EXISTS shared_payment_project_lookup ON shared_payment_project_shares(project_id,payment_id)').run(),
       db.prepare(`
         CREATE INDEX IF NOT EXISTS audit_log_project_revision
         ON audit_log (project_id, revision DESC)

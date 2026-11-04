@@ -17,8 +17,9 @@ const SettingsPage = lazy(() => import('../pages/SettingsPage').then((module) =>
 const CounterpartiesPage = lazy(() => import('../pages/CounterpartiesPage').then((module) => ({ default: module.CounterpartiesPage })));
 const TasksPage = lazy(() => import('../pages/TasksPage').then((module) => ({ default: module.TasksPage })));
 const ProjectPage = lazy(() => import('../pages/ProjectPage').then((module) => ({ default: module.ProjectPage })));
+const CustomerOrdersPage = lazy(() => import('../pages/CustomerOrdersPage').then((module) => ({ default: module.CustomerOrdersPage })));
 
-export function WorkspacePages({ state, session, role, focusEntityId, updateState, navigate, applyServerSnapshot, reconcileServerSnapshot, openQuestions, openProjects }: {
+export function WorkspacePages({ state, session, role, focusEntityId, updateState, navigate, applyServerSnapshot, reconcileServerSnapshot, openQuestions, openProjects, openProject, createOrder, syncPhase }: {
   state: AppState;
   session: AuthenticatedUser;
   role: UserRole;
@@ -29,6 +30,9 @@ export function WorkspacePages({ state, session, role, focusEntityId, updateStat
   reconcileServerSnapshot: (snapshot: RemoteProjectSnapshot) => void;
   openQuestions: () => void;
   openProjects: () => void;
+  openProject: (projectId: string, page?: PageId) => void;
+  createOrder: (customerId?: string) => void;
+  syncPhase?: string;
 }) {
   return (
     <PageLoadBoundary>
@@ -38,6 +42,7 @@ export function WorkspacePages({ state, session, role, focusEntityId, updateStat
           <Route path="/projects/:projectId/tasks" element={<TasksPage state={state} role={role} session={session} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />} />
           <Route path="/projects/:projectId/marketing" element={<MarketingPage state={state} role={session.role} actor={session.name} focusId={focusEntityId} onChange={updateState} />} />
           <Route path="/projects/:projectId/counterparties" element={<CounterpartiesPage state={state} actor={session.name} focusId={focusEntityId} onChange={updateState} />} />
+          <Route path="/projects/:projectId/customers" element={<CustomerOrdersPage key={state.project.id} state={state} session={session} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} onOpenProject={openProject} onCreateOrder={createOrder} syncPhase={syncPhase} />} />
           <Route path="/projects/:projectId/finance" element={<FinancePage key={state.project.id} onServerSnapshot={reconcileServerSnapshot} role={role} onOpenQuestions={openQuestions} state={state} actor={session.name} userId={session.id} focusId={focusEntityId} onChange={updateState} onNavigate={navigate} />} />
           <Route path="/projects/:projectId/schedule" element={<SchedulePage state={state} role={role} actor={session.name} userId={session.id} focusId={focusEntityId} onChange={updateState} />} />
           <Route path="/projects/:projectId/procurement" element={<ProcurementPage state={state} role={role} actor={session.name} focusId={focusEntityId} onChange={updateState} />} />

@@ -44,6 +44,7 @@ import { EmptyState, Field, Modal, ProgressBar, StatusBadge } from '../component
 import { CounterpartyModal } from '../components/CounterpartyModal';
 import { SchedulePaymentImpact } from '../components/SchedulePaymentImpact';
 import { previewStagePlan } from '../application/schedule-payment-preview';
+import { OrderWorkPlanSetup } from '../components/OrderWorkPlanSetup';
 
 const statusTone = (status: StageStatus): 'neutral' | 'positive' | 'warning' | 'danger' | 'blue' => {
   if (status === 'accepted') return 'positive';
@@ -58,8 +59,9 @@ const taskDone = (task: ProjectTask) => ['done', 'canceled'].includes(task.statu
 export type SchedulePageProps = { state: AppState; role: UserRole; actor: string; userId?: string; focusId?: string | null; onChange: (next: AppState) => void; embedded?: boolean; onOpenFinance?: (entryId: string) => void; onOpenTask?: (taskId: string) => void };
 
 export function SchedulePage(props: SchedulePageProps) {
-  if (!props.state.stages.length) return <div className="page-stack"><BaselinePanel state={props.state} role={props.role} actor={props.actor} onChange={props.onChange} /><EmptyState icon={CalendarDays} title="График пока не составлен" text="После добавления этапов здесь появятся исходные и действующие сроки." /></div>;
-  return <ScheduleWithStages key={props.state.project.id} {...props} />;
+  if (!props.state.stages.length) return <div className="page-stack"><BaselinePanel state={props.state} role={props.role} actor={props.actor} onChange={props.onChange} /><OrderWorkPlanSetup {...props} /><EmptyState icon={CalendarDays} title="График пока не составлен" text="После добавления этапов здесь появятся исходные и действующие сроки." /></div>;
+  if (!props.state.orderRelations) return <ScheduleWithStages key={props.state.project.id} {...props} />;
+  return <div className="page-stack"><ScheduleWithStages key={props.state.project.id} {...props} /><OrderWorkPlanSetup {...props} /></div>;
 }
 
 function ScheduleWithStages({ state, role, actor, userId, focusId, onChange, embedded = false, onOpenFinance, onOpenTask }: SchedulePageProps) {

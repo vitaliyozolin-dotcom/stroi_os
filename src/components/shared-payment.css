@@ -1,0 +1,16 @@
+.shared-payment-panel { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.2rem; margin: 1rem 0; border: 1px solid var(--border, #d9e1e8); border-radius: 12px; background: var(--surface, #fff); }
+.shared-payment-panel h3 { margin: 0 0 .4rem; }
+.shared-payment-panel p { margin: 0 0 .4rem; max-width: 70ch; color: var(--text-muted, #576574); }
+.shared-payment-panel > button { flex-shrink: 0; }
+.shared-payment-fieldset { margin: 0; padding: 0; border: 0; display: grid; gap: 1rem; min-width: 0; }
+.shared-payment-fieldset:disabled { opacity: .7; }
+.shared-payment-row { padding: 1rem; border: 1px solid var(--border, #d9e1e8); border-radius: 10px; display: grid; gap: .75rem; min-width: 0; }
+.shared-payment-row__heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.shared-payment-totals { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; padding: .9rem; background: var(--background, #f4f7fa); border-radius: 8px; }
+.shared-payment-summary { padding: .85rem 0; border-bottom: 1px solid var(--border, #d9e1e8); overflow-wrap: anywhere; }
+.shared-payment-summary p { margin: .35rem 0; }
+.shared-payment-summary ul { margin: .65rem 0; padding-left: 1.5rem; }
+.shared-payment-history summary { cursor: pointer; padding: .7rem 0; font-weight: 600; }
+.shared-payment-success { display: grid; gap: .8rem; }
+.shared-payment-success > p { line-height: 1.5; margin: 0; }
+@media (max-width: 640px) { .shared-payment-panel { align-items: stretch; flex-direction: column; } .shared-payment-form .form-grid { grid-template-columns: minmax(0, 1fr); } .shared-payment-panel > button { width: 100%; } .shared-payment-row { padding: .8rem; } }

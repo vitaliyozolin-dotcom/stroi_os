@@ -205,6 +205,48 @@ const acknowledgeServerFields = (sent: AppState, local: AppState, server: AppSta
   if (base.financeAutomation && current.financeAutomation && server.financeAutomation) {
     acknowledgeRecords(base.financeAutomation.reviews, current.financeAutomation.reviews, server.financeAutomation.reviews, 'riskId');
   }
+  if (base.orderRelations && current.orderRelations && server.orderRelations) {
+    const acknowledgeProject = (field: 'clientNames' | 'status' | 'contractValue' | 'unknownFields') => {
+      if (server.project[field] === undefined) { delete (base.project as unknown as Record<string, unknown>)[field]; delete (current.project as unknown as Record<string, unknown>)[field]; }
+      else { (base.project as unknown as Record<string, unknown>)[field] = structuredClone(server.project[field]); (current.project as unknown as Record<string, unknown>)[field] = structuredClone(server.project[field]); }
+    };
+    // Canonical projections must join their receipt even when project.name has
+    // another local edit. A newer change of the projection's source wins locally.
+    if (sent.orderRelations?.customerId && sent.orderRelations.customerId === local.orderRelations?.customerId) acknowledgeProject('clientNames');
+    if (sent.orderRelations?.status === local.orderRelations?.status) acknowledgeProject('status');
+    if (sent.orderRelations?.contractPricing === true && local.orderRelations?.contractPricing === true
+      && JSON.stringify(sent.orderRelations.contracts) === JSON.stringify(local.orderRelations.contracts)) {
+      acknowledgeProject('contractValue');
+      const beforeUnknown = base.project.unknownFields ?? [], currentUnknown = current.project.unknownFields ?? [];
+      if (!server.project.unknownFields?.includes('contractValue')) {
+        base.project.unknownFields = beforeUnknown.filter(field => field !== 'contractValue');
+        current.project.unknownFields = currentUnknown.filter(field => field !== 'contractValue');
+      }
+    }
+    const changed = JSON.stringify(base.orderRelations) !== JSON.stringify(current.orderRelations);
+    for (const collection of ['objects', 'contracts', 'mortgages', 'changeRequests', 'warrantyCases', 'costAllocations'] as const) {
+      acknowledgeRecords(base.orderRelations[collection], current.orderRelations[collection], server.orderRelations[collection]);
+      for (const receipt of server.orderRelations[collection] ?? []) {
+        const first = base.orderRelations[collection]?.find(row => row.id === receipt.id);
+        const latest = current.orderRelations[collection]?.find(row => row.id === receipt.id);
+        if (!first || !latest) continue;
+        for (const field of ['signedAt', 'signedBy', 'closedAt', 'closedBy', 'fundedAt', 'fundedBy', 'appliedAt', 'appliedBy', 'canceledAt', 'canceledBy', 'partySnapshots'] as const) {
+          if (field in receipt) {
+            (first as unknown as Record<string, unknown>)[field] = structuredClone((receipt as unknown as Record<string, unknown>)[field]);
+            (latest as unknown as Record<string, unknown>)[field] = structuredClone((receipt as unknown as Record<string, unknown>)[field]);
+          }
+        }
+      }
+    }
+    for (const receipt of server.orderRelations.objects) {
+      acknowledgeRecords(base.orderRelations.objects.find(row => row.id === receipt.id)?.specifications,
+        current.orderRelations.objects.find(row => row.id === receipt.id)?.specifications, receipt.specifications);
+    }
+    base.orderRelations.history = structuredClone(server.orderRelations.history);
+    current.orderRelations.history = structuredClone(server.orderRelations.history);
+    delete base.orderRelations.changeReason;
+    if (!changed) delete current.orderRelations.changeReason;
+  }
   return { base, current };
 };
 

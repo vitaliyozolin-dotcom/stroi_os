@@ -13,6 +13,7 @@ import type { AppSettings } from './user';
 import type { TreasuryState } from './treasury';
 import type { FinanceLedgerState } from './finance-ledger';
 import type { FinanceAutomationState } from './finance-automation';
+import type { OrderRelationsState } from './order-relations';
 
 export interface AppState {
   version: 1;
@@ -26,6 +27,8 @@ export interface AppState {
   treasury?: TreasuryState;
   financeLedger?: FinanceLedgerState;
   financeAutomation?: FinanceAutomationState;
+  /** Links to shared customer/asset identity; project.id remains the order ID. */
+  orderRelations?: OrderRelationsState;
   procurement: ProcurementItem[];
   counterparties: CounterpartyProfile[];
   supplierQuotes: SupplierQuote[];

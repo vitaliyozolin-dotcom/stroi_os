@@ -18,6 +18,7 @@ export const syncErrorMessage = (error: unknown, cachePhase: LocalCacheView['pha
   if (error instanceof Error && error.message.startsWith('invalid_stage_transition')) return `Сервер не сохранил изменение этапа. ${error.message.split(': ').slice(1).join(': ')} Исправьте запись или вернитесь к сохранённой версии.`;
   if (error instanceof Error && error.message.startsWith('invalid_baseline_transition')) return `Сервер не сохранил изменение плана. ${error.message.split(': ').slice(1).join(': ')} Исправьте запись или вернитесь к сохранённой версии.`;
   if (error instanceof Error && error.message.startsWith('invalid_finance_transition')) return `Сервер не сохранил финансовую операцию. ${error.message.split(': ').slice(1).join(': ') || 'Проверьте утверждение, основание приёмки и суммы.'} Исправьте запись перед повторной синхронизацией.`;
+  if (error instanceof Error && /^(invalid_order_relations|invalid_order_references|invalid_shared_payment|financial_transaction_unavailable):/.test(error.message)) return `Сервер не сохранил изменение. ${error.message.split(': ').slice(1).join(': ')} Исправьте запись или загрузите сохранённую версию.`;
   if (error instanceof Error && error.message === 'payload_too_large') return 'Данные слишком велики для сохранения. Проверьте вложения.';
   if (cachePhase === 'failed') return 'Сервер недоступен, локальная копия тоже не сохранена. Не закрывайте вкладку.';
   if (cachePhase === 'saving') return 'Нет связи с сервером. Локальная копия ещё сохраняется на этом устройстве.';

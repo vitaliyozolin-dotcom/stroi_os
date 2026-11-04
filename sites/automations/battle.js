@@ -11,7 +11,8 @@ const activeAutomationUser = (state, preferredName = '') => {
 };
 
 export const applyBattleAutomations = (previous, next, actor) => {
-  if (!previous || next.project?.status === 'workspace') return next;
+  if (!previous || ['workspace', 'archived', 'completed'].includes(next.project?.status)
+    || ['on_hold', 'canceled', 'completed'].includes(next.orderRelations?.status)) return next;
   next.tasks = Array.isArray(next.tasks) ? next.tasks : [];
   next.activity = Array.isArray(next.activity) ? next.activity : [];
   const now = new Date().toISOString();

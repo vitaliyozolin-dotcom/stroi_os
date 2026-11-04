@@ -275,7 +275,8 @@ export function useProjectState(role: UserRole, actor: string, storageIdentity: 
 
   const createProject = useCallback(async (nextState: AppState) => {
     const current = workflowRef.current;
-    if (current) await createProjectWorkflow(current, nextState, refreshProjects);
+    if (!current) throw new Error('Проект ещё загружается. Повторите создание после подключения.');
+    await createProjectWorkflow(current, nextState, refreshProjects);
   }, [refreshProjects]);
 
   return {

@@ -205,14 +205,33 @@ export const switchProjectWorkflow = async (workflow: ProjectSyncWorkflow, proje
 };
 
 export const createProjectWorkflow = async (workflow: ProjectSyncWorkflow, state: AppState, refreshProjects: () => Promise<void>) => {
+  if (workflow.saving() || workflow.conflict()) throw new Error('Сначала завершите сохранение текущего проекта или разрешите конфликт.');
   const before = workflow.readModel();
   if (before.dirty && before.ready) await flushProjectChanges(workflow);
-  const model = createSyncModel({ state, revision: 0 }, true, true);
-  model.pendingSummary = `Создан проект ${model.state.project.code}`;
-  workflow.setConflict(null);
-  workflow.writeModel(model);
-  workflow.emit({ phase: 'saving', revision: 0 });
-  workflow.queueCache(cached(model));
-  await flushProjectChanges(workflow);
-  await refreshProjects();
+  const source = workflow.readModel();
+  if (!source.ready || source.dirty || workflow.saving() || workflow.conflict()) {
+    throw new Error('Текущий проект ещё не сохранён на сервере. Восстановите связь и повторите создание заказа.');
+  }
+  workflow.setSaving(true);
+  try {
+    let remote: RemoteProjectSnapshot;
+    try {
+      const saved = await workflow.repository.save({ state, expectedRevision: 0, actor: workflow.actor(), role: workflow.role(), action: 'project_created', summary: `Создан заказ ${state.project.code}` });
+      remote = { ...saved, state: saved.state ?? state };
+    } catch (error) {
+      // The same stable request can have committed even when its response was lost.
+      if (error instanceof ProjectRevisionConflict && state.project.creationRequestId && error.current.state.project.creationRequestId === state.project.creationRequestId && error.current.projectId === state.project.id) {
+        remote = error.current;
+      } else throw error;
+    }
+    const latest = workflow.readModel();
+    if (latest.state.project.id !== source.state.project.id || latest.dirty || workflow.conflict()) {
+      await refreshProjects().catch(() => undefined);
+      throw new Error('Заказ создан на сервере. Сначала сохраните изменения текущего проекта, затем повторите открытие этого заказа.');
+    }
+    applyProjectRemote(workflow, remote);
+    await refreshProjects().catch(() => undefined);
+  } finally {
+    workflow.setSaving(false);
+  }
 };

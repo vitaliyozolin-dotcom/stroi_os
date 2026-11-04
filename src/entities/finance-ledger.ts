@@ -12,6 +12,8 @@ export interface LedgerOperation {
   /** Import reconciliation of the SAME legacy movement. No new cash or settlement. */
   legacyPayment?: LegacyPaymentLink;
   sourceKey?: string; documentId?: string; documentIds?: string[]; recordedAt?: string; recordedBy?: string;
+  /** Server-owned share of one canonical cross-project payment; never a second full bank movement. */
+  sharedPaymentId?: string; sharedPaymentSourceKey?: string; actualPayer?: string; actualPayee?: string;
 }
 export interface LedgerAllocationEvent {
   id: string; operationId: string; allocations: LedgerAllocation[]; source: string; recordedAt?: string; recordedBy?: string;

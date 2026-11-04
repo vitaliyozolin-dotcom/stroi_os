@@ -45,6 +45,18 @@ test('Sites artifact includes Worker request-boundary modules', () => {
   }
 });
 
+test('both runtime artifacts package customer relations and shared payment boundaries', () => {
+  const prepare = source('scripts/prepare-sites-build.mjs'), dockerfile = source('Dockerfile');
+  for (const module of ['order-relations', 'order-object-costs', 'shared-payment']) {
+    assert.ok(prepare.includes(`src/domain/${module}.js`));
+    assert.ok(dockerfile.includes(`src/domain/${module}.js`));
+  }
+  assert.ok(prepare.includes('sites/orders/directory.js'));
+  assert.ok(prepare.includes('sites/projects/shared-payment.js'));
+  assert.ok(dockerfile.includes('sites/orders ./sites/orders'));
+  assert.ok(dockerfile.includes('sites/projects ./sites/projects'));
+});
+
 test('Sites artifact includes Worker file-route modules', () => {
   const prepare = source('scripts/prepare-sites-build.mjs');
 

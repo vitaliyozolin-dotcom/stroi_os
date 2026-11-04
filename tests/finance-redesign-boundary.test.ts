@@ -228,11 +228,13 @@ class TestDatabase {
   readonly raw = new DatabaseSync(':memory:');
   statements: { sql: string; values: unknown[] }[] = [];
   constructor() {
+    this.raw.exec(`CREATE TABLE shared_payment_records(id TEXT PRIMARY KEY, source_key TEXT UNIQUE, payload_json TEXT);
+      CREATE TABLE shared_payment_project_shares(payment_id TEXT, project_id TEXT, operation_id TEXT, amount_cents INTEGER);`);
     this.raw.exec(`CREATE TABLE project_state (project_id TEXT PRIMARY KEY, state_json TEXT NOT NULL, revision INTEGER NOT NULL, created_at TEXT, updated_at TEXT, updated_by TEXT, updated_role TEXT);
       CREATE TABLE audit_log (id TEXT PRIMARY KEY, project_id TEXT, revision INTEGER, created_at TEXT, actor TEXT, role TEXT, action TEXT CHECK(action <> 'force_audit_failure'), summary TEXT, state_bytes INTEGER);`);
   }
   prepare(sql: string) {
-    return { bind: (...values: unknown[]) => ({ sql, values }) };
+    return { bind: (...values: unknown[]) => ({ sql, values, all: async () => ({ results: this.raw.prepare(sql).all(...values as never[]) }) }) };
   }
   async batch(statements: { sql: string; values: unknown[] }[]) {
     this.statements.push(...statements);

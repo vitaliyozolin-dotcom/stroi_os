@@ -1,5 +1,6 @@
 import type { AppState, BudgetLine, Stage, SystemUser } from './entities/index';
 import { uid } from './infrastructure/runtime.ts';
+import { emptyOrderRelations } from './domain/order-relations.js';
 
 const DAY_MS = 86_400_000;
 
@@ -233,5 +234,34 @@ export const createProjectState = (base: AppState, input: {
       text: `Создан проект ${input.code.trim()} · ${input.name.trim()}`,
       tone: 'positive',
     }],
+  };
+};
+
+/** A new order can exist before a site, specification or construction dates. */
+export const createDraftOrderState = (base: AppState, input: {
+  code: string; name: string; actor: string; customerId?: string; customerName?: string;
+  address?: string; source?: string;
+}): AppState => {
+  const createdAt = new Date().toISOString();
+  return {
+    version: 1,
+    schemaVersion: 17,
+    project: {
+      id: uid('order'), creationRequestId: uid('create'), createdAt,
+      code: input.code.trim(), name: input.name.trim(), address: input.address?.trim() ?? '',
+      model: '', area: 0, clientNames: input.customerName?.trim() ?? '',
+      contractValue: 0, targetCost: 0, unknownFields: ['area', 'contractValue', 'targetCost'],
+      startDate: '', targetDate: '', forecastDate: '', foreman: '', cameraStatus: 'offline',
+      source: input.source?.trim() || 'Новый заказ ИКИОМА', status: 'draft',
+    },
+    orderRelations: { ...emptyOrderRelations(), ...(input.customerId ? { customerId: input.customerId } : {}) },
+    budgetMeta: { version: '—', source: 'Смета не загружена', note: 'Объём, сроки и стоимость уточняются в карточке заказа.' },
+    stages: [], budgetLines: [], financeEntries: [], procurement: [], counterparties: [],
+    supplierQuotes: [], leads: [], tasks: [], fieldReports: [], checkpoints: [], documents: [], decisions: [],
+    settings: {
+      ...structuredClone(base.settings),
+      users: base.settings.users.filter(user => user.id === 'user-owner').map(user => ({ ...user })),
+    },
+    activity: [{ id: uid('activity'), timestamp: createdAt, actor: input.actor, text: `Создан черновик заказа ${input.code.trim()} · ${input.name.trim()}`, tone: 'positive' }],
   };
 };

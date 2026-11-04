@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { applyLocalChange, createSyncModel } from '../src/application/project-sync.ts';
-import { flushProjectChanges, switchProjectWorkflow, type ProjectSyncEvent, type ProjectSyncWorkflow } from '../src/application/project-sync-workflow.ts';
+import { flushProjectChanges, switchProjectWorkflow, createProjectWorkflow, type ProjectSyncEvent, type ProjectSyncWorkflow } from '../src/application/project-sync-workflow.ts';
 import { ProjectRevisionConflict } from '../src/application/ports.ts';
 import type { CachedProject, ProjectCacheSession, ProjectRepository, RemoteProjectSnapshot } from '../src/application/ports.ts';
 import type { AppState } from '../src/entities/index.ts';
-import { seedState } from '../src/seed.ts';
+import { seedState, createDraftOrderState } from '../src/seed.ts';
 
 const remote = (state: AppState, revision: number): RemoteProjectSnapshot => ({
   projectId: state.project.id,
@@ -152,4 +152,54 @@ test('a failed save keeps the source project selected during a route switch', as
   assert.equal(setup.model().state.project.id, current.state.project.id);
   assert.equal(setup.model().dirty, true);
   assert.equal(setup.events.at(-1)?.phase, 'offline');
+});
+
+test('creating an order stops when the source save fails and retains every local edit', async () => {
+  const repository: ProjectRepository = { list: async () => [], load: async () => null, save: async () => { throw new Error('network_error'); } };
+  const initial = createSyncModel({ state: structuredClone(seedState), revision: 1 }, true, true);
+  initial.state.project.name = 'Несохранённое имя';
+  const setup = harness(repository, initial);
+  const draft = createDraftOrderState(initial.state, { code: 'O-1', name: 'Новый заказ', actor: 'Владелец' });
+  await assert.rejects(createProjectWorkflow(setup.workflow, draft, async () => {}), /не сохранён/);
+  assert.equal(setup.model().state.project.name, 'Несохранённое имя');
+  assert.equal(setup.model().state.project.id, initial.state.project.id);
+  assert.equal(setup.model().dirty, true);
+});
+
+test('a failed creation never replaces the source; retry after lost response opens the same committed order', async () => {
+  let saved: AppState | undefined;
+  let calls = 0;
+  const repository: ProjectRepository = { list: async () => [], load: async () => null, save: async input => {
+    calls++;
+    if (!saved) { saved = structuredClone(input.state); throw new Error('response_lost'); }
+    assert.equal(input.state.project.id, saved.project.id);
+    assert.equal(input.expectedRevision, 0);
+    throw new ProjectRevisionConflict(remote(saved, 1));
+  } };
+  const setup = harness(repository);
+  const draft = createDraftOrderState(seedState, { code: 'O-2', name: 'Новый заказ', actor: 'Владелец' });
+  await assert.rejects(createProjectWorkflow(setup.workflow, draft, async () => {}), /response_lost/);
+  assert.equal(setup.model().state.project.id, seedState.project.id);
+  await createProjectWorkflow(setup.workflow, draft, async () => {});
+  assert.equal(calls, 2);
+  assert.equal(setup.model().state.project.id, draft.project.id);
+  assert.equal(setup.model().revision, 1);
+  assert.equal(setup.model().dirty, false);
+});
+
+test('a newer source edit made during order creation is not discarded', async () => {
+  let release: (() => void) | undefined;
+  const repository: ProjectRepository = { list: async () => [], load: async () => null, save: async input => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return remote(input.state, 1);
+  } };
+  const setup = harness(repository);
+  const draft = createDraftOrderState(seedState, { code: 'O-3', name: 'Новый заказ', actor: 'Владелец' });
+  const saving = createProjectWorkflow(setup.workflow, draft, async () => {});
+  const newer = structuredClone(setup.model().state); newer.project.name = 'Правка во время отправки';
+  setup.workflow.writeModel(applyLocalChange(setup.model(), newer));
+  release!();
+  await assert.rejects(saving, /Заказ создан на сервере/);
+  assert.equal(setup.model().state.project.name, 'Правка во время отправки');
+  assert.equal(setup.model().dirty, true);
 });

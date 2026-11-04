@@ -48,6 +48,7 @@ const roleLabels: Record<UserRole, string> = {
 const fullNavigation: Array<{ id: PageId; label: string; icon: typeof LayoutDashboard }> = [
   { id: 'overview', label: 'Главная', icon: LayoutDashboard },
   { id: 'project', label: 'Карточка проекта', icon: FolderKanban },
+  { id: 'customers', label: 'Заказчики и заказы', icon: UsersRound },
   { id: 'tasks', label: 'Задачи', icon: ListTodo },
   { id: 'marketing', label: 'Маркетинг и заявки', icon: Megaphone },
   { id: 'finance', label: 'Деньги', icon: WalletCards },
@@ -87,6 +88,7 @@ function App() {
   const [questionsOpen, setQuestionsOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [newOrderCustomerId, setNewOrderCustomerId] = useState<string | undefined>();
 
   useEffect(() => {
     setMobileMenu(false);
@@ -223,7 +225,7 @@ function App() {
             : !allowedPages(role).includes(page) ? <div role="status">Открываем доступный раздел…</div>
             : route.projectId && route.projectId !== state.project.id ? <div className="task-empty" role="status" aria-live="polite"><strong>{sync.phase === 'loading' ? 'Загружаем проект…' : 'Не удалось открыть проект'}</strong>{sync.phase !== 'loading' && <><p>{sync.message || 'Проверьте доступ к проекту или подключение к сети.'}</p><button type="button" className="button button--primary" onClick={() => navigate(role === 'client' ? 'client' : 'overview')}>К текущему проекту</button></>}</div>
             : location.pathname === '/' ? <div role="status">Открываем раздел…</div>
-            : <WorkspacePages key={`${state.project.id}:${page}`} state={state} session={session} role={role} focusEntityId={focusEntityId} updateState={updateState} navigate={navigate} applyServerSnapshot={applyServerSnapshot} reconcileServerSnapshot={reconcileServerSnapshot} openQuestions={() => setQuestionsOpen(true)} openProjects={() => setCreateProjectOpen(true)} />}
+            : <WorkspacePages key={`${state.project.id}:${page}`} state={state} session={session} role={role} focusEntityId={focusEntityId} updateState={updateState} navigate={navigate} applyServerSnapshot={applyServerSnapshot} reconcileServerSnapshot={reconcileServerSnapshot} openQuestions={() => setQuestionsOpen(true)} openProjects={() => { if (session.isOwner) { setNewOrderCustomerId(undefined); setCreateProjectOpen(true); } }} openProject={(projectId, targetPage = 'customers') => { if (allowedPages(role).includes(targetPage)) void changeLocation(workspacePath(projectId, targetPage)); }} createOrder={customerId => { if (session.isOwner) { setNewOrderCustomerId(customerId); setCreateProjectOpen(true); } }} syncPhase={sync.phase} />}
         </main>
       </div>
 
@@ -248,17 +250,22 @@ function App() {
       )}
 
       {projectOpen && (
-        <Modal title="Проекты" subtitle="Переключайтесь между домами или создайте новый проект по стартовому шаблону." onClose={() => setProjectOpen(false)}>
+        <Modal title="Проекты и заказы" subtitle="Откройте существующий заказ или создайте новый." onClose={() => setProjectOpen(false)}>
           {role !== 'client' && <button type="button" className="project-picker__open-card" onClick={() => { setProjectOpen(false); navigate('project'); }}><FolderKanban size={18} /><span><strong>Открыть карточку текущего проекта</strong><small>Реквизиты объекта, команда и документы</small></span></button>}
-          <div className="project-picker__list" data-tour="project-list">{projects.map((project) => <button type="button" key={project.id} className={project.id === state.project.id ? 'project-picker__item project-picker__item--active' : 'project-picker__item'} onClick={() => { setProjectOpen(false); void changeLocation(workspacePath(project.id, page)); }}><span><House size={20} /></span><div><small>{project.code}{project.id === state.project.id ? ' · активный проект' : ''}</small><strong>{project.name}</strong><p>{project.model} · {project.area} м²</p></div><StatusBadge label={project.id === state.project.id ? 'Выбран' : 'Открыть'} tone={project.id === state.project.id ? 'positive' : 'neutral'} /></button>)}</div>
-          <button type="button" data-tour="new-project" className="project-picker__add" onClick={() => {
+          <div className="project-picker__list" data-tour="project-list">{projects.map((project) => <button type="button" key={project.id} className={project.id === state.project.id ? 'project-picker__item project-picker__item--active' : 'project-picker__item'} onClick={() => { setProjectOpen(false); void changeLocation(workspacePath(project.id, page)); }}><span><House size={20} /></span><div><small>{project.code}{project.id === state.project.id ? ' · активный проект' : ''}</small><strong>{project.name}</strong><p>{[project.model, project.unknownFields?.includes('area') ? 'Площадь уточняется' : `${project.area} м²`].filter(Boolean).join(' · ')}</p></div><StatusBadge label={project.id === state.project.id ? 'Выбран' : 'Открыть'} tone={project.id === state.project.id ? 'positive' : 'neutral'} /></button>)}</div>
+          {session.isOwner && <button type="button" data-tour="new-project" className="project-picker__add" onClick={() => {
             setProjectOpen(false);
+            setNewOrderCustomerId(undefined);
             setCreateProjectOpen(true);
-          }}><Plus size={18} /> Добавить новый дом <small>проект, график и стартовая смета</small></button>
+          }}><Plus size={18} /> Новый заказ <small>черновик или шаблон строительства</small></button>}
         </Modal>
       )}
 
-      {createProjectOpen && <CreateProjectDialog nextCode={`H-${String(projects.filter(project => project.id !== 'workspace-initial').length + 1).padStart(3, '0')}`} state={state} actor={session.name} onClose={() => setCreateProjectOpen(false)} onCreate={async next => { setCreateProjectOpen(false); setProjectOpen(false); void changeLocation(workspacePath(next.project.id, 'overview')); await createProject(next); }} />}
+      {createProjectOpen && session.isOwner && <CreateProjectDialog nextCode={`H-${String(projects.filter(project => project.id !== 'workspace-initial').length + 1).padStart(3, '0')}`} initialCustomerId={newOrderCustomerId} state={state} actor={session.name} onClose={() => setCreateProjectOpen(false)} onCreate={async next => {
+        try { await createProject(next); }
+        catch (error) { const message = error instanceof Error ? error.message : ''; throw new Error(/[А-Яа-яЁё]/.test(message) ? message : 'Сервер не подтвердил создание заказа. Проверьте связь и повторите — запись не продублируется.'); }
+        setCreateProjectOpen(false); setProjectOpen(false); void changeLocation(workspacePath(next.project.id, 'customers'));
+      }} />}
 
       {role === 'management' && questionsOpen && <QuestionRegistry key={state.project.id} projectId={state.project.id} currentPage={page} onClose={() => setQuestionsOpen(false)} />}
       {role === 'management' && <HelpCenter onOpenQuestions={() => setQuestionsOpen(true)} projectId={state.project.id} currentPage={page} onNavigate={navigate} onOpenProjects={() => setProjectOpen(true)} onCloseProjects={() => setProjectOpen(false)} />}

@@ -8,6 +8,7 @@ import { useFinanceLedger } from '../useFinanceLedger';
 import { FinanceLedgerPanel } from '../components/FinanceLedgerPanel';
 import { FinanceAutomationPanel } from '../components/FinanceAutomationPanel';
 import { FinancePortfolioPanel } from '../components/FinancePortfolioPanel';
+import { SharedPaymentPanel } from '../components/SharedPaymentPanel';
 import { TreasuryBudgetVersions } from '../components/TreasuryPlanningPanel';
 import { treasuryProjection, treasuryCostSummary } from '../domain/treasury.js';
 import { automaticSchedule } from '../domain/construction/index.js';
@@ -225,6 +226,7 @@ export function FinancePage({ state, actor, role, userId, focusId, onChange, onN
         <div hidden={paymentView !== 'calendar'}><FinanceScheduleSync state={state} role={role} onEditPlan={openPaymentPlan} onOpenSchedule={() => setView('schedule')} /><FinancePaymentCalendar state={state} onSetDueDate={finance.setDueDate} onOpenEntry={setSelectedEntryId} onAddEntry={openNew} onEditPlan={openPaymentPlan} onOpenForecast={() => setView('forecast')} onOpenLedger={() => setPaymentView('settlements')} /></div>
         <div hidden={paymentView !== 'operations'}><div className="finance-ledger-totals"><button type="button" onClick={() => setSummaryOpen('received')}>Поступило <strong>{money(totals.received)}</strong></button><button type="button" onClick={() => setSummaryOpen('paid')}>Оплачено <strong>{money(totals.paid)}</strong></button></div><FinanceOperations state={state} onOpenEntry={setSelectedEntryId} /><CashflowPanel state={state} /></div>
         {paymentView === 'settlements' && <FinanceLedgerPanel state={state} role={role} snapshot={ledger.snapshot} onSave={ledger.save} onOpenEntry={setSelectedEntryId} />}
+        {view === 'payments' && role === 'management' && <SharedPaymentPanel state={state} role={role} onServerSnapshot={onServerSnapshot} />}
         <FinanceAutomationPanel state={state} role={role} actor={actor} userId={userId} onChange={onChange} onOpenEntry={setSelectedEntryId} onOpenForecast={() => setView('forecast')} onOpenBudget={() => setView('budget')} />
       </div>
       <div id="finance-view-schedule" role="tabpanel" aria-labelledby="finance-tab-schedule" hidden={view !== 'schedule'}>{view === 'schedule' && <SchedulePage state={state} role={role} actor={actor} userId={userId} onChange={onChange} embedded onOpenFinance={setSelectedEntryId} onOpenTask={id => onNavigate('tasks', id)} />}</div>

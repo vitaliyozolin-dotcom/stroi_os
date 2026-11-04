@@ -84,6 +84,24 @@ export const documentVisibilityForRole = (state, identity) => {
   }
   for (const document of state.documents ?? []) {
     if (document.financeEntryId) remember(document.id, entries.get(document.financeEntryId)?.kind ?? 'unknown');
+    if (document.category === 'contract' && (identity.role === 'foreman' || document.clientVisible !== true)) remember(document.id, 'private-finance');
+  }
+  for (const contract of state.orderRelations?.contracts ?? []) {
+    for (const id of contract.documentIds ?? []) remember(id, contract.kind === 'customer' ? 'income' : 'private-finance');
+  }
+  for (const mortgage of state.orderRelations?.mortgages ?? []) {
+    for (const id of mortgage.documentIds ?? []) remember(id, 'private-finance');
+  }
+  for (const change of state.orderRelations?.changeRequests ?? []) {
+    for (const id of change.documentIds ?? []) remember(id, 'private-finance');
+  }
+  for (const link of state.orderRelations?.links ?? []) {
+    if (link.kind !== 'document') continue;
+    if (link.changeRequestId) remember(link.entityId, 'private-finance');
+    if (link.contractId) {
+      const contract = state.orderRelations.contracts?.find(row => row.id === link.contractId);
+      remember(link.entityId, contract?.kind === 'customer' ? 'income' : 'private-finance');
+    }
   }
   const restrictedIds = new Set(), restrictedKeys = new Set();
   for (const document of state.documents ?? []) {
@@ -109,6 +127,8 @@ export const stateForRole = (state, identity) => {
   delete safe.treasury;
   delete safe.financeLedger;
   delete safe.financeAutomation;
+  // Shared identities, contract terms and financing applications are management-only.
+  delete safe.orderRelations;
   safe.documents = (safe.documents ?? []).filter(documentVisibilityForRole(state, identity));
 
   if (role === 'foreman') {
@@ -166,7 +186,7 @@ export const stateForRole = (state, identity) => {
 export const mergeStateForRole = (previous, incoming, identity, { serverManagedRoster = false } = {}) => {
   const role = identity.role;
   // Additive pilot data survives saves by an older client that has never seen it.
-  for (const field of ['treasury', 'financeLedger', 'financeAutomation']) {
+  for (const field of ['treasury', 'financeLedger', 'financeAutomation', 'orderRelations']) {
     if (previous?.[field] && !Object.hasOwn(incoming, field)) incoming = { ...incoming, [field]: previous[field] };
   }
   if (!previous || (role === 'management' && identity.isOwner && !serverManagedRoster)) return incoming;

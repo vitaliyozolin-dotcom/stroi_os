@@ -11,6 +11,8 @@ import { createDeveloperFeedbackHandler } from './feedback/routes.js';
 import { createProjectReadHandlers } from './projects/routes.js';
 import { createFinancePortfolioHandler } from './projects/finance-portfolio.js';
 import { createSharedFinanceAccountHandler } from './projects/shared-finance-account.js';
+import { createSharedPaymentHandler } from './projects/shared-payment.js';
+import { createOrderDirectoryHandler } from './orders/directory.js';
 import { createProjectWriteHandler } from './projects/write.js';
 import { createSessionHandler } from './access/session.js';
 import { createAccessUsersHandler } from './access/users.js';
@@ -120,6 +122,8 @@ const {
 const { getState: handleGetState, audit: handleAudit, projects: handleProjects } = createProjectReadHandlers({ ensureSchema, readSnapshot });
 const handleFinancePortfolio = createFinancePortfolioHandler({ ensureSchema });
 const handleSharedFinanceAccount = createSharedFinanceAccountHandler({ ensureSchema });
+const handleSharedPayment = createSharedPaymentHandler({ ensureSchema });
+const handleOrderDirectory = createOrderDirectoryHandler({ ensureSchema });
 const handleSession = createSessionHandler({ ensureSchema });
 const handleAccessUsers = createAccessUsersHandler({ ensureSchema, readSnapshot });
 const { status: handleCameraStatus, view: handleCameraView } = createCameraHandlers({ ensureSchema, readSnapshot });
@@ -287,6 +291,8 @@ const handleApi = createApiHandler({
   projects: handleProjects,
   financePortfolio: handleFinancePortfolio,
   sharedFinanceAccount: handleSharedFinanceAccount,
+  sharedPayment: handleSharedPayment,
+  orderDirectory: handleOrderDirectory,
   integrationStatus: handleIntegrationStatus,
   integrationTest: handleIntegrationTest,
   telegramChatSelect: handleTelegramChatSelect,

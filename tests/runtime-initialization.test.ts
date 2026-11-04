@@ -21,9 +21,9 @@ test('initialization retries schema failure, never seeds business records and re
     const statement = {
       bind: (...values: string[]) => ({
         run: async () => {
-          assert.deepEqual(values.slice(0, 2), ['battle_schema_version', '17']);
+          assert.deepEqual(values.slice(0, 2), ['battle_schema_version', '18']);
         },
-        first: async () => ({ value: values[0] === 'battle_schema_version' ? '17' : ready ? 'done' : null }),
+        first: async () => ({ value: values[0] === 'battle_schema_version' ? '18' : ready ? 'done' : null }),
       }),
       run: async () => {
         if (fail && sql.includes('CREATE TABLE IF NOT EXISTS project_state')) throw new Error('schema_failed');

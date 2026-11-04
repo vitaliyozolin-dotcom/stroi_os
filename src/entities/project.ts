@@ -25,6 +25,10 @@ export interface HouseProject {
   cameraStatus: 'online' | 'offline';
   cameraUrl?: string;
   createdAt?: string;
+  /** Stable request identity makes a lost creation response safe to retry. */
+  creationRequestId?: string;
+  /** Legacy numeric slots remain zero while these draft values are unknown. */
+  unknownFields?: Array<'area' | 'contractValue' | 'targetCost'>;
   source?: string;
   contractNumber?: string;
   status?: 'workspace' | 'draft' | 'active' | 'completed' | 'archived';

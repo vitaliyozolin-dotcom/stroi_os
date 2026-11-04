@@ -8,7 +8,7 @@ class ReadOnlyDb {
   battleMarker: string | null;
   schemaMarker: string | null;
 
-  constructor(battleMarker: string | null, schemaMarker: string | null = '17') {
+  constructor(battleMarker: string | null, schemaMarker: string | null = '18') {
     this.battleMarker = battleMarker;
     this.schemaMarker = schemaMarker;
   }
@@ -40,7 +40,7 @@ test('readiness is repeatable and never mutates storage', async () => {
     assert.deepEqual(await battleReadiness({ DB: db, BUILD_SHA: buildSha }), {
       ok: true,
       database: true,
-      schemaVersion: 17,
+      schemaVersion: 18,
       schemaReady: true,
       battleReady: true,
       buildSha,
@@ -56,7 +56,7 @@ test('readiness fails closed when manual initialization is absent', async () => 
   assert.deepEqual(await battleReadiness({ DB: db, BUILD_SHA: '' }), {
     ok: false,
     database: true,
-    schemaVersion: 17,
+    schemaVersion: 18,
     schemaReady: true,
     battleReady: false,
     buildSha: 'unknown',

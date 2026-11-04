@@ -106,7 +106,7 @@ test('web adapter commits the shared use case with action metadata and a generat
 test('Telegram CAS rechecks creation against the latest snapshot and replay does not inflate forecast', async () => {
   let reads = 0, updates = 0, audits = 0;
   let persisted: AppState | undefined;
-  const db = { prepare: (sql: string) => ({ bind: (...values: unknown[]) => ({ run: async () => {
+  const db = { financialTransaction: async (work: (tx: unknown) => Promise<unknown>): Promise<unknown> => work(db), prepare: (sql: string) => ({ bind: (...values: unknown[]) => ({ all: async () => ({ results: [] }), run: async () => {
     if (sql.includes('UPDATE project_state')) {
       updates += 1;
       if (updates === 1) return { changes: 0 };

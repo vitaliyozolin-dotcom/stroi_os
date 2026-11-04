@@ -42,7 +42,9 @@ test('Telegram project mutation retries CAS and audits only the successful revis
   let updates = 0;
   let audits = 0;
   const db = {
+    financialTransaction: async (work: (tx: unknown) => Promise<unknown>): Promise<unknown> => work(db),
     prepare: (sql: string) => ({ bind: () => ({
+      all: async () => ({ results: [] }),
       run: async () => {
         if (sql.includes('UPDATE project_state')) return { changes: ++updates === 2 ? 1 : 0 };
         if (sql.includes('INSERT INTO audit_log')) audits += 1;
@@ -66,7 +68,7 @@ test('Telegram project mutation retries CAS and audits only the successful revis
 });
 
 test('Telegram project mutation fails after three conflicting revisions', async () => {
-  const db = { prepare: () => ({ bind: () => ({ run: async () => ({ changes: 0 }) }) }) };
+  const db = { financialTransaction: async (work: (tx: unknown) => Promise<unknown>): Promise<unknown> => work(db), prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), run: async () => ({ changes: 0 }) }) }) };
   const store = createTelegramProjectStore({
     ensureSchema: async () => undefined,
     readSnapshot: async () => ({ state: { project: { id: 'project-1' } }, revision: 1, updatedAt: 'now' }),
@@ -94,7 +96,7 @@ test('Telegram CAS retries stamp one payment event from the latest authoritative
   let reads = 0;
   let updates = 0;
   let persisted: { financeEntries: { paidAmount: number; payments: { amount: number; recordedBy: string }[] }[] } | undefined;
-  const db = { prepare: (sql: string) => ({ bind: (...values: unknown[]) => ({ run: async () => {
+  const db = { financialTransaction: async (work: (tx: unknown) => Promise<unknown>): Promise<unknown> => work(db), prepare: (sql: string) => ({ bind: (...values: unknown[]) => ({ all: async () => ({ results: [] }), run: async () => {
     if (sql.includes('UPDATE project_state')) {
       updates += 1;
       if (updates === 1) return { changes: 0 };

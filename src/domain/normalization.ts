@@ -1,4 +1,5 @@
 import type { AppState } from '../entities/index';
+import { normalizeOrderRelations } from './order-relations.js';
 
 export const normalizeAppStateWithFallback = (state: AppState, fallback: AppState): AppState => {
   const sourceWidgets = Array.isArray(state.settings?.dashboardWidgets)
@@ -10,6 +11,7 @@ export const normalizeAppStateWithFallback = (state: AppState, fallback: AppStat
 
   return {
     ...state,
+    ...(state.orderRelations === undefined ? {} : { orderRelations: normalizeOrderRelations(state.orderRelations) }),
     budgetMeta: state.budgetMeta ?? fallback.budgetMeta,
     procurement: state.procurement.map((item) => ({
       ...item,

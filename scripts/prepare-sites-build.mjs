@@ -18,11 +18,17 @@ await mkdir(`${projectRoot}dist/src/domain/construction`, { recursive: true });
 await mkdir(`${projectRoot}dist/src/application`, { recursive: true });
 await mkdir(`${projectRoot}dist/src/infrastructure`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/projects`, { recursive: true });
+await mkdir(`${projectRoot}dist/server/orders`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/routes`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/runtime`, { recursive: true });
 
 await Promise.all([
+  copyFile(`${projectRoot}src/domain/order-relations.js`, `${projectRoot}dist/src/domain/order-relations.js`),
+  copyFile(`${projectRoot}src/domain/order-object-costs.js`, `${projectRoot}dist/src/domain/order-object-costs.js`),
+  copyFile(`${projectRoot}src/domain/shared-payment.js`, `${projectRoot}dist/src/domain/shared-payment.js`),
+  copyFile(`${projectRoot}sites/orders/directory.js`, `${projectRoot}dist/server/orders/directory.js`),
+  copyFile(`${projectRoot}sites/projects/shared-payment.js`, `${projectRoot}dist/server/projects/shared-payment.js`),
   copyFile(`${projectRoot}src/domain/treasury.js`, `${projectRoot}dist/src/domain/treasury.js`),
   copyFile(`${projectRoot}src/domain/finance-ledger.js`, `${projectRoot}dist/src/domain/finance-ledger.js`),
   copyFile(`${projectRoot}src/domain/finance-automation.js`, `${projectRoot}dist/src/domain/finance-automation.js`),

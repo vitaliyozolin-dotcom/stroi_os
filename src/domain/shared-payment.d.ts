@@ -1,0 +1,12 @@
+import type { SharedPaymentInput, SharedPaymentPrincipal, SharedPaymentShare, LedgerOperation } from '../entities/index';
+export const SHARED_PAYMENT_PREFIX: string;
+export function stableSharedPaymentValue(value: unknown): string;
+export function sharedPaymentHash(parts: unknown[]): string;
+export function sharedPaymentBankKey(sharedAccountKey: string, externalId: string): string;
+export function sharedPaymentDocumentKey(scope: string, reference: string): string;
+export function sharedPaymentOperationId(paymentId: string, projectId: string): string;
+export function sharedPaymentInputError(input: unknown): string;
+export function normalizeSharedPaymentInput(input: SharedPaymentInput): SharedPaymentPrincipal;
+export function buildSharedPaymentShares(input: SharedPaymentPrincipal): SharedPaymentShare[];
+export function isSharedPaymentOperation(operation: LedgerOperation | unknown): boolean;
+export function sharedPaymentEvidenceFingerprint(document: unknown): string;

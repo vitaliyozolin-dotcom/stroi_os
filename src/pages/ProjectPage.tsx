@@ -152,10 +152,12 @@ export function ProjectPage({
         <div>
           <span className="eyebrow">Единая карточка объекта</span>
           <h1>{state.project.name}</h1>
-          <p>{state.project.code} · {state.project.model} · {state.project.area} м²</p>
+          <p>{[state.project.code, state.project.model, state.project.unknownFields?.includes('area') ? 'Площадь уточняется' : `${state.project.area} м²`].filter(Boolean).join(' · ')}</p>
         </div>
         <button type="button" className="button button--primary" onClick={() => setShowUpload(true)}><UploadCloud size={17} /> Загрузить документ</button>
       </section>
+
+      {session.role === 'management' && <button type="button" className="button button--secondary" onClick={() => onNavigate('customers')}><UsersRound size={18} /> Заказчик, объекты и условия заказа</button>}
 
       <section className="project-hero-grid">
         <article className="panel project-identity-card">

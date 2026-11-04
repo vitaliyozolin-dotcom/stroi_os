@@ -65,6 +65,7 @@ export const createProjectReadHandlers = ({ ensureSchema, readSnapshot }) => {
             name: clean(project.name, 120),
             model: clean(project.model, 120),
             area: Number(project.area) || 0,
+            ...(Array.isArray(project.unknownFields) ? { unknownFields: project.unknownFields.filter(field => field === 'area') } : {}),
             address: clean(project.address, 240),
             targetDate: clean(project.targetDate, 40),
             revision: Number(row.revision),

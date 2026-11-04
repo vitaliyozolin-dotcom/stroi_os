@@ -71,13 +71,15 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
       {show('project') && <section className="project-heading project-heading--overview">
         <div>
           <div className="project-heading__meta">
-            <StatusBadge label={`${state.project.code} · активный проект`} tone="positive" />
+            <StatusBadge label={`${state.project.code} · ${state.project.status === 'draft' ? 'черновик заказа' : 'проект'}`} tone={state.project.status === 'draft' ? 'neutral' : 'positive'} />
             <span>{lastUpdated ? `Обновлено ${formatDateTime(lastUpdated)}` : 'Изменений пока нет'}</span>
           </div>
           <h1>{role === 'foreman' ? 'Сегодня на объекте' : state.project.name}</h1>
           <p>{[state.project.model, state.project.area ? `${state.project.area} м²` : '', state.project.address].filter(Boolean).join(' · ') || 'Заполните параметры первого объекта'}</p>
         </div>
       </section>}
+
+      {role === 'management' && state.project.status === 'draft' && <section className="panel"><p>Объём, сроки и стоимость этого заказа ещё уточняются. Заполните участников, объекты и условия, затем добавьте план работ.</p><button type="button" className="button button--primary" onClick={() => onNavigate('customers')}>Заполнить заказ</button></section>}
 
       {role !== 'foreman' && show('finance') && <section className="metric-grid overview-money" aria-label="Деньги проекта">
         <MetricCard

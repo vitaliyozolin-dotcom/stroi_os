@@ -36,7 +36,7 @@ test('project write denies an unauthenticated caller before parsing its body', a
 
 test('only the owner can create a project at revision zero', async () => {
   const db = {
-    prepare: () => ({ bind: () => ({ run: async () => ({}) }) }),
+    prepare: () => ({ bind: () => ({ run: async () => ({}), all: async () => ({ results: [] }) }) }),
     batch: async () => [{ meta: { changes: 1 } }],
   };
   const state = projectState();

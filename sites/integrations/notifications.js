@@ -8,6 +8,12 @@ const notificationStatusLabels = {
 };
 
 export const notificationEvent = (text, page, entityId, recipientId) => ({ text, page, entityId, recipientId });
+const stoppedWork = state => ['archived', 'completed'].includes(state?.project?.status) || ['on_hold', 'canceled', 'completed'].includes(state?.orderRelations?.status);
+const applicableEvents = (state, events) => {
+  if (!stoppedWork(state)) return events;
+  const warrantyTasks = new Set((state.orderRelations?.links ?? []).filter(link => link.kind === 'task' && link.warrantyCaseId).map(link => link.entityId));
+  return events.filter(event => ['finance', 'project', 'marketing', 'customers'].includes(event.page) || event.page === 'tasks' && warrantyTasks.has(event.entityId));
+};
 
 export const notificationEvents = (previous, next, today = new Date().toISOString().slice(0, 10)) => {
   if (!previous) return [];
@@ -53,7 +59,7 @@ export const notificationEvents = (previous, next, today = new Date().toISOStrin
     const before = beforeDocuments.get(item.id);
     if (before && before.status !== 'signed' && item.status === 'signed') events.push(notificationEvent(`Документ подписан: «${item.name}»`, 'project', item.id));
   }
-  return events.slice(0, 8);
+  return applicableEvents(next, events).slice(0, 8);
 };
 
 export const deepLink = (origin, projectId, page, entityId) => {
@@ -67,10 +73,11 @@ export const deepLink = (origin, projectId, page, entityId) => {
 export const createNotificationService = ({ resolveTelegramConnection, sha256 }) => {
   const buildPlan = async (previous, next, env, actor, origin, summary, eventKey = '', recoveryEvents = []) => {
     let events = notificationEvents(previous, next);
-    if (!events.length && Array.isArray(recoveryEvents) && recoveryEvents.length) events = recoveryEvents.slice(0, 8);
+    if (!events.length && Array.isArray(recoveryEvents) && recoveryEvents.length) events = applicableEvents(next, recoveryEvents).slice(0, 8);
     const channels = next.settings?.notifications?.channels ?? {};
     const allActivity = next.settings?.notifications?.events?.projectActivity !== false;
-    if (!events.length && allActivity && clean(summary, 300)) events = [notificationEvent(clean(summary, 300), 'overview')];
+    const lifecycleChanged = previous?.orderRelations?.status !== next.orderRelations?.status || previous?.project?.status !== next.project?.status;
+    if (!events.length && allActivity && clean(summary, 300) && (!stoppedWork(next) || lifecycleChanged)) events = [notificationEvent(clean(summary, 300), 'overview')];
     if (!events.length) return { channels, message: '', deliveries: [] };
     const lines = events.map((event) => `• ${event.text}\n  ${deepLink(origin, next.project.id, event.page, event.entityId)}`);
     const message = `ИКИОМА ОС · ${next.project?.code ?? 'проект'}\nИзменил: ${actor}\n\n${lines.join('\n')}`;

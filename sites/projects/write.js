@@ -14,6 +14,9 @@ import { validateTreasuryChanges } from '../../src/domain/treasury.js';
 import { validateFinanceLedgerChanges, validateFinanceLedgerShape } from '../../src/domain/finance-ledger.js';
 import { validateFinanceAutomationChanges } from '../../src/domain/finance-automation.js';
 import { requiresPortfolioCheck, validatePortfolioWrite } from '../../src/domain/finance-portfolio.js';
+import { validateOrderRelationsChanges } from '../../src/domain/order-relations.js';
+import { validateOrderDirectoryReferences } from '../orders/directory.js';
+import { validateSharedPaymentWrite } from './shared-payment.js';
 
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_JSON_BODY_BYTES = 32 * 1024;
@@ -84,6 +87,20 @@ const write = async (request, env, context, atomicFinance = false, afterCommit, 
     const mergedState = mergeStateForRole(previousSnapshot?.state ?? null, incomingState, identity, {
       serverManagedRoster: env.AUTH_ROSTER_MODE === 'local_password',
     });
+    if (previousSnapshot?.state.project.creationRequestId) {
+      if (mergedState.project.creationRequestId && mergedState.project.creationRequestId !== previousSnapshot.state.project.creationRequestId) return json({ ok: false, error: 'immutable_creation_request' }, 422);
+      mergedState.project.creationRequestId = previousSnapshot.state.project.creationRequestId;
+    }
+    if (mergedState.project.unknownFields === undefined && previousSnapshot?.state.project.unknownFields) mergedState.project.unknownFields = [...previousSnapshot.state.project.unknownFields];
+    if (mergedState.project.unknownFields !== undefined) {
+      if (!Array.isArray(mergedState.project.unknownFields) || mergedState.project.unknownFields.some(field => !['area', 'contractValue', 'targetCost'].includes(field))) return json({ ok: false, error: 'invalid_unknown_fields' }, 422);
+      mergedState.project.unknownFields = mergedState.project.unknownFields.filter(field => mergedState.project[field] === 0);
+    }
+    if (JSON.stringify(previousSnapshot?.state.orderRelations) !== JSON.stringify(mergedState.orderRelations) && !atomicFinance) return json({ ok: false, error: 'financial_transaction_unavailable', message: 'Для сохранения связей заказа требуется атомарная проверка доступа.' }, 503);
+    const directoryError = await validateOrderDirectoryReferences({ db: env.DB, request, env, previousState: previousSnapshot?.state ?? null, nextState: mergedState });
+    if (directoryError) return json({ ok: false, error: 'invalid_order_references', message: directoryError }, 422);
+    const orderError = validateOrderRelationsChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
+    if (orderError) return json({ ok: false, error: 'invalid_order_relations', message: orderError }, 422);
     const stageError = validateStageControl(previousSnapshot?.state ?? null, mergedState, identity, now);
     if (stageError) return json({ ok: false, error: 'invalid_stage_transition', message: stageError }, 422);
     const baselineError = validateBaselineChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
@@ -100,6 +117,9 @@ const write = async (request, env, context, atomicFinance = false, afterCommit, 
     if (treasuryError) return json({ ok: false, error: 'invalid_treasury_transition', message: treasuryError }, 422);
     const automationError = validateFinanceAutomationChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
     if (automationError) return json({ ok: false, error: 'invalid_finance_automation', message: automationError }, 422);
+    const sharedPaymentError = await validateSharedPaymentWrite(env.DB, previousSnapshot?.state ?? null, mergedState);
+    if (sharedPaymentError) return json({ ok: false, error: 'invalid_shared_payment', message: sharedPaymentError }, 422);
+    if (!atomicFinance && [...(previousSnapshot?.state.financeLedger?.operations ?? []), ...(mergedState.financeLedger?.operations ?? [])].some(row => row.sharedPaymentId || row.sharedPaymentSourceKey)) return json({ ok: false, error: 'financial_transaction_unavailable', message: 'Записи общего платежа требуют атомарной проверки.' }, 503);
     if (requiresPortfolioCheck(previousSnapshot?.state ?? null, mergedState)) {
       if (!atomicFinance) return json({ ok: false, error: 'financial_transaction_unavailable', message: 'Хранилище не поддерживает атомарную сверку нескольких проектов.' }, 503);
       const otherRows = await env.DB.prepare('SELECT state_json FROM project_state WHERE project_id <> ?').bind(projectId).all();

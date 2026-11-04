@@ -7,7 +7,7 @@ import { emptyFinanceLedger } from '../src/domain/finance-ledger.js';
 const headers = { 'content-type': 'application/json', 'oai-authenticated-user-email': 'owner@example.test' };
 const requestFor = (state: unknown, revision = 0) => new Request('https://example.test/api/state?projectId=project-1', { method: 'PUT', headers, body: JSON.stringify({ projectId: 'project-1', expectedRevision: revision, state }) });
 const minimal = () => ({ version: 1, project: { id: 'project-1' }, settings: { users: [] } });
-const database = () => ({ prepare: () => ({ bind: () => ({}) }), batch: async () => [{ meta: { changes: 1 } }] });
+const database = () => ({ prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }) }) }), batch: async () => [{ meta: { changes: 1 } }] });
 const handlerFor = (overrides: Record<string, unknown> = {}) => createProjectWriteHandler({ ensureSchema: async () => {}, readSnapshot: async () => null, changes: (result: { meta?: { changes?: number } }) => result?.meta?.changes ?? 0, applyAutomations: (_before: unknown, state: unknown) => state, buildNotificationPlan: async () => ({ deliveries: [] }), dispatchNotifications: async () => {}, ...overrides });
 
 test('notifications start after financial COMMIT and use the original database pool', async () => {
