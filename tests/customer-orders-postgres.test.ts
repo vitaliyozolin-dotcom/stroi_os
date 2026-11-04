@@ -140,7 +140,8 @@ test('PostgreSQL customer-order APIs preserve isolated drafts, CAS, exactly-once
       assert.deepEqual(outcomes.map(response => response.status).sort(), [200, 409]);
       assert.equal(await count('order_directory_records'), 1); assert.equal(await count('order_directory_audit'), 3);
       assert.equal((await db.prepare('SELECT revision FROM order_directory_records WHERE id = ?').bind('pg-party').first()).revision, 3);
-      assert.deepEqual(await readFinancialOrders(), seed);
+      // Stored project snapshots use JSON, which omits optional undefined fields.
+      assert.deepEqual(await readFinancialOrders(), JSON.parse(JSON.stringify(seed)));
     });
 
     await t.test('two successive empty drafts reuse the canonical customer and lost-response retries return the existing snapshot', async () => {
