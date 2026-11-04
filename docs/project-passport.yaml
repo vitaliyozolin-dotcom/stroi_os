@@ -328,15 +328,15 @@ project:
     - "После снятия блокировки домена подключены DNS и Telegram webhook"
     - "Заявки с ikioma.ru записываются в отдельный входящий поток и доступны только владельцу"
     - "Telegram всегда сообщает, распознано ли обращение и было ли что-либо сохранено; записи и изменения требуют подтверждения"
-  current_stage: "Внедрение общих заказчиков, связей заказов и распределений"
+  current_stage: "Общие заказчики, связи заказов и распределения опубликованы"
   current_step:
-    owner: "Codex"
-    action: "Завершить сквозную приёмку, выпустить проверенную сборку через установленный SSH deploy и сверить сохранность существующих данных"
-    due: "текущая рабочая сессия"
-    expected_result: "Один заказчик связан с несколькими заказами; общие объекты, договоры и платежи имеют явные проектные доли и неизменную историю"
-    evidence: "docs/customer-orders-2026-11-04.md; тесты order-*, shared-payment, project-sync-workflow; PostgreSQL migration rehearsal"
+    owner: "Виталий / ответственный менеджер нового заказа"
+    action: "Создать первый реальный новый заказ через раздел «Заказчики и заказы» и заполнить участников, объекты и условия по подтверждённым источникам"
+    due: "после получения исходных данных нового заказа"
+    expected_result: "Реальный заказ связан с нужным заказчиком и объектами; договорные условия и финансовые доли подтверждены документами"
+    evidence: "docs/customer-orders-release-2026-11-04.md; docs/customer-orders-2026-11-04.md"
     publication: "Прямое поручение владельца 04.11.2026: «Применяй промт и внедряй в нашу систему». Маршрут выпуска: подключённый исполнитель → существующий SSH → штатный exact-SHA deploy. GitHub Actions не используются."
-    local_result: "Миграция на отдельной копии PostgreSQL выполнена дважды: все четыре project_state и ревизии побайтово сохранены; reset marker battle_v17_reset остаётся done, схема дополнена до 18. Общая сборка: 817 проверок прошли, 2 PostgreSQL-проверки ожидают отдельного запуска. Браузерная приёмка продолжается."
+    local_result: "Выпуск 16d637ae1ccabeecd9a77152d9e647c7a1c4d062 опубликован и проверен 04.11.2026 в 10:12 UTC. Основная сборка: 817 passed; отдельный PostgreSQL-прогон: 10 passed, 0 skipped; браузер: 16 desktop + 16 mobile + 4 дополнительных проверки. Все 4 сохранённых project_state и ревизии совпали с исходными хешами; схема 18, battle_v17_reset=done; новые таблицы пусты."
     next_step_proposal: "После выпуска использовать новый заказ для реального клиента; сведения об участке, условиях и финансировании вводить по документам, не переносить автоматически из прошлых заказов."
   infrastructure:
     provider: "Timeweb Cloud"
@@ -765,6 +765,14 @@ project:
       constraints: ["project.id остаётся ID заказа", "Прежние факты и идентификаторы сохраняются", "Финансовые операции не дублируются", "Нет новых сервисов и расходов", "Права не расширяются ссылками", "Проверки на синтетических данных и отдельной копии базы", "GitHub Actions не используются для выпуска"]
       evidence: "customer_orders_2026_11_04; docs/customer-orders-2026-11-04.md"
 
+    - decision_id: "IKIOMA-CUSTOMER-ORDERS-RELEASE-2026-11-04"
+      date: "2026-11-04"
+      status: verified
+      source: "Результат исполнения поручения IKIOMA-CUSTOMER-ORDERS-2026-11-04; штатный deploy и последующая проверка"
+      decision: "Зафиксировать проверенный выпуск 16d637ae1ccabeecd9a77152d9e647c7a1c4d062 с резервной копией и сохранением исходных состояний проектов. Это техническое свидетельство исполнения, а не новое продуктовое согласование."
+      implementation_status: deployed
+      evidence: "docs/customer-orders-release-2026-11-04.md; authenticated API 200, anonymous API 401; schema 18; исходные project_state и ревизии сохранены"
+
   ai_contract:
     input: "Исходники v17, конфигурация VPS, подтверждённые продуктовые решения"
     expected_result: "Проверенная сборка и безопасное воспроизводимое развёртывание"
@@ -967,13 +975,15 @@ project:
         status: done
         evidence: "PostgreSQL rehearsal: 2 повторных запуска; 4 project_state и ревизии до/после идентичны; SHA256 13b8fdbc690e98c0c729d5498bbdb989a3686fe0356e0076f1d8e31c748e07b7; схема 18; battle_v17_reset unchanged"
       - id: customer-orders-acceptance
-        status: in_progress
-        evidence_required: "Полный прогон, TypeScript, Vite и runtime imports; браузер desktop/mobile; отдельная PostgreSQL для auth/concurrency и новых API"
+        status: done
+        evidence: "npm run build: 817 passed, 3 PostgreSQL-теста отдельно; PostgreSQL gate: 10 passed, 0 skipped; TypeScript, Vite, packaged runtime import и shell syntax успешны; Chromium: 16/16 desktop, 16/16 mobile с начальной шириной 390 px, 4/4 дополнительных сценария. Границы 19 требований сохранены в руководстве."
       - id: customer-orders-release
-        status: pending_verification
-        evidence_required: "Штатный deploy с backup, точный application SHA в readiness, authenticated read-only API, сравнение исходных business hashes"
-    implementation_status: in_progress
-    current_step: "Браузерная и сквозная приёмка, затем выпуск"
+        status: done
+        evidence: "04.11.2026 10:12 UTC: STROIOS_DEPLOY_OK 16d637ae1ccabeecd9a77152d9e647c7a1c4d062 telegram=ready; публичный readiness подтверждает этот SHA. Авторизованные новые API, страница и JS-модуль: 200; без входа API: 401. Хеши и ревизии всех 4 исходных записей проектов сохранены; backup создан; временные базы удалены."
+    implementation_status: deployed
+    application_sha: "16d637ae1ccabeecd9a77152d9e647c7a1c4d062"
+    verified_at: "2026-11-04T10:12:45Z"
+    current_step: "Выпуск проверен; новый раздел доступен в рабочем приложении"
     next_step: "Заполнение первого реального нового заказа по подтверждённым источникам"
     constraints: ["Старые проекты не получают автоматически угаданных клиентов и условий", "Неизвестные данные не равны 0", "Подписанные основания и денежные факты неизменны", "Изменение спецификации относится к конкретному заказу", "Общий платёж имеет один исходный факт и явные доли", "Подрядный договор отделён от клиентской цены"]
     limitations: ["Перенос уже проведённой доли общего платежа между заказами запрещён до отдельного append-only сценария корректировки; реальные возвраты и внутрипроектное распределение остатка доступны", "Источники, сроки и суммы реальных заказов не заполняются тестовыми данными"]
