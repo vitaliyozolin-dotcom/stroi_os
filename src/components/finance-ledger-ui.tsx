@@ -1,4 +1,4 @@
-import { useEffect, useRef, cloneElement, type ReactNode, type ReactElement } from 'react';
+import { cloneElement, type ReactNode, type ReactElement } from 'react';
 import type { AppState, FinanceLedgerState, LedgerAllocation, LedgerOperationKind, PaymentRequestStatus } from '../entities/index';
 import { Field as BaseField, Modal } from './Ui';
 import { money } from '../presentation/formatting';
@@ -18,16 +18,6 @@ export function requiredCents(value: string, label = 'Сумма', allowZero = f
   const cents = parseBankMoney(value); if (cents === null || cents < 0 || !allowZero && cents === 0) throw new Error(`${label}: укажите ${allowZero ? 'неотрицательную' : 'положительную'} сумму, не более двух знаков после запятой.`); return cents;
 }
 export function LedgerModal({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode }) {
-  const closeRef = useRef(onClose); closeRef.current = onClose;
-  useEffect(() => {
-    const previous = document.activeElement;
-    const dialogs = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')], dialog = dialogs.find(item => item.getAttribute('aria-label') === title);
-    if (!dialog) return;
-    const controls = () => [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex="0"]')].filter(item => item.getClientRects().length);
-    controls()[0]?.focus();
-    const keyboard = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); closeRef.current(); } else if (event.key === 'Tab') { const items = controls(); if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items.at(-1)?.focus(); } else if (!event.shiftKey && document.activeElement === items.at(-1)) { event.preventDefault(); items[0]?.focus(); } } };
-    dialog.addEventListener('keydown', keyboard); return () => { dialog.removeEventListener('keydown', keyboard); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
-  }, [title]);
   return <Modal wide title={title} subtitle={subtitle} onClose={onClose}>{children}</Modal>;
 }
 export interface AllocationDraft { key: string; entryId: string; trancheId: string; retentionId: string; amount: string }

@@ -1,4 +1,5 @@
-import type { ComponentType, ReactNode } from 'react';
+import { useEffect, useRef, type ComponentType, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 type IconType = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
@@ -62,10 +63,39 @@ export function SectionHeader({ title, eyebrow, action }: { title: string; eyebr
   );
 }
 
+// Shared by overlapping dialogs so closing one does not unlock the background.
+let openModalCount = 0;
+let previousBodyOverflow = '';
+
 export function Modal({ title, subtitle, children, onClose, wide = false }: { title: string; subtitle?: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className={`modal ${wide ? 'modal--wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previous = document.activeElement;
+    dialog.showModal();
+    if (openModalCount++ === 0) {
+      previousBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      dialog.close();
+      if (--openModalCount === 0) document.body.style.overflow = previousBodyOverflow;
+      queueMicrotask(() => {
+        if (previous instanceof HTMLElement && previous.isConnected && !document.querySelector('dialog:modal')) previous.focus();
+      });
+    };
+  }, []);
+
+  return createPortal(
+    <dialog ref={dialogRef} className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title} onKeyDown={(event) => {
+      if (event.key !== 'Tab') return;
+      const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex]:not([tabindex="-1"])')].filter(element => element.getClientRects().length > 0);
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }} onCancel={(event) => { event.preventDefault(); onClose(); }} onMouseDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); onClose(); } }}>
+      <section className={`modal ${wide ? 'modal--wide' : ''}`} onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal__header">
           <div>
             <h2>{title}</h2>
@@ -75,7 +105,8 @@ export function Modal({ title, subtitle, children, onClose, wide = false }: { ti
         </div>
         {children}
       </section>
-    </div>
+    </dialog>,
+    document.body,
   );
 }
 
