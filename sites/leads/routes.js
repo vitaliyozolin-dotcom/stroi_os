@@ -2,6 +2,7 @@ import { authenticatedIdentity, projectIdentity } from '../access-control.js';
 import { json, publicLeadResponse } from '../lib/http.js';
 import { readJsonBodyLimited } from '../lib/request-body.js';
 import { clean, normalizeClientAddress, validProjectId } from '../lib/validation.js';
+import { describeVelaLead, fetchVelaCatalog, parseVelaLead } from './vela.js';
 
 const MAX_JSON_BODY_BYTES = 32 * 1024;
 const PUBLIC_LEAD_PROJECT_ID = 'ikioma-sales';
@@ -55,6 +56,7 @@ export const createLeadHandlers = ({
   resolveTelegramConnection,
   telegramSend,
   deepLink,
+  loadVelaCatalog = fetchVelaCatalog,
 }) => {
   const telegramOrigin = (env) => clean(env.APP_PUBLIC_URL, 500) || 'https://stroios-work-2026.ozolin.chatgpt.site';
 
@@ -72,8 +74,11 @@ export const createLeadHandlers = ({
         if (!identity || (projectId === PUBLIC_LEAD_PROJECT_ID ? !identity.isOwner : identity.role !== 'management')) {
           return json({ ok: false, error: 'project_access_denied' }, 403);
         }
-        const result = await env.DB.prepare(`SELECT id, project_id, created_at, name, phone, email, source, message, status FROM lead_inbox WHERE project_id = ? ORDER BY created_at DESC LIMIT 100`).bind(projectId).all();
-        return json({ ok: true, leads: result?.results ?? [] });
+        const result = await env.DB.prepare(`SELECT id, project_id, created_at, name, phone, email, source, message, status, vela_details FROM lead_inbox WHERE project_id = ? ORDER BY created_at DESC LIMIT 100`).bind(projectId).all();
+        const leads = (result?.results ?? []).map(({ vela_details, ...row }) => ({
+          ...row, ...(vela_details ? { details: JSON.parse(vela_details).detail } : {}),
+        }));
+        return json({ ok: true, leads });
       } catch {
         return json({ ok: false, error: 'storage_error' }, 500);
       }
@@ -104,6 +109,62 @@ export const createLeadHandlers = ({
     }
   };
 
+  const notifyVela = async (env, text) => {
+    try {
+      const connection = await resolveTelegramConnection(env, { discover: false });
+      if (!env.TELEGRAM_BOT_TOKEN || !connection.chat?.id) return false;
+      return (await telegramSend(env.TELEGRAM_BOT_TOKEN, connection.chat.id, text, { timeoutMs: 3_000 })).ok;
+    } catch { return false; }
+  };
+  let lastFailureAlert = 0;
+
+  const deliverVela = async (input, request, env, origin) => {
+    const fail = (error, status) => publicLeadResponse({ ok: false, error }, status, origin);
+    const receipt = (row, fingerprint) => {
+      if (!row?.vela_details || JSON.parse(row.vela_details).fingerprint !== fingerprint) return fail('request_conflict', 409);
+      return publicLeadResponse({ ok: true, duplicate: true, leadId: input.requestId }, 200, origin);
+    };
+    let phase = 'storage_error';
+    try {
+      await ensureSchema(env.DB);
+      const lookup = () => env.DB.prepare('SELECT vela_details FROM lead_inbox WHERE id = ? AND project_id = ?')
+        .bind(input.requestId, PUBLIC_LEAD_PROJECT_ID).first();
+      const fingerprint = await sha256(JSON.stringify(input));
+      const existing = await lookup();
+      if (existing) return receipt(existing, fingerprint);
+
+      const address = clean(request.headers.get('oai-client-ip') || request.headers.get('cf-connecting-ip'), 200) || 'unknown';
+      const rateLimit = await claimPublicLeadRateLimit(env.DB, address);
+      if (!rateLimit.allowed) return publicLeadResponse({ ok: false, error: 'rate_limit_exceeded' }, 429, origin, { 'Retry-After': String(rateLimit.retryAfter) });
+
+      phase = 'catalog_unavailable';
+      const catalog = await loadVelaCatalog(input.catalogVersion);
+      const createdAt = new Date().toISOString();
+      const result = describeVelaLead(input, catalog, createdAt);
+      if (result.error) return fail(result.error, result.error === 'catalog_changed' ? 409 : 422);
+
+      phase = 'storage_error';
+      const inserted = await env.DB.prepare(`
+        INSERT INTO lead_inbox (id, project_id, created_at, name, phone, email, source, message, status, vela_details)
+        VALUES (?, ?, ?, ?, ?, ?, 'website', ?, 'new', ?)
+        ON CONFLICT(id) DO NOTHING
+        RETURNING id
+      `).bind(input.requestId, PUBLIC_LEAD_PROJECT_ID, createdAt, input.name || 'Посетитель сайта', input.phone,
+        input.email || null, result.message, JSON.stringify({ fingerprint, detail: result.detail })).first();
+      if (!inserted) return receipt(await lookup(), fingerprint);
+      const url = deepLink(telegramOrigin(env), PUBLIC_LEAD_PROJECT_ID, 'marketing', input.requestId);
+      const telegramNotified = await notifyVela(env, 'Новая заявка ВЕЛА в ИКИОМА ОС.\nОткрыть воронку: ' + url);
+      return publicLeadResponse({ ok: true, leadId: inserted.id, telegramNotified }, 201, origin);
+    } catch {
+      console.error('[vela-leads] delivery_failed', phase, input.requestId);
+      if (Date.now() - lastFailureAlert > 60_000) {
+        lastFailureAlert = Date.now();
+        await notifyVela(env, 'ИКИОМА ОС не подтвердила приём заявки ВЕЛА. Проверьте журнал доставки. Запрос ' + input.requestId);
+      }
+      return fail(phase, 503);
+    }
+  };
+
   const publicLead = async (request, env) => {
     const origin = clean(request.headers.get('origin'), 500);
     if (!PUBLIC_LEAD_ORIGINS.has(origin)) return json({ ok: false, error: 'forbidden_origin' }, 403);
@@ -131,13 +192,19 @@ export const createLeadHandlers = ({
       );
     }
 
+    const trap = clean(payload?.company, 120);
+    if (trap) return publicLeadResponse({ ok: true }, 202, origin);
+    if (payload?.version === 2) {
+      const input = parseVelaLead(payload);
+      if (input.error) return publicLeadResponse({ ok: false, error: input.error }, 422, origin);
+      return deliverVela(input, request, env, origin);
+    }
+
     const name = clean(payload?.name, 120);
     const phone = clean(payload?.phone, 60);
     const email = clean(payload?.email, 240);
     const source = clean(payload?.source, 40) || 'website';
     const message = clean(payload?.message, 1000);
-    const trap = clean(payload?.company, 120);
-    if (trap) return publicLeadResponse({ ok: true }, 202, origin);
     if (!name || phone.replace(/\D/g, '').length < 10 || (email && !/^\S+@\S+\.\S+$/.test(email))) {
       return publicLeadResponse({ ok: false, error: 'invalid_lead' }, 422, origin);
     }
