@@ -58,3 +58,22 @@ test('step 4: malformed response fails atomically and another project cannot rec
 });
 test('all existing lead commands reject missing/stale cross-project records', () => { const state = fixture(), expected = leadSnapshot(state, 'existing'); state.project.id = 'other'; assert.equal(useCases(state).execute({ action: 'stage', leadId: 'existing', expected }).ok, false); state.leads = []; assert.equal(useCases(state).execute({ action: 'qualify', leadId: 'existing', expected, patch: { landStatus: 'owned' } }).ok, false); });
 test('UI has explicit commands, cancellable import, latest-snapshot access and error feedback', () => { const page = readFileSync(new URL('../src/pages/MarketingPage.tsx', import.meta.url), 'utf8'); assert.doesNotMatch(page, /createMarketingCommands|saveChange\(|leads:|activity:|uid\(/); assert.match(page, /latest\.current\.execute/); assert.match(page, /controller\.abort\(\)/); assert.match(page, /response\.ok/); assert.match(page, /Повторить загрузку заявок/); });
+
+test('direct successful-stage selection cannot skip project creation or write a false contract', () => {
+ for (const stage of ['new','qualified','site_visit','estimate','negotiation','preparation','lost'] as const) {
+  const state = fixture(); state.leads[0].stage=stage; let writes=0;
+  const result=useCases(state,()=>{writes++;}).execute({action:'stage',leadId:'existing',expected:leadSnapshot(state,'existing'),stage:'won'});
+  assert.equal(result.ok,false); if(!result.ok) assert.match(result.error,/подготовку проекта/);
+  assert.equal(writes,0); assert.equal(state.leads[0].stage,stage);
+ }
+ const historical=fixture(); historical.leads[0].stage='won';
+ const noOp=useCases(historical).execute({action:'stage',leadId:'existing',expected:leadSnapshot(historical,'existing')});
+ assert.ok(noOp.ok); if(noOp.ok) assert.equal(noOp.change,null);
+});
+test('CRM successful-stage UI routes unlinked leads to handoff and checks saved contract before won', () => {
+ const page=readFileSync(new URL('../src/pages/MarketingPage.tsx',import.meta.url),'utf8');
+ assert.match(page,/if \(patch.stage === 'won'\)[^\n]+if \(!lead.projectId\) void prepareProject\(lead\); else void confirmContract\(lead\)/);
+ assert.match(page,/contract\?\.status !== 'done' \|\| lifecycleItemBlockers\(target, 'contract'\)\.length/);
+ assert.match(page,/cache: 'no-store'/);
+ assert.match(page,/lead.stage === 'preparation'\) \{ void confirmContract\(lead\)/);
+});

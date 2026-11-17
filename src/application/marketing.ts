@@ -40,7 +40,7 @@ export const changeProjectMarketing = (state: SalesSnapshot, input: MarketingCom
     } else {
       const stage = input.stage ?? (['won', 'lost'].includes(current.stage) ? current.stage : marketingStages[marketingStages.indexOf(current.stage) + 1]);
       if (!marketingStages.includes(stage)) return { ok: false, error: 'Выберите допустимый этап воронки.' };
-      if (stage === 'preparation' && !current.projectId) return { ok: false, error: 'Передайте обращение в подготовку проекта.' };
+      if (['preparation', 'won'].includes(stage) && !current.projectId && stage !== current.stage) return { ok: false, error: 'Передайте обращение в подготовку проекта.' };
       if (stage === current.stage) return { ok: true, change: null };
       leads = leads.map(lead => lead.id === current.id ? { ...lead, stage } : lead); summary = `${current.name}: этап «${marketingStageLabels[stage]}»`; tone = stage === 'won' ? 'positive' : 'neutral';
     }
