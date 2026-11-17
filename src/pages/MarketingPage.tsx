@@ -1,7 +1,7 @@
 import type { RemoteProjectSnapshot } from '../application';
 import { Link } from 'react-router';
 import { LeadQualificationForm } from '../components/LeadQualificationForm';
-import { leadHandoffBlockers } from '../domain/project-lifecycle.js';
+import { leadHandoffBlockers, lifecycleItemBlockers } from '../domain/project-lifecycle.js';
 import type { LeadQualification } from '../domain/marketing';
 import { workspacePath } from '../presentation/navigation';
 import { useModuleRepository } from '../useModuleRepository';
@@ -100,6 +100,7 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
   };
 
   const updateLead = (leadId: string, patch: LeadQualification & { stage?: LeadStage }) => {
+    if (patch.stage === 'won') { const lead = state.leads.find(row => row.id === leadId); if (lead && lead.stage !== 'won') { if (!lead.projectId) void prepareProject(lead); else void confirmContract(lead); } return; }
     if (patch.stage === 'preparation') { const lead = state.leads.find(row => row.id === leadId); if (lead) void prepareProject(lead); return; }
     const result = marketing.execute(patch.stage ? { action: 'stage', leadId, stage: patch.stage, expected: leadSnapshot(state, leadId) } : { action: 'qualify', leadId, patch, expected: leadSnapshot(state, leadId) });
     setCommandError(result.ok ? '' : result.error);
@@ -118,7 +119,25 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
     } catch (error) { setCommandError(error instanceof Error ? error.message : 'Не удалось передать обращение в проект.'); }
     finally { setHandoffBusy(false); }
   };
+  const confirmContract = async (lead: Lead) => {
+    if (!lead.projectId) { await prepareProject(lead); return; }
+    const expected = leadSnapshot(state, lead.id);
+    setCommandError(''); setHandoffBusy(true);
+    try {
+      const response = await requestApi(`/api/state?projectId=${encodeURIComponent(lead.projectId)}`, { cache: 'no-store' });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || 'Не удалось проверить договор связанного проекта.');
+      const target = body.snapshot?.state as AppState | undefined;
+      if (!target || target.project.id !== lead.projectId || target.project.lifecycle?.sourceLeadId !== lead.id) throw new Error('Связанный проект обращения не подтверждён.');
+      const contract = target.project.lifecycle.items.find(item => item.key === 'contract');
+      if (contract?.status !== 'done' || lifecycleItemBlockers(target, 'contract').length) throw new Error('Сначала подтвердите договор с подписанным оригиналом в этапе 0 связанного проекта.');
+      const result = latest.current.execute({ action: 'stage', leadId: lead.id, expected, stage: 'won' });
+      if (!result.ok) setCommandError(result.error);
+    } catch (error) { setCommandError(error instanceof Error ? error.message : 'Не удалось проверить договор.'); }
+    finally { setHandoffBusy(false); }
+  };
   const advanceLead = (lead: Lead) => {
+    if (lead.stage === 'preparation') { void confirmContract(lead); return; }
     if (lead.stage === 'negotiation') { void prepareProject(lead); return; }
     const result = marketing.execute({ action: 'stage', leadId: lead.id, expected: leadSnapshot(state, lead.id) });
     setCommandError(result.ok ? '' : result.error);
@@ -201,9 +220,9 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
           </div>
           <LeadQualificationForm objects={state.orderRelations?.objects} key={selected.id} lead={selected} onSave={patch => updateLead(selected.id, { ...patch, qualification: { ...patch.qualification, updatedAt: new Date().toISOString(), updatedBy: actor } })} />
           {(selected.projectId || handoffTarget) && <div className="entity-detail-section"><strong>Связанный проект</strong><p><Link to={workspacePath(selected.projectId || handoffTarget!.id, 'project')}>{handoffTarget?.code || 'Открыть'} · {handoffTarget?.name || 'Подготовка объекта'}</Link></p><small>Передача в подготовку не считается подписанным договором.</small></div>}
-          <div className="entity-detail-section"><span className="eyebrow">Текущий этап</span><div className="stage-choice">{stageOrder.map((stage) => <button type="button" key={stage} disabled={handoffBusy} className={selected.stage === stage ? 'active' : ''} onClick={() => updateLead(selected.id, { stage })}>{stageLabels[stage]}</button>)}</div></div>
+          <div className="entity-detail-section"><span className="eyebrow">Текущий этап</span><div className="stage-choice">{stageOrder.map((stage) => <button type="button" key={stage} disabled={handoffBusy} className={selected.stage === stage ? 'active' : ''} onClick={() => updateLead(selected.id, { stage })}>{stage === 'won' && selected.stage !== 'won' ? selected.projectId ? 'Проверить договор' : 'Договор → подготовить проект' : stageLabels[stage]}</button>)}</div></div>
           <div className="entity-detail-section"><span className="eyebrow">Следующий шаг</span><h3>{selected.nextAction}</h3><p>{selected.nextActionAt ? formatDateTime(selected.nextActionAt) : 'Срок не задан'} · {selected.notes ?? 'Комментариев пока нет'}</p></div>
-          <div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => window.location.href = `tel:${selected.phone.replace(/\s/g, '')}`}><Phone size={17} /> Позвонить</button>{!['won', 'lost'].includes(selected.stage) && <button type="button" className="button button--primary" disabled={handoffBusy} onClick={() => advanceLead(selected)}>{handoffBusy ? 'Создаём проект…' : selected.stage === 'negotiation' ? 'Передать в проект' : 'Следующий этап'} <ArrowRight size={17} /></button>}</div>
+          <div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => window.location.href = `tel:${selected.phone.replace(/\s/g, '')}`}><Phone size={17} /> Позвонить</button>{!['won', 'lost'].includes(selected.stage) && <button type="button" className="button button--primary" disabled={handoffBusy} onClick={() => advanceLead(selected)}>{handoffBusy ? 'Создаём проект…' : selected.stage === 'negotiation' ? 'Передать в проект' : selected.stage === 'preparation' ? 'Проверить договор' : 'Следующий этап'} <ArrowRight size={17} /></button>}</div>
         </Modal>
       )}
     </div>
