@@ -1,3 +1,4 @@
+import { validateLifecycleChanges } from '../../src/domain/project-lifecycle.js';
 import { validateBaselineChanges } from '../projects/baseline.js';
 import { validateStageControl } from '../projects/stage-control.js';
 import { validateFinanceChanges } from '../projects/finance.js';
@@ -50,6 +51,8 @@ export const createTelegramProjectStore = ({ ensureSchema, readSnapshot, changes
       if (orderError) throw new Error(`invalid_order_relations: ${orderError}`);
       const ledgerShapeError = validateFinanceLedgerShape(state.financeLedger);
       if (ledgerShapeError) throw new Error(`invalid_finance_ledger: ${ledgerShapeError}`);
+      const lifecycleError = validateLifecycleChanges(previous, state, { role, name: actor }, now);
+      if (lifecycleError) throw new Error(lifecycleError);
       const stageError = validateStageControl(previous, state, { role, name: actor }, now);
       if (stageError) throw new Error(`invalid_stage_transition: ${stageError}`);
       const baselineError = validateBaselineChanges(previous, state, { role, name: actor }, now);

@@ -16,6 +16,11 @@ export interface ProcurementItem {
   neededBy: string;
   status: ProcurementStatus;
   budget: number;
+  budgetKnown?: boolean;
+  receivedQuantity?: number;
+  acceptedQuantity?: number;
+  expectedDeliveryDate?: string;
+  receiptNote?: string;
   supplier: string;
   supplierId?: string;
   owner: string;

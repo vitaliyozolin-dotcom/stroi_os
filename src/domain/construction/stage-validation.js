@@ -1,5 +1,5 @@
 import { planToday, validPlanDate } from './plan-baseline.js';
-import { stageGaps, stageCanStart } from './stage-control.js';
+import { stageGaps, stageCanStart, stageDependencyIssue } from './stage-control.js';
 import { validateScheduleReview } from './schedule-validation.js';
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const text = (v) => typeof v === 'string' ? v.trim() : '';
@@ -29,9 +29,19 @@ export function validateStageControl(previous, next, identity, now = new Date().
   } else { project.workForecastUpdatedAt = oldProject.workForecastUpdatedAt; project.workForecastUpdatedBy = oldProject.workForecastUpdatedBy; }
   for (const stage of next.stages ?? []) {
     const before = oldStages.get(stage.id);
-    if (!before) { if (!manager || stage.status === 'accepted' || stage.ownerAcceptance) return 'Новый этап добавляет управление без подстановки приёмки.'; continue; }
+    if (!before) { if (!manager || !['ready', 'not_ready'].includes(stage.status) || stage.actualStart || stage.completedOn || stage.ownerAcceptance) return 'Новый этап добавляет управление без подстановки приёмки.'; continue; }
     const statusChanged = stage.status !== before.status;
     const ownerAccepts = Boolean(stage.ownerAcceptance && !before.ownerAcceptance);
+    const starting = (!before.actualStart && stage.actualStart) || statusChanged && stage.status === 'in_progress';
+    const finishing = statusChanged && ['awaiting_inspection', 'accepted'].includes(stage.status);
+    if ((starting || finishing) && (stage.dependencyId !== before.dependencyId || stage.dependency !== before.dependency || !same(stage.schedule?.dependencies, before.schedule?.dependencies))) return 'Сначала отдельно сохраните изменения зависимостей, затем подтвердите работу.';
+    if (starting || finishing) {
+      // Read predecessor facts from the previous persisted snapshot: one bulk write cannot
+      // simultaneously invent its own prerequisite and use it to unlock another stage.
+      const issue = stageDependencyIssue(previous, stage, starting ? 'start' : 'finish', starting ? stage.actualStart || today : stage.completedOn || stage.completionObservedOn || today);
+      if (issue) return issue;
+    }
+
     if (before.ownerAcceptance && !same(stage.ownerAcceptance, before.ownerAcceptance)) return 'Сохранённое подтверждение владельца нельзя переписать.';
     if (ownerAccepts) {
       if (!manager || identity.isOwner !== true || !statusChanged || stage.status !== 'accepted' || stage.schedule?.kind === 'summary'
@@ -99,7 +109,7 @@ export function validateStageControl(previous, next, identity, now = new Date().
     if (statusChanged && stage.status === 'accepted') {
       if (!ownerAccepts && !validPlanDate(before.completedOn || before.actualEnd)) return 'До приёмки должна быть отдельно подтверждена фактическая дата выполнения.';
       const gaps = stageGaps(next, stage.id);
-      if (!manager || !ownerAccepts && (gaps.tasks.length || gaps.checkpoints.length) || stage.blocker) return 'Принять этап можно после завершения задач и приёмки контрольных точек либо по личному подтверждению владельца.';
+      if (!manager || gaps.tasks.length || gaps.checkpoints.length || stage.blocker) return 'Принять этап можно после завершения задач и приёмки всех контрольных точек. Личное подтверждение не отменяет обязательные проверки.';
       for (const collection of ['tasks', 'checkpoints']) if ((previous[collection] ?? []).some((item) => item.stageId === stage.id && !(next[collection] ?? []).some((n) => n.id === item.id && n.stageId === stage.id))) return 'Нельзя убрать условия приёмки из этапа при его закрытии.';
       const acceptedOn = Number.isFinite(Date.parse(stage.acceptedAt || '')) ? planToday(new Date(stage.acceptedAt)) : '';
       if (!validPlanDate(acceptedOn) || acceptedOn > today || acceptedOn < (stage.completedOn || stage.completionObservedOn)) return 'Дата приёмки должна быть между выполнением и сегодняшним днём.';
@@ -114,7 +124,7 @@ export function validateStageControl(previous, next, identity, now = new Date().
   for (const point of next.checkpoints ?? []) {
     const before = (previous.checkpoints ?? []).find((p) => p.id === point.id);
     if (point.status === 'accepted' && before?.status !== 'accepted') {
-      if (!manager || (point.photos ?? []).length < (before?.requiredShots ?? point.requiredShots ?? []).length) return 'Контрольную точку принимает управление после получения обязательных подтверждений.';
+      if (!manager || (!(before?.requiredShots ?? point.requiredShots ?? []).length && !text(point.measurement)) || (point.photos ?? []).length < (before?.requiredShots ?? point.requiredShots ?? []).length) return 'Контрольную точку принимает управление после получения обязательных подтверждений.';
       point.acceptedAt = now;
     }
     if (before?.status === 'accepted' && point.status === 'accepted' && ['acceptedAt', 'photos', 'requiredShots', 'measurement'].some((k) => !same(before[k], point[k]))) return 'Принятые подтверждения нельзя переписывать.';

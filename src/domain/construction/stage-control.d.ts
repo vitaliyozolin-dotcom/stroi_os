@@ -12,6 +12,7 @@ export interface RecordedScheduleGroup<T> {
   missingBaseline: number;
 }
 export function recordedScheduleStatus(state: ConstructionSnapshot, today?: string): { today: string; stages: RecordedScheduleGroup<Stage>; tasks: RecordedScheduleGroup<ProjectTask> };
-export function stageCanStart(state: ConstructionSnapshot, stage: Stage): boolean;
+export function stageCanStart(state: ConstructionSnapshot, stage: Stage, on?: string): boolean;
+export function stageDependencyIssue(state: ConstructionSnapshot, stage: Stage, action?: 'start' | 'finish', on?: string): string | null;
 export function stageGaps(state: ConstructionSnapshot, id: string): { tasks: ProjectTask[]; checkpoints: QualityCheckpoint[] };
 export function stageRadar(state: ConstructionSnapshot, today?: string): { running: Stage[]; due: Stage[]; upcoming: Stage[]; lowerBound: string | null; forecast: string | null; stale: boolean; conflict: boolean; complete: boolean };

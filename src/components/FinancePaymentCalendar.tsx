@@ -10,7 +10,7 @@ import './finance-payment-calendar.css';
 
 const groups: { id: FinanceCalendarGroup; title: string }[] = [
   { id: 'overdue', title: 'Срок прошёл' },
-  { id: 'next7', title: 'Ближайшие 7 дней' },
+  { id: 'next7', title: 'Ближайшие 14 дней' },
   { id: 'later', title: 'Позже' },
   { id: 'undated', title: 'Без даты' },
 ];
@@ -24,7 +24,7 @@ export function FinancePaymentCalendar({ state, onSetDueDate, onOpenEntry, onAdd
   const [error, setError] = useState('');
   const today = financeCalendarToday();
   const synced = state.treasury?.enabled === true;
-  const items = financeCalendarItems(state, today).filter(item => item.kind === kind);
+  const items = financeCalendarItems(state, today, 14).filter(item => item.kind === kind);
   const total = financeCalendarTotal(items);
   const directTotal = financeCalendarTotal(items.filter(item => item.projectionEvent?.excluded));
   const openDate = (entry: FinanceEntry) => {
@@ -46,13 +46,15 @@ export function FinancePaymentCalendar({ state, onSetDueDate, onOpenEntry, onAdd
       </div>
       {items.length > 0 && <div className="finance-calendar__total"><small>{kind === 'expense' ? 'Будущие выплаты' : 'Осталось получить'}</small><strong>{money(total)}</strong>{directTotal > 0 && <small>Из них вне счетов компании: {money(directTotal)}</small>}</div>}
     </div>
-    {items.length > 0 && <p className="finance-calendar__note">{synced ? `Обязательства, планы и финансирование на конец ${formatDate(today, true)}. Даты из ППР пересчитываются вместе с графиком работ; договорный срок хранится отдельно. В прогнозе просроченные суммы переносятся на следующий день с сохранением исходной даты.` : 'Остатки по внесённым обязательствам. Сроки задаются отдельно.'}</p>}
+    {items.length > 0 && <p className="finance-calendar__note">{synced ? `Срез на конец ${formatDate(today, true)} · даты из ППР и договоров` : 'Остатки по внесённым обязательствам · даты требуют актуализации'}</p>}
     {!items.length && <div className="finance-calendar__empty"><CalendarDays size={22} aria-hidden="true" /><div><strong>{kind === 'expense' ? 'Нет неоплаченного остатка' : 'Нет неполученного остатка'}</strong><p>{kind === 'expense' ? 'Все внесённые обязательства погашены либо будущие расходы ещё не добавлены.' : 'Все внесённые поступления получены либо будущие поступления ещё не добавлены.'}</p></div><button type="button" className="button button--secondary" onClick={() => onAddEntry(kind)}>{kind === 'expense' ? 'Добавить расход' : 'Добавить поступление'}</button></div>}
     {groups.map(group => {
       const rows = items.filter(item => item.group === group.id);
       if (!rows.length) return null;
-      return <section className={`finance-calendar__group finance-calendar__group--${group.id}`} key={group.id} aria-label={group.title}>
-        <header><h3>{group.title} <span>{rows.length}</span></h3><strong>{money(financeCalendarTotal(rows))}</strong></header>
+      const Group = group.id === 'later' ? 'details' : 'section';
+      const GroupHeading = group.id === 'later' ? 'summary' : 'header';
+      return <Group className={`finance-calendar__group finance-calendar__group--${group.id}`} key={group.id} aria-label={group.title}>
+        <GroupHeading><h3>{group.title} <span>{rows.length}</span></h3><strong>{money(financeCalendarTotal(rows))}</strong></GroupHeading>
         {rows.map(({ id, entry, title, counterparty, dueDate, remaining, projectionEvent: event }) => {
           const trancheIndex = entry && event?.trancheId ? state.treasury?.entryPlans.find(plan => plan.entryId === entry.id)?.tranches.findIndex(tranche => tranche.id === event.trancheId) : undefined;
           const standaloneLabel = event?.sourceType === 'loan' ? 'Финансирование по займу' : event?.sourceType === 'transfer' ? 'Перевод между счетами' : event?.sourceType === 'delay' ? 'Стоимость задержки' : event?.sourceType === 'cash_plan' ? 'План без договора' : event?.sourceType === 'scenario' ? 'Сценарий' : 'Плановое движение';
@@ -69,7 +71,7 @@ export function FinancePaymentCalendar({ state, onSetDueDate, onOpenEntry, onAdd
               {event.date !== dueDate && event.date && <span>В кассовом прогнозе: {formatDate(event.date, true)}</span>}
               <button className="finance-calendar__date" type="button" onClick={() => { if (entry) { setEditing(null); (onEditPlan ?? onOpenEntry)(entry.id); } else openSource(); }} aria-label={`Настроить график платежей: ${title}`}><CalendarDays size={14} aria-hidden="true" />{entry ? 'Настроить график' : 'Открыть источник плана'}</button>
             </div> : entry ? <button className="finance-calendar__date" type="button" onClick={() => openDate(entry)} aria-label={`${dueDate ? 'Изменить' : 'Задать'} срок: ${entry.description}`}><CalendarDays size={14} aria-hidden="true" />{dueDate ? formatDate(dueDate, true) : 'Задать срок'}</button> : null}
-            {event && <div className="finance-calendar__source"><span>{event.dateResolution.label}</span>{event.dateResolution.reason && <span className="finance-calendar__risk">{event.dateResolution.reason}</span>}{event.excluded && <span>Прямая оплата участником — вне движения по счетам компании.</span>}{!event.excluded && !event.accountId && <span className="finance-calendar__risk">Счёт не назначен: сводный прогноз неполон, распределение по счетам неизвестно.</span>}</div>}
+            {event && <details className="finance-calendar__source"><summary>Источник и условия</summary><span>{event.dateResolution.label}</span>{event.dateResolution.reason && <span className="finance-calendar__risk">{event.dateResolution.reason}</span>}{event.excluded && <span>Прямая оплата участником — вне движения по счетам компании.</span>}{!event.excluded && !event.accountId && <span className="finance-calendar__risk">Счёт не назначен: сводный прогноз неполон, распределение по счетам неизвестно.</span>}</details>}
             {entry && !synced && editing?.id === entry.id && <form className="finance-calendar__editor" onSubmit={saveDate}>
               <label>Плановая дата {entry.kind === 'expense' ? 'выплаты' : 'поступления'}<input autoFocus type="date" value={editing.value} onChange={event => setEditing({ ...editing, value: event.target.value })} /></label>
               <div><button type="button" className="button button--ghost" onClick={() => setEditing(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить</button></div>
@@ -78,7 +80,7 @@ export function FinancePaymentCalendar({ state, onSetDueDate, onOpenEntry, onAdd
             </form>}
           </article>;
         })}
-      </section>;
+      </Group>;
     })}
   </section>;
 }

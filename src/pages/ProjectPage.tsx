@@ -1,6 +1,9 @@
 import { useModuleRepository } from '../useModuleRepository';
 import { createDocumentsRepository } from '../infrastructure/module-project';
-import { requestApi } from '../infrastructure/api-http';
+import { updateProjectDocumentStatus } from '../application/project-records.js';
+import { ProjectFilePreview } from '../components/ProjectFilePreview';
+import { PreparationWizard } from '../components/PreparationWizard';
+import '../components/project-lifecycle-dashboard.css';
 import { FieldReportUpload } from '../components/FieldReportUpload';
 import { automaticSchedule } from '../domain/construction/index.js';
 import { useScheduleToday } from '../components/ProjectScheduleDates';
@@ -12,7 +15,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Building2,
   CalendarRange,
-  Download,
+  ExternalLink,
   FileCheck2,
   FileClock,
   FileText,
@@ -76,11 +79,15 @@ export function ProjectPage({
   const uploadAbort = useRef<AbortController | null>(null);
   useEffect(() => () => { uploadAbort.current?.abort(); }, [state.project.id]);
   const [search, setSearch] = useState('');
+  const [documentStatus, setDocumentStatus] = useState<ProjectDocument['status']>('draft');
+  const [signedOriginal, setSignedOriginal] = useState(false);
+  const [documentError, setDocumentError] = useState('');
   const [showPhotoUpload, setShowPhotoUpload] = useState(false);
   const today = useScheduleToday();
   const schedule = automaticSchedule(state, today);
   const [category, setCategory] = useState<'all' | NonNullable<ProjectDocument['category']>>('all');
   const [showUpload, setShowUpload] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState<{ key: string; name: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyDocumentForm);
   const [file, setFile] = useState<File | null>(null);
@@ -101,22 +108,12 @@ export function ProjectPage({
   }, [category, search, state.documents]);
 
   const selected = state.documents.find((item) => item.id === selectedId) ?? null;
+  useEffect(() => { setDocumentStatus(selected?.status ?? 'draft'); setSignedOriginal(false); setDocumentError(''); }, [selected?.id, selected?.status]);
   const signedCount = state.documents.filter((item) => item.status === 'signed').length;
   const awaitingCount = state.documents.filter((item) => item.status === 'draft').length;
   const activeStages = state.stages.filter((item) => ['in_progress', 'blocked', 'awaiting_inspection', 'rework'].includes(item.status));
   const team = state.settings.users.filter((item) => item.status !== 'disabled');
   const fieldReports = useMemo(() => [...state.fieldReports].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [state.fieldReports]);
-
-  const openFile = (document: ProjectDocument) => {
-    if (!document.fileKey) return;
-    const url = `/api/documents/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(document.fileKey)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
-  const openFieldReportFile = (key: string) => {
-    const url = `/api/field-reports/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(key)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
 
   const submitUpload = async (event: FormEvent) => {
     event.preventDefault();
@@ -147,19 +144,20 @@ export function ProjectPage({
   };
 
   return (
-    <div className="page-stack">
+    <div className="page-stack project-passport-page">
       <section className="page-title-row">
         <div>
           <span className="eyebrow">Единая карточка объекта</span>
           <h1>{state.project.name}</h1>
           <p>{[state.project.code, state.project.model, state.project.unknownFields?.includes('area') ? 'Площадь уточняется' : `${state.project.area} м²`].filter(Boolean).join(' · ')}</p>
         </div>
-        <button type="button" className="button button--primary" onClick={() => setShowUpload(true)}><UploadCloud size={17} /> Загрузить документ</button>
+        {session.role !== 'client' && <button type="button" className="button button--primary" onClick={() => setShowUpload(true)}><UploadCloud size={17} /> Загрузить документ</button>}
       </section>
 
+      <nav className="project-passport-nav" aria-label="Карточка проекта"><a href="#project-identity">Паспорт</a><a href="#project-preparation">Этап 0 и завершение</a><a href="#project-documents">Документы</a><a href="#project-photos">Фото объекта</a></nav>
       {session.role === 'management' && <button type="button" className="button button--secondary" onClick={() => onNavigate('customers')}><UsersRound size={18} /> Заказчик, объекты и условия заказа</button>}
 
-      <section className="project-hero-grid">
+      <section className="project-hero-grid" id="project-identity">
         <article className="panel project-identity-card">
           <span className="project-identity-card__icon"><House size={27} /></span>
           <div>
@@ -172,6 +170,8 @@ export function ProjectPage({
             <span><small>Сдача по договору</small><strong>{formatDate(state.project.targetDate, true)}</strong></span>
             <span><small>{schedule.kind === 'actual' ? 'Факт готовности по ППР' : schedule.kind === 'observed' ? 'Готовность подтверждена' : 'Готовность по ППР · расчёт'}</small><strong>{schedule.end ? formatDate(schedule.end, true) : 'Нужны сроки'}</strong>{schedule.unmappedWork.length > 0 && <small>Без сроков: {schedule.unmappedWork.join(', ')}</small>}</span>
             <span><small>Прораб</small><strong>{state.project.foreman || 'Не назначен'}</strong></span>
+            <span><small>Заказчик</small><strong>{state.project.clientNames || 'Не указан'}</strong></span>
+            <span><small>Проект дома</small><strong>{state.project.model || 'Не выбран'}</strong></span>
           </div>
         </article>
 
@@ -181,16 +181,53 @@ export function ProjectPage({
         <article className="project-quick-card">
           <span><UsersRound size={21} /></span><div><small>Команда проекта</small><strong>{team.length}</strong><p>{team.filter((item) => item.status === 'active').length} с активным доступом</p></div>
         </article>
-        <article className="project-quick-card">
+        <button type="button" className="project-quick-card" onClick={() => document.getElementById('project-documents')?.scrollIntoView({ behavior: 'smooth' })}>
           <span><FileCheck2 size={21} /></span><div><small>Документы</small><strong>{state.documents.length}</strong><p>{signedCount} подписано · {awaitingCount} черновика</p></div>
-        </article>
+        </button>
       </section>
 
+      <div id="project-preparation"><PreparationWizard state={state} actor={session.name} role={session.role} onChange={onChange} /></div>
       {showPhotoUpload && <FieldReportUpload state={state} actor={session.name} role={session.role} onChange={onChange} onClose={() => setShowPhotoUpload(false)} />}
-      <section className="panel field-reports-panel">
+      <section className="panel project-documents-panel" id="project-documents">
+        <SectionHeader
+          eyebrow="Документооборот"
+          title="Документы проекта"
+          action={<span className="count-badge">{documents.length}</span>}
+        />
+        <div className="project-documents-toolbar">
+          <div className="task-search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Название, номер или тип документа" /></div>
+          <select aria-label="Категория документа" value={category} onChange={(event) => setCategory(event.target.value as typeof category)}>
+            <option value="all">Все категории</option>
+            {Object.entries(categoryLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+          </select>
+          {session.role !== 'client' && <button type="button" className="button button--secondary button--compact" onClick={() => setShowUpload(true)}><Plus size={16} /> Добавить</button>}
+        </div>
+
+        <div className="project-document-list">
+          {documents.map((document) => {
+            const counterpart = state.counterparties.find((item) => item.id === document.counterpartyId);
+            const stage = state.stages.find((item) => item.id === document.stageId);
+            return (
+              <button type="button" className="project-document-row" key={document.id} onClick={() => setSelectedId(document.id)}>
+                <span className="project-document-row__icon">{document.fileKey ? <FileText size={20} /> : <FileClock size={20} />}</span>
+                <span className="project-document-row__main">
+                  <strong>{document.name}</strong>
+                  <small>{categoryLabels[document.category ?? 'other']}{document.number ? ` № ${document.number}` : ''} · {formatDate(document.documentDate ?? document.updatedAt, true)}</small>
+                </span>
+                <span className="project-document-row__links">{stage?.name ?? counterpart?.name ?? state.project.code}</span>
+                <span className="project-document-row__file">{document.fileName ? <><strong>{document.fileName}</strong><small>{readableSize(document.sizeBytes)}</small></> : <small>{document.storageLocation ?? 'Файл не загружен'}</small>}</span>
+                <span className="project-document-row__open"><StatusBadge label={statusLabels[document.status]} tone={statusTone(document.status)} /><span><ExternalLink size={16} /> {document.fileKey ? 'Открыть' : 'Нет оригинала'}</span></span>
+              </button>
+            );
+          })}
+          {!documents.length && <div className="task-empty"><FolderOpen size={28} /><strong>Документов пока нет</strong><p>Загрузите договор, акт, счёт, УПД, накладную или рабочую спецификацию.</p></div>}
+        </div>
+      </section>
+
+      <section className="panel field-reports-panel" id="project-photos">
         <SectionHeader
           eyebrow="С объекта"
-          title="Полевой дневник"
+          title="Фото объекта"
           action={session.role !== 'client' ? <button type="button" className="button button--secondary" onClick={() => setShowPhotoUpload(true)}>Добавить фото</button> : <span>{fieldReports.length} отчётов</span>}
         />
         <p className="field-reports-panel__intro">Фотографии и отчёты команды с датой и привязкой к этапу.</p>
@@ -208,8 +245,8 @@ export function ProjectPage({
                   <p>{report.note}</p>
                   <div className="field-report-card__files">
                     {report.attachments.map((attachment) => (
-                      <button type="button" key={attachment.id} onClick={() => openFieldReportFile(attachment.key)}>
-                        {attachment.mimeType.startsWith('image/') ? <img className="field-report-thumbnail" src={`/api/field-reports/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(attachment.key)}&preview=1`} alt={report.note} loading="lazy" /> : <Mic size={14} />}
+                      <button type="button" key={attachment.id} onClick={() => setSelectedPhoto({ key: attachment.key, name: attachment.name })}>
+                        {attachment.mimeType.startsWith('image/') ? <img className="field-report-thumbnail" src={`/api/field-reports/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(attachment.key)}&preview=1`} alt={report.note || attachment.name} loading="lazy" /> : <Mic size={14} />}
                         <span>{attachment.name}</span>
                         <small>{readableSize(attachment.sizeBytes)}</small>
                       </button>
@@ -219,43 +256,7 @@ export function ProjectPage({
               );
             })}
           </div>
-        ) : <div className="task-empty"><Image size={28} /><strong>Полевой дневник пока пуст</strong><p>Добавьте фото здесь или отправьте боту фото с подписью /report и подтвердите запись.</p></div>}
-      </section>
-
-      <section className="panel project-documents-panel">
-        <SectionHeader
-          eyebrow="Документооборот"
-          title="Документы проекта"
-          action={<span className="count-badge">{documents.length}</span>}
-        />
-        <div className="project-documents-toolbar">
-          <div className="task-search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Название, номер или тип документа" /></div>
-          <select aria-label="Категория документа" value={category} onChange={(event) => setCategory(event.target.value as typeof category)}>
-            <option value="all">Все категории</option>
-            {Object.entries(categoryLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-          </select>
-          <button type="button" className="button button--secondary button--compact" onClick={() => setShowUpload(true)}><Plus size={16} /> Добавить</button>
-        </div>
-
-        <div className="project-document-list">
-          {documents.map((document) => {
-            const counterpart = state.counterparties.find((item) => item.id === document.counterpartyId);
-            const stage = state.stages.find((item) => item.id === document.stageId);
-            return (
-              <button type="button" className="project-document-row" key={document.id} onClick={() => setSelectedId(document.id)}>
-                <span className="project-document-row__icon">{document.fileKey ? <FileText size={20} /> : <FileClock size={20} />}</span>
-                <span className="project-document-row__main">
-                  <strong>{document.name}</strong>
-                  <small>{categoryLabels[document.category ?? 'other']}{document.number ? ` № ${document.number}` : ''} · {formatDate(document.documentDate ?? document.updatedAt, true)}</small>
-                </span>
-                <span className="project-document-row__links">{counterpart?.name ?? stage?.name ?? 'Без привязки'}</span>
-                <span className="project-document-row__file">{document.fileName ? <><strong>{document.fileName}</strong><small>{readableSize(document.sizeBytes)}</small></> : <small>{document.storageLocation ?? 'Файл не загружен'}</small>}</span>
-                <StatusBadge label={statusLabels[document.status]} tone={statusTone(document.status)} />
-              </button>
-            );
-          })}
-          {!documents.length && <div className="task-empty"><FolderOpen size={28} /><strong>Документов пока нет</strong><p>Загрузите договор, акт, счёт, УПД, накладную или рабочую спецификацию.</p></div>}
-        </div>
+        ) : <div className="task-empty"><Image size={28} /><strong>Полевой дневник пока пуст</strong><p>Добавьте фотографии с объекта или ответьте на запрос Ская в рабочем чате.</p></div>}
       </section>
 
       {showUpload && (
@@ -287,23 +288,34 @@ export function ProjectPage({
       )}
 
       {selected && (
-        <Modal title={selected.name} subtitle={`${categoryLabels[selected.category ?? 'other']} · ${formatDate(selected.documentDate ?? selected.updatedAt, true)}`} onClose={() => setSelectedId(null)}>
+        <Modal wide title={selected.name} subtitle={`${categoryLabels[selected.category ?? 'other']} · ${formatDate(selected.documentDate ?? selected.updatedAt, true)}`} onClose={() => setSelectedId(null)}>
+          <ProjectFilePreview key={selected.id} url={selected.fileKey ? `/api/documents/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(selected.fileKey)}` : undefined} name={selected.fileName || selected.name} />
           <div className="document-detail-card">
             <span><FileText size={26} /></span>
             <div><small>Статус</small><StatusBadge label={statusLabels[selected.status]} tone={statusTone(selected.status)} /></div>
             <div><small>Файл</small><strong>{selected.fileName ?? 'Не загружен'}</strong><p>{selected.fileName ? `${readableSize(selected.sizeBytes)} · ${selected.uploadedBy ?? 'ИКИОМА ОС'}` : selected.storageLocation ?? 'Место хранения не указано'}</p></div>
           </div>
+          {session.role === 'management' && <form className="document-status-editor" onSubmit={event => {
+            event.preventDefault();
+            const result = updateProjectDocumentStatus(documentsRepository, { id: selected.id, status: documentStatus, confirmSignedOriginal: signedOriginal }, { identity: session, clock: systemClock, ids: runtimeIdGenerator });
+            setDocumentError(result.ok ? '' : result.error);
+          }}><Field label="Уточнить статус документа"><select value={documentStatus} onChange={event => { setDocumentStatus(event.target.value as ProjectDocument['status']); setSignedOriginal(false); }}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+            {documentStatus === 'signed' && selected.status !== 'signed' && <label className="document-status-confirm"><input type="checkbox" checked={signedOriginal} onChange={event => setSignedOriginal(event.target.checked)} />Проверил оригинал: документ подписан</label>}
+            {documentError && <p role="alert" className="form-warning">{documentError}</p>}
+            <button type="submit" className="button button--secondary" disabled={documentStatus === selected.status || documentStatus === 'signed' && (!selected.fileKey || !signedOriginal)}>Сохранить статус</button>
+          </form>}
           <div className="entity-detail-grid">
             <section className="entity-detail-card"><small>Контрагент</small><strong>{state.counterparties.find((item) => item.id === selected.counterpartyId)?.name ?? 'Не указан'}</strong><span>{selected.direction === 'incoming' ? 'Получен' : selected.direction === 'outgoing' ? 'Отправлен' : 'Внутренний'}</span></section>
             <section className="entity-detail-card"><small>Этап</small><strong>{state.stages.find((item) => item.id === selected.stageId)?.name ?? 'Без этапа'}</strong><span>{selected.clientVisible ? 'Виден клиенту' : 'Только внутри команды'}</span></section>
           </div>
           <div className="modal__actions">
             {selected.stageId && <button type="button" className="button button--secondary" onClick={() => { setSelectedId(null); onNavigate('schedule', selected.stageId); }}><Link2 size={16} /> Открыть этап</button>}
-            <button type="button" className="button button--primary" disabled={!selected.fileKey} onClick={() => openFile(selected)}><Download size={16} /> Скачать файл</button>
+            {!selected.fileKey && session.role !== 'client' && <button type="button" className="button button--primary" onClick={() => { setSelectedId(null); setShowUpload(true); }}><UploadCloud size={16} /> Добавить документ с оригиналом</button>}
           </div>
         </Modal>
       )}
 
+      {selectedPhoto && <Modal wide title={selectedPhoto.name} subtitle={`${state.project.code} · Фото объекта`} onClose={() => setSelectedPhoto(null)}><ProjectFilePreview url={`/api/field-reports/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(selectedPhoto.key)}`} name={selectedPhoto.name} /></Modal>}
       <section className="project-card-note">
         <Building2 size={19} />
         <div><strong>Одна карточка — один объект</strong><p>График, задачи, снабжение, финансы и документы связаны через код проекта {state.project.code}; дублировать файлы по разделам не нужно.</p></div>

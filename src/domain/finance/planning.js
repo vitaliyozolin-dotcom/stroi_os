@@ -53,9 +53,21 @@ export const setFinanceDueDate = (state, input, identity) => {
 // Called on trusted writes in both runtimes. Legacy unchanged values remain readable.
 export const validateBudgetPlanningChanges = (previous, state, identity) => {
   const before = new Map((previous?.budgetLines ?? []).map(line => [line.id, line]));
+  const meta = state.budgetMeta ?? {};
+  if (JSON.stringify(previous?.budgetMeta) !== JSON.stringify(meta)) {
+    if (meta.estimateKind !== undefined && !['internal_cost', 'commercial', 'unknown'].includes(meta.estimateKind)) return 'Укажите допустимый вид сметы.';
+    if (meta.estimateKind && meta.estimateKind !== 'unknown' && !text(meta.classificationSource)) return 'Укажите основание определения вида сметы.';
+    if (meta.estimateDocumentId && !state.documents?.some(document => document.id === meta.estimateDocumentId)) return 'Документ внутренней сметы не найден в проекте.';
+    if (meta.commercialEstimate !== undefined) {
+      const commercial = meta.commercialEstimate;
+      if (!commercial || !Number.isSafeInteger(commercial.amountCents) || commercial.amountCents < 0 || !text(commercial.source) || !text(commercial.version)) return 'Проверьте сумму, версию и источник коммерческой сметы.';
+      if (commercial.documentId && !state.documents?.some(document => document.id === commercial.documentId)) return 'Документ коммерческой сметы не найден в проекте.';
+    }
+  }
   if (JSON.stringify(previous?.budgetMeta) !== JSON.stringify(state.budgetMeta) && identity.role !== 'management') return 'Смету меняет только роль «Управление».';
   for (const line of state.budgetLines ?? []) {
     const old = before.get(line.id);
+    if (!old && (!text(line.id) || !text(line.name) || !Array.isArray(line.stageIds) || !text(meta.source))) return 'Для новой строки сметы нужны название, источник и список этапов.';
     for (const field of ['plan', 'forecast']) {
       if (line[field] === old?.[field]) continue;
       if (identity.role !== 'management') return 'Смету меняет только роль «Управление».';

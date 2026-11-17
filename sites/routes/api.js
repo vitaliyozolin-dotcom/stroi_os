@@ -26,6 +26,7 @@ export const createApiHandler = (handlers) => {
     ['/api/documents/file', route(['GET'], handlers.documentFile)],
     ['/api/field-reports/file', route(['GET'], handlers.fieldReportFile)],
     ['/api/leads', route(['GET', 'POST'], handlers.leadInbox)],
+    ['/api/leads/prepare', route(['POST'], handlers.leadPreparation)],
     ['/api/developer-feedback', route(['GET', 'POST'], handlers.developerFeedback)],
     ['/api/audit', route(['GET'], handlers.audit)],
   ]);

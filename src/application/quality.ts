@@ -5,7 +5,7 @@ import { validateStageControl } from '../domain/construction/index.js';
 import { executeModule, moduleChange, type ModuleContext, type ModuleRepository } from './module-repository.ts';
 export const checkpointSnapshot = (state: Pick<ConstructionSnapshot, 'project' | 'checkpoints'>, id: string) => JSON.stringify([state.project.id, state.checkpoints.find(point => point.id === id)]);
 export interface QualityUploadPort { upload(projectId: string, checkpointId: string, file: File, signal: AbortSignal): Promise<EvidencePhoto> }
-type CheckpointPatch = Partial<Pick<QualityCheckpoint, 'status' | 'note' | 'measurement' | 'submittedAt' | 'acceptedAt' | 'clientVisible'>>;
+type CheckpointPatch = Partial<Pick<QualityCheckpoint, 'status' | 'note' | 'measurement' | 'submittedAt' | 'acceptedAt' | 'clientVisible' | 'requiredShots' | 'assignee' | 'reviewer'>>;
 export const createQualityUseCases = (repository: ModuleRepository<ConstructionSnapshot, ConstructionPatch>, context: ModuleContext) => {
  const current = (state: ConstructionSnapshot, checkpointId: string, expected: string) => {
   if (context.identity.role === 'client') throw new Error('Контроль качества доступен команде проекта.');
@@ -27,9 +27,18 @@ export const createQualityUseCases = (repository: ModuleRepository<ConstructionS
    try {
     const point = current(state, input.checkpointId, input.expected);
     const allowed: CheckpointPatch = {};
-    for (const key of ['status', 'note', 'measurement', 'submittedAt', 'acceptedAt', 'clientVisible'] as const) if (Object.hasOwn(input.patch, key)) Object.assign(allowed, { [key]: input.patch[key] });
+    for (const key of ['status', 'note', 'measurement', 'submittedAt', 'acceptedAt', 'clientVisible', 'requiredShots', 'assignee', 'reviewer'] as const) if (Object.hasOwn(input.patch, key)) Object.assign(allowed, { [key]: input.patch[key] });
+    if (allowed.requiredShots || allowed.assignee !== undefined || allowed.reviewer !== undefined) {
+     if (context.identity.role !== 'management' || point.status === 'accepted') throw new Error('Условия контроля настраивает управление до приёмки.');
+     if (allowed.requiredShots) {
+      if (point.photos.length) throw new Error('После загрузки фото список кадров сохраняется. Создайте отдельную контрольную точку для новых требований.');
+      const shots = allowed.requiredShots.map(value => value.trim()).filter(Boolean);
+      if (!shots.length || shots.length > 20 || shots.some(value => value.length > 180) || new Set(shots).size !== shots.length) throw new Error('Укажите от 1 до 20 разных кадров, каждый отдельной строкой.');
+      allowed.requiredShots = shots;
+     }
+    }
     if (['accepted', 'rework'].includes(allowed.status ?? '') && context.identity.role !== 'management') throw new Error('Приёмку и доработку назначает управление.');
-    if (allowed.status === 'in_review' && point.photos.length < point.requiredShots.length) throw new Error('Сначала добавьте обязательные кадры.');
+    if (allowed.status === 'in_review' && (!point.requiredShots.length && !point.measurement?.trim() || point.photos.length < point.requiredShots.length)) throw new Error('Сначала добавьте обязательные кадры.');
     return { ok: true as const, change: prepare(state, point.id, allowed, input.summary ?? `Обновлена контрольная точка «${point.title}»`, input.tone ?? 'neutral', Boolean(input.summary)) };
    } catch (failure) { return { ok: false as const, error: failure instanceof Error ? failure.message : 'Не удалось сохранить контрольную точку.' }; }
   }),

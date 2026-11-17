@@ -1,6 +1,10 @@
+import type { ProjectFunding } from './project-funding';
+import type { ProjectLifecycle } from './project-lifecycle';
 import type { PlanBaseline, PlanChange } from './baseline';
 
 export interface HouseProject {
+  funding?: ProjectFunding;
+  lifecycle?: ProjectLifecycle;
   siteProgressHistory?: { id: string; asOf: string; completed: string[]; remaining: string[]; source: string; recordedAt?: string; recordedBy?: string }[];
   workForecastDate?: string;
   workForecastNote?: string;

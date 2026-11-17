@@ -1,12 +1,13 @@
 import type { LeadStage, UserRole } from '../entities/index';
 import type { SalesSnapshot, SalesPatch } from '../domain/contexts.ts';
 import { moduleChange, executeModule, type ModuleChange, type ModuleRepository } from './module-repository.ts';
-import { leadSnapshot, marketingStages, marketingStageLabels, marketingSourceLabels, prepareLead, prepareWebsiteLeads, validQualification, type LeadDraft, type LeadQualification } from '../domain/marketing.ts';
+import { leadSnapshot, marketingStages, marketingStageLabels, marketingSourceLabels, prepareLead, prepareWebsiteLeads, validQualification, qualificationKeys, type LeadDraft, type LeadQualification } from '../domain/marketing.ts';
 import type { Clock, IdGenerator } from './ports.ts';
 export type MarketingCommand =
   | { action: 'create'; projectId: string; draft: LeadDraft }
   | { action: 'qualify'; leadId: string; expected: string; patch: LeadQualification }
   | { action: 'stage'; leadId: string; expected: string; stage?: LeadStage }
+  | { action: 'handoff'; leadId: string; expected: string; targetProjectId: string; preparedAt: string }
   | { action: 'import'; projectId: string; response: unknown };
 export type MarketingResult = { ok: true; change: ModuleChange<SalesPatch> | null } | { ok: false; error: string };
 export const changeProjectMarketing = (state: SalesSnapshot, input: MarketingCommand, identity: { name: string; role: UserRole }, clock: Clock, ids: IdGenerator): MarketingResult => {
@@ -28,13 +29,18 @@ export const changeProjectMarketing = (state: SalesSnapshot, input: MarketingCom
     const current = leads.find(lead => lead.id === input.leadId);
     if (!current || input.expected !== leadSnapshot(state, input.leadId)) return { ok: false, error: 'Заявка обновилась. Откройте карточку заново.' };
     if (input.action === 'qualify') {
-      if (!validQualification(input.patch) || Object.keys(input.patch).some(key => !['landStatus', 'mortgageStatus'].includes(key))) return { ok: false, error: 'Выберите допустимые параметры участка и финансирования.' };
+      if (!validQualification(input.patch) || Object.keys(input.patch).some(key => !qualificationKeys.includes(key))) return { ok: false, error: 'Выберите допустимые параметры участка и финансирования.' };
       const next = { ...current, ...input.patch };
       if (JSON.stringify(next) === JSON.stringify(current)) return { ok: true, change: null };
       leads = leads.map(lead => lead.id === current.id ? next : lead); summary = `${current.name}: уточнены параметры участка и финансирования`;
+    } else if (input.action === 'handoff') {
+      if (!input.targetProjectId.startsWith('lead-')) return { ok: false, error: 'Некорректная связь с проектом.' };
+      leads = leads.map(lead => lead.id === current.id ? { ...lead, stage: 'preparation', projectId: input.targetProjectId, preparedAt: input.preparedAt } : lead);
+      summary = `${current.name}: передан в подготовку проекта`;
     } else {
       const stage = input.stage ?? (['won', 'lost'].includes(current.stage) ? current.stage : marketingStages[marketingStages.indexOf(current.stage) + 1]);
       if (!marketingStages.includes(stage)) return { ok: false, error: 'Выберите допустимый этап воронки.' };
+      if (stage === 'preparation' && !current.projectId) return { ok: false, error: 'Передайте обращение в подготовку проекта.' };
       if (stage === current.stage) return { ok: true, change: null };
       leads = leads.map(lead => lead.id === current.id ? { ...lead, stage } : lead); summary = `${current.name}: этап «${marketingStageLabels[stage]}»`; tone = stage === 'won' ? 'positive' : 'neutral';
     }

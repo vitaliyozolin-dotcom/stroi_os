@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { automaticSchedule, plannedStageDays } from '../domain/construction/index.js';
-import { planToday } from '../domain/construction/index.js';
+import { planToday, planDays } from '../domain/construction/index.js';
 import type { AppState } from '../entities/index';
 import { formatDate } from '../presentation/formatting';
 import { SectionHeader } from './Ui';
@@ -15,6 +15,7 @@ export function ProjectScheduleDates({ state, action, onReview, children }: { st
   const today = useScheduleToday(), view = automaticSchedule(state, today);
   const observed = view.kind === 'observed', complete = observed || view.kind === 'actual';
   const delay = view.baselineShift;
+  const contractDelay = observed ? null : planDays(view.end, state.project.targetDate);
   const remaining = state.stages.filter(stage => stage.schedule?.kind !== 'summary' && !['accepted', 'awaiting_inspection'].includes(stage.status));
   return <section className="panel overview-dates" aria-label="Сроки проекта">
     <SectionHeader title="Сроки" action={action} />
@@ -26,7 +27,7 @@ export function ProjectScheduleDates({ state, action, onReview, children }: { st
     </div>
     <div className="overview-dates__footer">
       <span>{observed ? 'Сроки фактического отставания уточняются' : delay === null ? 'Отставание пока не рассчитано' : `${complete ? 'Отклонение' : 'Прогноз отклонения'} от ППР: ${delay > 0 ? '+' : ''}${delay} дн.`}</span>
-      <span>Сдача по договору: <strong>{state.project.targetDate ? formatDate(state.project.targetDate, true) : 'Не указана'}</strong></span>
+      <span>Сдача по договору: <strong>{state.project.targetDate ? formatDate(state.project.targetDate, true) : 'Не указана'}</strong>{contractDelay !== null && <strong className={contractDelay > 0 ? 'danger-text' : ''}> · {complete ? 'Отклонение' : 'Прогноз'} {contractDelay > 0 ? '+' : ''}{contractDelay} дн.</strong>}</span>
     </div>
     {view.unmappedWork.length > 0 && <div className="automatic-schedule__scope"><strong>До сдачи дома ещё: {view.unmappedWork.join(', ').toLocaleLowerCase('ru')}.</strong><span>Для этих работ не найдены отдельные сроки в ППР. Дата выше пока не включает их.</span></div>}
     <details className="automatic-schedule__details"><summary>{remaining.length ? `Из чего складывается срок · этапов осталось: ${remaining.length}` : 'Как рассчитан срок'}</summary>

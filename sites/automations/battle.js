@@ -1,13 +1,13 @@
 import { addCalendarDays, isoDate } from '../lib/date.js';
 import { clean } from '../lib/validation.js';
+import { missingQualityShots, qualityShotTemplate, qualityRequestStillNeeded } from './project-coordinator.js';
 
 const activeAutomationUser = (state, preferredName = '') => {
   const users = (state.settings?.users ?? []).filter((user) => user.status === 'active');
   const preferred = clean(preferredName, 120).toLocaleLowerCase('ru');
   return users.find((user) => clean(user.name, 120).toLocaleLowerCase('ru') === preferred)
     ?? users.find((user) => user.role === 'foreman')
-    ?? users.find((user) => user.role === 'management')
-    ?? { id: 'user-owner', name: 'Виталий Озолин', role: 'management', status: 'active' };
+    ?? { id: '', name: 'Ответственный не назначен', role: 'foreman', status: 'pending' };
 };
 
 export const applyBattleAutomations = (previous, next, actor) => {
@@ -19,7 +19,8 @@ export const applyBattleAutomations = (previous, next, actor) => {
   const tomorrow = isoDate(addCalendarDays(new Date(), 1));
   const automated = [];
 
-  const ensureTask = ({ id, title, description, dueDate, priority, assignee, links }) => {
+  const ensureTask = ({ id, title, description, dueDate, priority, assignee, links, preserveUnknownDate = false }) => {
+    const taskDate = dueDate || (preserveUnknownDate ? '' : tomorrow);
     const existing = next.tasks.find((task) => task.id === id);
     if (existing) {
       if (['done', 'canceled'].includes(existing.status)) {
@@ -28,7 +29,7 @@ export const applyBattleAutomations = (previous, next, actor) => {
         existing.completionNote = undefined;
         existing.updatedAt = now;
         const previousDueDate = existing.dueDate;
-        existing.dueDate = dueDate || tomorrow;
+        existing.dueDate = taskDate;
         existing.rescheduleCount = Number(existing.rescheduleCount ?? 0) + Number(previousDueDate !== existing.dueDate);
         if (previousDueDate !== existing.dueDate) {
           existing.planHistory = [...(existing.planHistory ?? []), { at: now, actor: 'ИКИОМА ОС', field: 'dueDate', before: previousDueDate, after: existing.dueDate, reason: 'Повторное открытие после нового события' }];
@@ -58,9 +59,9 @@ export const applyBattleAutomations = (previous, next, actor) => {
       createdBy: 'ИКИОМА ОС',
       createdAt: now,
       updatedAt: now,
-      dueDate: dueDate || tomorrow,
-      originalDueDate: dueDate || tomorrow,
-      baseline: { end: dueDate || tomorrow, source: 'initial', note: 'Исходный срок автоматически созданной задачи', recordedAt: now, recordedBy: 'ИКИОМА ОС' },
+      dueDate: taskDate,
+      originalDueDate: taskDate,
+      baseline: { end: taskDate, source: 'initial', note: 'Исходный срок автоматически созданной задачи', recordedAt: now, recordedBy: 'ИКИОМА ОС' },
       rescheduleCount: 0,
       ...links,
       history: [{
@@ -122,15 +123,7 @@ export const applyBattleAutomations = (previous, next, actor) => {
         title: `Фотофиксация: ${stage.shortName || stage.name}`,
         zone: 'Весь этап',
         status: 'pending',
-        requiredShots: [
-          'Общий вид зоны',
-          'Средний план работы',
-          'Крупный план узла',
-          'Замер с читаемым прибором',
-          'Маркировка материала',
-          'Результат испытания',
-          'Итог после устранения замечаний',
-        ],
+        requiredShots: qualityShotTemplate(stage),
         photos: [],
         assignee: assignee.name,
         reviewer: reviewer.name,
@@ -147,6 +140,34 @@ export const applyBattleAutomations = (previous, next, actor) => {
       assignee,
       links: { stageId: stage.id },
     });
+  }
+
+  // A photo collection task is distinct from technical acceptance. One stable task per point.
+  for (const checkpoint of next.checkpoints ?? []) {
+    const stage = (next.stages ?? []).find(item => item.id === checkpoint.stageId);
+    const taskId = `auto-photo-${checkpoint.id}`;
+    const existing = next.tasks.find(task => task.id === taskId);
+    const missing = missingQualityShots(checkpoint);
+    if (qualityRequestStillNeeded(next, checkpoint.id)) {
+      const assignee = activeAutomationUser(next, checkpoint.assignee || stage?.responsible);
+      const beforePoint = beforeCheckpoints.get(checkpoint.id);
+      const beforeStage = beforeStages.get(checkpoint.stageId);
+      const changed = !beforePoint || beforeStage?.status !== stage?.status
+        || JSON.stringify(beforePoint.requiredShots) !== JSON.stringify(checkpoint.requiredShots)
+        || checkpoint.status === 'rework' && beforePoint.status !== 'rework';
+      if (!changed) continue;
+      ensureTask({ id: taskId, title: `Предоставить фото: ${checkpoint.title}`,
+        description: `Нужны: ${missing.join('; ')}. Фото не заменяют техническую приёмку.`,
+        dueDate: stage?.forecastEnd || stage?.planEnd || '', preserveUnknownDate: true, priority: 'high', assignee,
+        links: { stageId: checkpoint.stageId, checkpointId: checkpoint.id } });
+      const task = next.tasks.find(row => row.id === taskId);
+      if (task) task.description = `Нужны: ${missing.join('; ')}. Фото не заменяют техническую приёмку.`;
+    } else if (existing && !['done', 'canceled', 'review'].includes(existing.status) && (!missing.length || checkpoint.status === 'accepted')) {
+      existing.status = existing.reviewerId ? 'review' : 'done'; existing.completedAt = existing.reviewerId ? undefined : now; existing.updatedAt = now;
+      existing.completionNote = 'Необходимые фотографии получены. Техническая приёмка выполняется отдельно.';
+      existing.history = [...(existing.history ?? []), { id: crypto.randomUUID(), timestamp: now, actor: 'ИКИОМА ОС', kind: existing.reviewerId ? 'status' : 'completed', text: existing.completionNote }];
+      automated.push(`Получены фото: ${checkpoint.title}`);
+    }
   }
 
   if (automated.length) {

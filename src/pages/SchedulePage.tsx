@@ -5,6 +5,8 @@ import { BaselinePanel, planShiftLabel } from '../components/BaselinePanel';
 import { StageControlModal } from '../components/StageControlModal';
 import { SiteProgress } from '../components/SiteProgress';
 import { ScheduleReconciliation } from '../components/ScheduleReconciliation';
+import { constructionLaunchBlockers } from '../domain/project-lifecycle.js';
+import { stageDependencyIssue } from '../domain/construction/index.js';
 import { automaticSchedule } from '../domain/construction/index.js';
 import { useScheduleToday } from '../components/ProjectScheduleDates';
 import type { StageAction } from '../application/stage-control';
@@ -81,6 +83,9 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange, emb
   const todayKey = useScheduleToday();
   const forecast = useMemo(() => automaticSchedule(state, todayKey), [state, todayKey]);
   const calculated = scheduleDisplayRow(selected, forecast);
+  const preparationBlockers = constructionLaunchBlockers(state);
+  const dependencyIssue = stageDependencyIssue(state, selected, selected.status === 'awaiting_inspection' ? 'finish' : 'start', todayKey);
+  const contractDelay = forecast.kind === 'observed' ? null : baselineDays(forecast.end, state.project.targetDate);
   const handledFocus = useRef<string | null>(null);
   useEffect(() => {
     if (!focusId) { handledFocus.current = null; return; }
@@ -130,7 +135,6 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange, emb
 
   const renderActions = () => {
     if (role === 'client' || selected.status === 'accepted' || role !== 'management' && selected.schedule && selected.schedule.reporterId !== userId) return null;
-    if (role === 'management' && userId === 'owner' && selected.schedule?.kind !== 'summary') return <div className="action-pair"><button className="button button--secondary" type="button" onClick={() => setStageAction(selected.status === 'awaiting_inspection' ? 'rework' : 'start')}>{selected.status === 'awaiting_inspection' ? 'На доработку' : 'В работе'}</button><button className="button button--primary" type="button" onClick={() => setStageAction('owner_accept')}><Check size={17} /> Готово</button></div>;
     if (selected.status === 'ready' || selected.status === 'not_ready') return <button className="button button--primary" type="button" onClick={() => setStageAction('start')}><Play size={17} /> Зафиксировать начало</button>;
     if (selected.status === 'in_progress' || selected.status === 'rework') return (
       <button className="button button--primary" type="button" onClick={() => setStageAction('complete')}><Send size={17} /> Зафиксировать выполнение</button>
@@ -147,15 +151,16 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange, emb
       {stageAction && <StageControlModal state={state} stageId={selected.id} action={stageAction} role={role} actor={actor} userId={userId} onChange={onChange} onClose={() => setStageAction(null)} />}
       {reviewing && <ScheduleReconciliation state={state} role={role} actor={actor} userId={userId} initialId={selected.id} onChange={onChange} onClose={() => setReviewing(false)} />}
       {!embedded && <section className="schedule-heading">
-        <div><span className="eyebrow">Производственный план</span><h1>Этапы и график</h1><p>{projectStarted && currentWeek.number > 0 ? `${currentWeek.number}-я неделя · ${formatDate(currentWeek.start)} — ${formatDate(currentWeek.end)}` : `Начало проекта · ${formatDate(state.project.startDate, true)}`}</p></div>
+        <div><span className="eyebrow">Производственный план</span><h1>График строительства</h1><p>Этапы, зависимости и сроки. Действия исполнителей — в задачах.</p><p>{projectStarted && currentWeek.number > 0 ? `${currentWeek.number}-я неделя · ${formatDate(currentWeek.start)} — ${formatDate(currentWeek.end)}` : `Начало проекта · ${formatDate(state.project.startDate, true)}`}</p></div>
         <div className="schedule-heading__progress"><strong>{progress.physical}%</strong><span>выполнение ППР</span></div>
       </section>}
       {!embedded && <section className="schedule-workspace-brief" aria-label="Основные сроки ППР">
         <div><span>Исходный ППР</span><strong>{forecast.baselineEnd ? formatDate(forecast.baselineEnd, true) : 'Не указан'}</strong></div>
         <div><span>{forecast.kind === 'actual' ? 'ППР выполнен' : forecast.kind === 'observed' ? 'Подтверждено к дате' : 'Прогноз по ППР'}</span><strong>{forecast.end ? formatDate(forecast.end, true) : 'Нужны сроки'}</strong><small>{forecast.kind === 'estimated' ? 'Предварительный' : forecast.kind === 'observed' ? 'Точная дата неизвестна' : forecast.kind === 'confirmed' ? 'По уточнённым остаткам' : ''}</small></div>
-        <div><span>{['actual', 'observed'].includes(forecast.kind) ? 'Отклонение от ППР' : 'Прогноз отклонения'}</span><strong>{forecast.kind === 'observed' || forecast.baselineShift === null ? '—' : `${forecast.baselineShift > 0 ? '+' : ''}${forecast.baselineShift} дн.`}</strong></div>
+        <div><span>{forecast.kind === 'actual' ? 'Отклонение от договора' : 'Прогноз к договору'}</span><strong className={contractDelay !== null && contractDelay > 0 ? 'danger-text' : ''}>{contractDelay === null ? 'Нужны даты' : `${contractDelay > 0 ? '+' : ''}${contractDelay} дн.`}</strong><small>{forecast.baselineShift === null ? 'Исходный план не зафиксирован' : `К исходному ППР: ${forecast.baselineShift > 0 ? '+' : ''}${forecast.baselineShift} дн.`}</small></div>
         <div><span>Сдача по договору</span><strong>{state.project.targetDate ? formatDate(state.project.targetDate, true) : 'Не указана'}</strong></div>
       </section>}
+      {preparationBlockers.length > 0 && <div className="schedule-scope" role="note"><LockKeyhole size={18} /><div><strong>До начала стройки завершите этап 0</strong><p>{preparationBlockers.join(' · ')}</p></div></div>}
       {forecast.unmappedWork.length > 0 && <div className="schedule-scope" role="note"><AlertTriangle size={18} /><div><strong>Прогноз сдачи дома пока неполный</strong><p>В сроки ППР ещё не включены: {forecast.unmappedWork.join(', ').toLocaleLowerCase('ru')}.</p></div></div>}
       {!forecast.end && forecast.issues.length > 0 && <div className="schedule-scope" role="note"><AlertTriangle size={18} /><div><strong>Для прогноза нужны уточнения</strong><p>{forecast.issues[0].message}</p></div></div>}
       <ScheduleTimeline state={state} today={todayKey} role={role} userId={userId} actor={actor} onSelect={openStage} onOpenFinance={onOpenFinance} onOpenTask={onOpenTask} />
@@ -190,7 +195,8 @@ function ScheduleWithStages({ state, role, actor, userId, focusId, onChange, emb
               </div>
             )}
             {selected.ownerAcceptance && <p className="muted">Принято владельцем: {selected.ownerAcceptance.by || selected.acceptedBy}{selected.ownerAcceptance.at ? ' · ' + formatDate(planToday(new Date(selected.ownerAcceptance.at))) : ''}.{!selected.completedOn && ' Точная дата выполнения неизвестна.'}</p>}
-            {(openStageTasks.length > 0 || unacceptedCheckpoints.length > 0) && !['not_ready', 'ready', 'accepted'].includes(selected.status) && !(role === 'management' && userId === 'owner' && selected.schedule?.kind !== 'summary') && <div className="blocker-note"><LockKeyhole size={19} /><div><strong>Этап ещё нельзя закрыть</strong><p>{[openStageTasks.length ? `${openStageTasks.length} задач не завершено` : '', unacceptedCheckpoints.length ? `${unacceptedCheckpoints.length} контрольных точек не принято` : ''].filter(Boolean).join(' · ')}</p></div></div>}
+            {(openStageTasks.length > 0 || unacceptedCheckpoints.length > 0) && !['not_ready', 'ready', 'accepted'].includes(selected.status) && <div className="blocker-note"><LockKeyhole size={19} /><div><strong>Этап ещё нельзя закрыть</strong><p>{[openStageTasks.length ? `${openStageTasks.length} задач не завершено` : '', unacceptedCheckpoints.length ? `${unacceptedCheckpoints.length} контрольных точек не принято` : ''].filter(Boolean).join(' · ')}</p></div></div>}
+            {dependencyIssue && selected.status !== 'accepted' && <div className="dependency-note"><LockKeyhole size={18} /><span><small>Условие перехода</small><strong>{dependencyIssue}</strong></span></div>}
             <div className="stage-detail__actions">{renderActions()}</div>
             {selected.schedule && (role === 'management' || role === 'foreman' && Boolean(userId && selected.schedule.reporterId === userId)) && !['accepted', 'awaiting_inspection'].includes(selected.status) && <button type="button" className="button button--secondary stage-date-edit" onClick={() => setReviewing(true)}>Уточнить остаток и прогноз</button>}
             {role === 'management' && <button type="button" className="button button--secondary stage-date-edit" onClick={openDateEdit}><Pencil size={16} /> Изменить план и оценку срока</button>}

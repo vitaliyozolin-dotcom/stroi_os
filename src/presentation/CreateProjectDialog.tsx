@@ -1,3 +1,4 @@
+import { createLifecycle } from '../domain/project-lifecycle.js';
 import { useEffect, useRef, useState } from 'react';
 import type { AppState, OrderDirectoryRecord } from '../entities/index';
 import { buildStages, createDraftOrderState, createProjectState } from '../seed';
@@ -7,6 +8,8 @@ import { fetchOrderDirectory, saveOrderDirectoryRecord } from '../infrastructure
 import { OrderEditorModal, type OrderEditorField } from '../components/customer-orders/OrderEditorModal';
 import { orderMoneyInput, orderNumberInput } from './customer-order-forms';
 import '../pages/customer-orders.css';
+
+const createdAtFrom = (state: AppState) => state.project.createdAt || new Date().toISOString();
 
 export function CreateProjectDialog({ state, actor, nextCode, initialCustomerId, onClose, onCreate }: {
   state: AppState; actor: string; nextCode: string; initialCustomerId?: string;
@@ -29,7 +32,7 @@ export function CreateProjectDialog({ state, actor, nextCode, initialCustomerId,
 
   const fields: OrderEditorField[] = ([
     { name: 'code', label: 'Номер заказа', required: true },
-    { name: 'name', label: 'Название заказа', required: true, placeholder: 'Дом и баня для семьи Ивановых' },
+    { name: 'name', label: 'Название, если адрес ещё неизвестен', placeholder: 'Населённый пункт · участок уточняется' },
     { name: 'customerId', label: 'Заказчик из справочника', type: 'select', options: records.filter(record => record.kind === 'party').map(record => ({ value: record.id, label: record.data.name })), hint: 'Можно выбрать позже. Повторный заказ связывайте с той же карточкой.' },
     { name: 'newCustomerName', label: 'Имя нового заказчика', hint: 'Заполните, если заказчика ещё нет в справочнике.' },
     { name: 'address', label: 'Адрес', hint: 'Можно уточнить позже' },
@@ -55,7 +58,8 @@ export function CreateProjectDialog({ state, actor, nextCode, initialCustomerId,
     </>}
     onSubmit={async values => {
       if (attempt.current) { await onCreate(attempt.current); return; }
-      if (!values.code?.trim() || !values.name?.trim()) throw new Error('Укажите номер и название заказа.');
+      if (!values.code?.trim()) throw new Error('Укажите номер проекта.');
+      values.name = values.address?.trim() || values.name?.trim() || 'Участок уточняется';
       if (values.customerId && values.newCustomerName?.trim()) throw new Error('Выберите существующего заказчика либо укажите имя нового.');
       const area = template ? orderNumberInput(values.area ?? '', 'Площадь') : undefined;
       const contractCents = template ? orderMoneyInput(values.contractValue ?? '') : undefined;
@@ -87,6 +91,7 @@ export function CreateProjectDialog({ state, actor, nextCode, initialCustomerId,
         if (costCents === undefined) next.budgetLines = [];
         next.orderRelations = { ...emptyOrderRelations(), ...(customerId ? { customerId } : {}) };
       }
+      next.project.lifecycle = createLifecycle(createdAtFrom(next));
       attempt.current = next; setStarted(true);
       await onCreate(next);
     }} />;

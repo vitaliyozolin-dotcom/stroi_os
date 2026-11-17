@@ -14,6 +14,7 @@ import { createSharedFinanceAccountHandler } from './projects/shared-finance-acc
 import { createSharedPaymentHandler } from './projects/shared-payment.js';
 import { createOrderDirectoryHandler } from './orders/directory.js';
 import { createProjectWriteHandler } from './projects/write.js';
+import { createLeadPreparationHandler } from './leads/preparation.js';
 import { createSessionHandler } from './access/session.js';
 import { createAccessUsersHandler } from './access/users.js';
 import { createCameraHandlers } from './integrations/camera.js';
@@ -124,6 +125,7 @@ const handleFinancePortfolio = createFinancePortfolioHandler({ ensureSchema });
 const handleSharedFinanceAccount = createSharedFinanceAccountHandler({ ensureSchema });
 const handleSharedPayment = createSharedPaymentHandler({ ensureSchema });
 const handleOrderDirectory = createOrderDirectoryHandler({ ensureSchema });
+const handleLeadPreparation = createLeadPreparationHandler({ ensureSchema, readSnapshot });
 const handleSession = createSessionHandler({ ensureSchema });
 const handleAccessUsers = createAccessUsersHandler({ ensureSchema, readSnapshot });
 const { status: handleCameraStatus, view: handleCameraView } = createCameraHandlers({ ensureSchema, readSnapshot });
@@ -214,6 +216,7 @@ const {
 });
 
 const { processTelegramUpdate } = createTelegramUpdateProcessor({
+  mutateProjectFromTelegram, mutationNoop: TELEGRAM_MUTATION_NOOP,
   readSnapshot, bindingsForTelegramUser, bindingForTelegramUser, bindingForTelegramProject, telegramBotUsername, telegramGroupChatAuthorized, bindTelegramUser, createTelegramDraft, telegramReadCommands, telegramWriteDrafts, telegramAttachmentDrafts, telegramConfirmTask, telegramConfirmNote, telegramConfirmExpense, telegramConfirmFile, telegramChangeTaskStatus,
 });
 
@@ -308,6 +311,7 @@ const handleApi = createApiHandler({
   documentFile: handleDocumentFile,
   fieldReportFile: handleFieldReportFile,
   leadInbox: handleLeadInbox,
+  leadPreparation: handleLeadPreparation,
   publicLead: handlePublicLead,
   developerFeedback: handleDeveloperFeedback,
   audit: handleAudit,

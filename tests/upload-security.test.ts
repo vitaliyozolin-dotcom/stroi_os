@@ -82,7 +82,10 @@ test('untrusted file endpoints force safe response headers and UI excludes activ
   assert.doesNotMatch(quality, /accept="image\/\*"/);
   assert.match(quality, /\^data:image\\\/\(\?:jpeg\|png\|webp\);base64,/);
   assert.match(quality, /window\.open\(source, '_blank', 'noopener,noreferrer'\)/);
-  assert.match(project, /Скачать файл/);
+  assert.match(project, /ProjectFilePreview/);
+  assert.match(source('src/components/ProjectFilePreview.tsx'), /download=\{name\}/);
+  assert.match(source('src/components/ProjectFilePreview.tsx'), /filePreviewKind\(signature, name\)/);
+  assert.match(source('src/components/ProjectPdfPreview.tsx'), /page.render/);
 });
 
 test('public lead JSON is streamed through a hard body limit before parsing', () => {

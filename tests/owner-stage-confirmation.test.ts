@@ -17,15 +17,14 @@ const fixture = () => {
     planStart: '2026-01-01', planEnd: '2026-01-02', forecastEnd: '2026-01-02', responsible: 'Worker' },
     { id: 'b', name: 'Windows', shortName: 'Windows', order: 2, status: 'not_ready', weight: 1, progress: 0,
       planStart: '2026-01-03', planEnd: '2026-01-04', forecastEnd: '2026-01-04', responsible: 'Worker', dependencyId: 'a' }];
-  state.tasks = [{ id: 'task', title: 'Report', status: 'todo', priority: 'normal', assigneeId: 'worker', assigneeName: 'Worker', reviewerId: 'owner', createdBy: 'Owner', createdAt: now, updatedAt: now, dueDate: today, originalDueDate: today, stageId: 'a', rescheduleCount: 0, history: [] }];
-  state.checkpoints = [{ id: 'photo', stageId: 'a', title: 'Photo report', zone: 'Site', status: 'pending', requiredShots: ['Overview'], photos: [], assignee: 'Worker', reviewer: 'Owner', clientVisible: false }];
+  state.tasks = [{ id: 'task', title: 'Report', status: 'done', priority: 'normal', assigneeId: 'worker', assigneeName: 'Worker', reviewerId: 'owner', createdBy: 'Owner', createdAt: now, updatedAt: now, dueDate: today, originalDueDate: today, stageId: 'a', rescheduleCount: 0, history: [] }];
+  state.checkpoints = [{ id: 'photo', stageId: 'a', title: 'Photo report', zone: 'Site', status: 'accepted', requiredShots: ['Overview'], photos: [{ id: 'photo-1', name: 'Overview', url: '/api/files/photo-1', uploadedAt: now, author: 'Worker' }], assignee: 'Worker', reviewer: 'Owner', clientVisible: false }];
   return state;
 };
 const confirm = (state: ReturnType<typeof fixture>, extra = {}) => applyStageControl(state, 'a', 'owner_accept', { date: today, note: '', tasks: [], completionDateUnknown: true, ...extra }, owner.name, 'management', owner.id);
 
-test('owner confirmation accepts observed work, preserving unfinished evidence, money, baseline and exact-date uncertainty', () => {
+test('owner confirmation preserves verified evidence, money, baseline and exact-date uncertainty', () => {
   const before = fixture(), original = structuredClone(before);
-  before.stages[0].blocker = 'Awaiting report';
   const next = confirm(before);
   assert.equal(validateStageControl(before, next, owner, now), null);
   assert.equal(next.stages[0].status, 'accepted');
@@ -34,7 +33,7 @@ test('owner confirmation accepts observed work, preserving unfinished evidence, 
   assert.equal(next.stages[0].completionObservedOn, today);
   assert.equal(next.stages[0].acceptedAt, now);
   assert.equal(next.stages[0].acceptedBy, owner.name);
-  assert.deepEqual(next.stages[0].ownerAcceptance, { note: 'Лично подтверждаю: этап выполнен.', at: now, by: owner.name, pendingTaskIds: ['task'], pendingCheckpointIds: ['photo'] });
+  assert.deepEqual(next.stages[0].ownerAcceptance, { note: 'Лично подтверждаю: этап выполнен.', at: now, by: owner.name, pendingTaskIds: [], pendingCheckpointIds: [] });
   assert.deepEqual(next.tasks, before.tasks);
   assert.deepEqual(next.checkpoints, before.checkpoints);
   assert.deepEqual(next.financeEntries, before.financeEntries);
@@ -72,7 +71,7 @@ test('only the authenticated owner can use personal confirmation; stamps cannot 
   assert.equal(next.stages[0].ownerAcceptance?.by, owner.name);
   assert.equal(next.stages[0].ownerAcceptance?.at, now);
   assert.equal(next.stages[0].acceptedAt, now);
-  assert.deepEqual(next.stages[0].ownerAcceptance?.pendingCheckpointIds, ['photo']);
+  assert.deepEqual(next.stages[0].ownerAcceptance?.pendingCheckpointIds, []);
 });
 
 test('saved personal acceptance and its required evidence cannot be rewritten or removed', () => {
@@ -133,4 +132,17 @@ test('save acknowledgement retains owner audit stamps alongside a concurrent unr
   assert.equal(model.state.project.name, 'Renamed');
   assert.deepEqual(model.state.stages[0].ownerAcceptance, saved.stages[0].ownerAcceptance);
   assert.equal(validateStageControl(saved, structuredClone(model.state), owner, now), null);
+});
+
+
+test('personal confirmation cannot bypass an unfinished task, missing quality or blocker', () => {
+  for (const mutate of [s => { s.tasks[0].status = 'todo'; }, s => { s.checkpoints[0].status = 'pending'; s.checkpoints[0].photos = []; }, s => { s.stages[0].blocker = 'Awaiting report'; }]) {
+    const before = fixture(); mutate(before);
+    assert.throws(() => confirm(before), /Сначала завершите/);
+    const raw = structuredClone(before);
+    Object.assign(raw.stages[0], { status: 'accepted', completionObservedOn: today, completionNote: 'Claim', statusNote: 'Claim', ownerAcceptance: { note: 'Claim' }, blocker: undefined });
+    // A forged bulk request cannot skip the control the client command enforces.
+    if (before.stages[0].blocker) raw.stages[0].blocker = before.stages[0].blocker;
+    assert.ok(validateStageControl(before, raw, owner, now));
+  }
 });

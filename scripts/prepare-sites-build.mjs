@@ -24,6 +24,11 @@ await mkdir(`${projectRoot}dist/server/telegram`, { recursive: true });
 await mkdir(`${projectRoot}dist/server/runtime`, { recursive: true });
 
 await Promise.all([
+  copyFile(`${projectRoot}src/domain/project-lifecycle.js`, `${projectRoot}dist/src/domain/project-lifecycle.js`),
+  copyFile(`${projectRoot}src/domain/project-funding.js`, `${projectRoot}dist/src/domain/project-funding.js`),
+  copyFile(`${projectRoot}sites/leads/preparation.js`, `${projectRoot}dist/server/leads/preparation.js`),
+  copyFile(`${projectRoot}sites/automations/project-coordinator.js`, `${projectRoot}dist/server/automations/project-coordinator.js`),
+  copyFile(`${projectRoot}sites/telegram/quality-replies.js`, `${projectRoot}dist/server/telegram/quality-replies.js`),
   copyFile(`${projectRoot}src/domain/order-relations.js`, `${projectRoot}dist/src/domain/order-relations.js`),
   copyFile(`${projectRoot}src/domain/order-object-costs.js`, `${projectRoot}dist/src/domain/order-object-costs.js`),
   copyFile(`${projectRoot}src/domain/shared-payment.js`, `${projectRoot}dist/src/domain/shared-payment.js`),
@@ -49,7 +54,7 @@ await Promise.all([
   ...['index', 'plan-baseline', 'stage-control', 'schedule-forecast', 'automatic-schedule', 'stage-validation', 'baseline-validation', 'schedule-validation'].map(name => copyFile(`${projectRoot}src/domain/construction/${name}.js`, `${projectRoot}dist/src/domain/construction/${name}.js`)),
   copyFile(`${projectRoot}src/infrastructure/finance-commitment.js`, `${projectRoot}dist/src/infrastructure/finance-commitment.js`),
   copyFile(`${projectRoot}src/application/finance-context-commitment.js`, `${projectRoot}dist/src/application/finance-context-commitment.js`),
-  ...['index', 'policy', 'planning', 'state-validation', 'transitions'].map((name) => copyFile(`${projectRoot}src/domain/finance/${name}.js`, `${projectRoot}dist/src/domain/finance/${name}.js`)),
+  ...['index', 'policy', 'planning', 'state-validation', 'transitions', 'project-funding'].map((name) => copyFile(`${projectRoot}src/domain/finance/${name}.js`, `${projectRoot}dist/src/domain/finance/${name}.js`)),
   copyFile(`${projectRoot}src/domain/finance-totals.js`, `${projectRoot}dist/src/domain/finance-totals.js`),
   copyFile(`${projectRoot}sites/company-os-export.js`, `${projectRoot}dist/server/company-os-export.js`),
   copyFile(`${projectRoot}sites/company-os-investor-export.js`, `${projectRoot}dist/server/company-os-investor-export.js`),

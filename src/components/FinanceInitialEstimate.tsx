@@ -1,0 +1,27 @@
+import { useState, type FormEvent } from 'react';
+import type { AppState, UserRole } from '../entities/index';
+import type { StateChangeSink } from '../application';
+import { Modal, Field } from './Ui';
+import { money } from '../presentation/formatting';
+
+type Row = { id: string; name: string; amount: string; stageId: string };
+export function FinanceInitialEstimate({ state, role, onChange }: { state: AppState; role: UserRole; onChange: StateChangeSink }) {
+  const [draft, setDraft] = useState<null | { expected: string; version: string; source: string; documentId: string; rows: Row[] }>(null);
+  const [error, setError] = useState('');
+  if (state.budgetLines.length || role !== 'management') return null;
+  const row = (): Row => ({ id: `budget-${crypto.randomUUID()}`, name: '', amount: '', stageId: '' });
+  const total = draft?.rows.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) ?? 0;
+  const save = (event: FormEvent) => {
+    event.preventDefault(); if (!draft) return;
+    if (JSON.stringify([state.budgetLines, state.budgetMeta]) !== draft.expected) { setError('Смета обновилась. Откройте форму заново.'); return; }
+    const values = draft.rows.map(item => ({ ...item, amountValue: Number(item.amount) }));
+    if (!draft.source.trim() || !draft.version.trim() || !values.length || values.some(item => !item.name.trim() || !item.amount.trim() || !Number.isFinite(item.amountValue) || item.amountValue < 0 || !Number.isSafeInteger(Math.round(item.amountValue * 100)) || Math.abs(item.amountValue - Math.round(item.amountValue * 100) / 100) > .000001)) { setError('Для каждой строки нужны название и точная сумма; для сметы — версия и источник.'); return; }
+    onChange({ ...state, budgetLines: values.map(item => ({ id: item.id, name: item.name.trim(), plan: item.amountValue, forecast: item.amountValue, stageIds: item.stageId ? [item.stageId] : [], costGroup: 'construction' as const })), budgetMeta: { ...state.budgetMeta, version: draft.version.trim(), source: draft.source.trim(), estimateKind: 'internal_cost', classificationSource: draft.source.trim(), estimateDocumentId: draft.documentId || undefined, approvedBy: undefined, approvedAt: undefined } }, { action: 'internal_estimate_created', summary: `Внутренняя смета ${draft.version.trim()}: ${money(total)} · ${draft.source.trim()}` });
+    setDraft(null);
+  };
+  return <section className="finance-estimate-identity"><div><h3>Подготовьте смету на этапе 0</h3><p>Укажите затраты компании по разделам и приложенный документ. Цена договора хранится отдельно.</p></div><button type="button" className="button button--primary" onClick={() => { setError(''); setDraft({ expected: JSON.stringify([state.budgetLines, state.budgetMeta]), version: '1', source: '', documentId: '', rows: [row()] }); }}>Создать внутреннюю смету</button>
+    {draft && <Modal wide title="Внутренняя смета" subtitle="Стоимость материалов и работ для компании. После сохранения можно утвердить версию бюджета." onClose={() => setDraft(null)}><form className="modal-form" onSubmit={save}>{error && <p className="form-warning" role="alert">{error}</p>}<div className="form-grid"><Field label="Версия"><input required value={draft.version} onChange={event => setDraft({ ...draft, version: event.target.value })} /></Field><Field label="Источник / составитель"><input required value={draft.source} onChange={event => setDraft({ ...draft, source: event.target.value })} placeholder="Смета от Константина, дата" /></Field></div><Field label="Документ сметы"><select value={draft.documentId} onChange={event => setDraft({ ...draft, documentId: event.target.value })}><option value="">Выберите загруженный в проект документ</option>{state.documents.map(doc => <option key={doc.id} value={doc.id}>{doc.name}</option>)}</select></Field>
+      {draft.rows.map((item, index) => <div className="finance-estimate-input-row" key={item.id}><Field label={`Раздел ${index + 1}`}><input required value={item.name} onChange={event => setDraft({ ...draft, rows: draft.rows.map(next => next.id === item.id ? { ...next, name: event.target.value } : next) })} placeholder="Фундамент: работы и материалы" /></Field><div className="form-grid"><Field label="Затраты компании, ₽"><input required type="number" min="0" step="0.01" value={item.amount} onChange={event => setDraft({ ...draft, rows: draft.rows.map(next => next.id === item.id ? { ...next, amount: event.target.value } : next) })} /></Field><Field label="Этап работ"><select value={item.stageId} onChange={event => setDraft({ ...draft, rows: draft.rows.map(next => next.id === item.id ? { ...next, stageId: event.target.value } : next) })}><option value="">Связать позже</option>{state.stages.map(stage => <option value={stage.id} key={stage.id}>{stage.name}</option>)}</select></Field></div>{draft.rows.length > 1 && <button type="button" className="text-button" onClick={() => setDraft({ ...draft, rows: draft.rows.filter(next => next.id !== item.id) })}>Убрать строку</button>}</div>)}
+      <button type="button" className="button button--secondary" disabled={draft.rows.length >= 100} onClick={() => setDraft({ ...draft, rows: [...draft.rows, row()] })}>Добавить раздел</button><p><strong>Итого: {money(total)}</strong></p><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setDraft(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить смету</button></div></form></Modal>}
+  </section>;
+}

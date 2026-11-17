@@ -4,3 +4,5 @@ import type { DocumentDraft, UploadedDocumentFile } from '../domain/project-docu
 import type { ModuleContext, ModuleRepository, ModuleResult } from './module-repository';
 export function registerProjectDocument(repository: ModuleRepository<DocumentsSnapshot, DocumentsPatch>, input: { id?: string; draft: DocumentDraft; file: UploadedDocumentFile; sourceDraftId?: string }, context: ModuleContext, channel?: 'web' | 'telegram'): ModuleResult<DocumentsPatch>;
 export function registerFieldReport(repository: ModuleRepository<DocumentsSnapshot, DocumentsPatch>, input: { id?: string; createdAt: string; note: string; source: 'web' | 'telegram'; stageId?: string; attachments: FieldReport['attachments']; sourceDraftId?: string; telegramMessageId?: string }, context: ModuleContext): ModuleResult<DocumentsPatch>;
+
+export function updateProjectDocumentStatus(repository: ModuleRepository<DocumentsSnapshot, DocumentsPatch>, input: { id: string; status: 'draft' | 'current' | 'signed'; confirmSignedOriginal?: boolean }, context: ModuleContext): ModuleResult<DocumentsPatch>;
