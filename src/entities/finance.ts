@@ -6,6 +6,12 @@ export interface CostClassification {
 }
 
 export interface BudgetMeta {
+  /** Explicit classification; legacy missing value means unverified, never internal cost. */
+  estimateKind?: 'internal_cost' | 'commercial' | 'unknown';
+  classificationSource?: string;
+  estimateDocumentId?: string;
+  /** A customer-facing total is independent of the internal budget and signed contract. */
+  commercialEstimate?: { amountCents: number; version: string; source: string; documentId?: string };
   importSourceSha256?: string;
   importPreviousBudget?: { lines: BudgetLine[]; meta: BudgetMeta; targetCost: number; recordedAt: string };
   version: string;

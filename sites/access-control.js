@@ -129,6 +129,8 @@ export const stateForRole = (state, identity) => {
   delete safe.financeAutomation;
   // Shared identities, contract terms and financing applications are management-only.
   delete safe.orderRelations;
+  delete safe.project.lifecycle;
+  delete safe.project.funding;
   safe.documents = (safe.documents ?? []).filter(documentVisibilityForRole(state, identity));
 
   if (role === 'foreman') {
@@ -185,6 +187,8 @@ export const stateForRole = (state, identity) => {
 
 export const mergeStateForRole = (previous, incoming, identity, { serverManagedRoster = false } = {}) => {
   const role = identity.role;
+  // Additive funding evidence survives older clients that omit the new field.
+  if (previous?.project?.funding && incoming.project && !Object.hasOwn(incoming.project, 'funding')) incoming = { ...incoming, project: { ...incoming.project, funding: previous.project.funding } };
   // Additive pilot data survives saves by an older client that has never seen it.
   for (const field of ['treasury', 'financeLedger', 'financeAutomation', 'orderRelations']) {
     if (previous?.[field] && !Object.hasOwn(incoming, field)) incoming = { ...incoming, [field]: previous[field] };

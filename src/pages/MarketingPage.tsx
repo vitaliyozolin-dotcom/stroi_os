@@ -1,3 +1,9 @@
+import type { RemoteProjectSnapshot } from '../application';
+import { Link } from 'react-router';
+import { LeadQualificationForm } from '../components/LeadQualificationForm';
+import { leadHandoffBlockers } from '../domain/project-lifecycle.js';
+import type { LeadQualification } from '../domain/marketing';
+import { workspacePath } from '../presentation/navigation';
 import { useModuleRepository } from '../useModuleRepository';
 import { createSalesRepository } from '../infrastructure/module-project';
 import { leadSnapshot, marketingStages as stageOrder, marketingStageLabels as stageLabels, marketingSourceLabels as sourceLabels } from '../domain/marketing';
@@ -43,9 +49,11 @@ const stageTone = (stage: LeadStage): 'neutral' | 'positive' | 'warning' | 'dang
   return 'neutral';
 };
 
-export function MarketingPage({ state, actor, role, focusId, onChange }: { state: AppState; actor: string; role: UserRole; focusId?: string | null; onChange: (next: AppState) => void }) {
+export function MarketingPage({ state, actor, role, focusId, onChange, onServerSnapshot }: { state: AppState; actor: string; role: UserRole; focusId?: string | null; onChange: (next: AppState) => void; onServerSnapshot?: (snapshot: RemoteProjectSnapshot) => void }) {
   const marketing = createMarketingUseCases(useModuleRepository(createSalesRepository, state, onChange), { name: actor, role }, systemClock, runtimeIdGenerator);
   const latest = useRef(marketing); latest.current = marketing;
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const [handoffTarget, setHandoffTarget] = useState<{id:string;code:string;name:string} | null>(null);
   const [commandError, setCommandError] = useState('');
   const [importError, setImportError] = useState('');
   const [importAttempt, setImportAttempt] = useState(0);
@@ -91,11 +99,27 @@ export function MarketingPage({ state, actor, role, focusId, onChange }: { state
     setForm({ ...form, name: '', phone: '', email: '', budget: '', houseArea: '', region: '', notes: '' });
   };
 
-  const updateLead = (leadId: string, patch: Pick<Lead, 'landStatus' | 'mortgageStatus'> & { stage?: LeadStage }) => {
+  const updateLead = (leadId: string, patch: LeadQualification & { stage?: LeadStage }) => {
+    if (patch.stage === 'preparation') { const lead = state.leads.find(row => row.id === leadId); if (lead) void prepareProject(lead); return; }
     const result = marketing.execute(patch.stage ? { action: 'stage', leadId, stage: patch.stage, expected: leadSnapshot(state, leadId) } : { action: 'qualify', leadId, patch, expected: leadSnapshot(state, leadId) });
     setCommandError(result.ok ? '' : result.error);
   };
+  const prepareProject = async (lead: Lead) => {
+    setCommandError(''); setHandoffBusy(true);
+    try {
+      const blockers = leadHandoffBlockers(lead);
+      if (blockers.length && !lead.projectId) throw new Error(blockers.join(' '));
+      const response = await requestApi('/api/leads/prepare', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceProjectId: state.project.id, leadId: lead.id, expectedLead: JSON.stringify(lead) }) });
+      const body = await response.json();
+      if (!response.ok || !body.project) throw new Error(body.message || 'Не удалось передать обращение в проект.');
+      setHandoffTarget(body.project);
+      if (body.sourceSnapshot && onServerSnapshot) onServerSnapshot(body.sourceSnapshot);
+      else if (body.sourceSnapshot) onChange(body.sourceSnapshot.state);
+    } catch (error) { setCommandError(error instanceof Error ? error.message : 'Не удалось передать обращение в проект.'); }
+    finally { setHandoffBusy(false); }
+  };
   const advanceLead = (lead: Lead) => {
+    if (lead.stage === 'negotiation') { void prepareProject(lead); return; }
     const result = marketing.execute({ action: 'stage', leadId: lead.id, expected: leadSnapshot(state, lead.id) });
     setCommandError(result.ok ? '' : result.error);
   };
@@ -107,8 +131,8 @@ export function MarketingPage({ state, actor, role, focusId, onChange }: { state
       <section className="page-title-row">
         <div>
           <span className="eyebrow">Продажи и спрос</span>
-          <h1>Маркетинг и воронка</h1>
-          <p>От первого обращения до договора и запуска дома. Источник, следующий шаг и потенциальная выручка видны в одном месте.</p>
+          <h1>Клиенты и воронка</h1>
+          <p>Сведения о клиенте, следующий шаг и передача в подготовку проекта.</p>
         </div>
         <button type="button" className="button button--primary" onClick={() => { setDraftProjectId(state.project.id); setCommandError(''); setShowForm(true); }}><Plus size={18} /> Добавить заявку</button>
       </section>
@@ -116,7 +140,7 @@ export function MarketingPage({ state, actor, role, focusId, onChange }: { state
       <section className="metric-grid">
         <MetricCard label="Новые заявки" value={`${state.leads.filter((lead) => lead.stage === 'new').length}`} detail={<span>требуют первичного контакта</span>} icon={UsersRound} onClick={() => setStageFilter('new')} />
         <MetricCard label="Активная воронка" value={shortMoney(pipeline)} detail={<span>{active.length} потенциальных проектов</span>} icon={BadgeRussianRuble} onClick={() => setStageFilter('all')} />
-        <MetricCard label="Договоры" value={`${won.length}`} detail={<span>{shortMoney(won.reduce((sum, lead) => sum + (lead.budget ?? 0), 0))} подтверждено</span>} icon={CheckCircle2} tone="positive" onClick={() => setStageFilter('won')} />
+        <MetricCard label="Договоры" value={`${won.length}`} detail={<span>Суммы договоров — в связанных проектах</span>} icon={CheckCircle2} tone="positive" onClick={() => setStageFilter('won')} />
         <MetricCard label="Конверсия в договор" value={`${conversion}%`} detail={<span>по всем заведённым обращениям</span>} icon={Target} tone="dark" onClick={() => setStageFilter('won')} />
       </section>
 
@@ -138,7 +162,7 @@ export function MarketingPage({ state, actor, role, focusId, onChange }: { state
         <SectionHeader eyebrow="CRM" title={stageFilter === 'all' ? 'Все обращения' : stageLabels[stageFilter]} action={<span className="count-badge">{visible.length}</span>} />
         <div className="lead-list">
           {visible.map((lead) => (
-            <button type="button" className="lead-row" key={lead.id} onClick={() => setSelectedId(lead.id)}>
+            <button type="button" className="lead-row" key={lead.id} onClick={() => { setHandoffTarget(null); setSelectedId(lead.id); }}>
               <span className="lead-row__avatar"><CircleUserRound size={20} /></span>
               <div className="lead-row__main"><strong>{lead.name}</strong><small>{lead.phone} · {sourceLabels[lead.source]}{lead.region ? ` · ${lead.region}` : ''}</small><small>Поступила: {formatDateTime(lead.createdAt)}</small></div>
               <span><StatusBadge label={stageLabels[lead.stage]} tone={stageTone(lead.stage)} /></span>
@@ -175,9 +199,11 @@ export function MarketingPage({ state, actor, role, focusId, onChange }: { state
             <section className="entity-detail-card entity-detail-card--editable"><small>Земельный участок</small><select aria-label="Статус земельного участка" value={selected.landStatus ?? 'unknown'} onChange={(event) => updateLead(selected.id, { landStatus: event.target.value as NonNullable<Lead['landStatus']> })}>{Object.entries(landLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><span>Можно уточнить прямо в карточке</span></section>
             <section className="entity-detail-card entity-detail-card--editable"><small>Ипотека</small><select aria-label="Статус ипотеки" value={selected.mortgageStatus ?? 'unknown'} onChange={(event) => updateLead(selected.id, { mortgageStatus: event.target.value as NonNullable<Lead['mortgageStatus']> })}>{Object.entries(mortgageLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><span>Нужна ли помощь с одобрением</span></section>
           </div>
-          <div className="entity-detail-section"><span className="eyebrow">Текущий этап</span><div className="stage-choice">{stageOrder.map((stage) => <button type="button" key={stage} className={selected.stage === stage ? 'active' : ''} onClick={() => updateLead(selected.id, { stage })}>{stageLabels[stage]}</button>)}</div></div>
+          <LeadQualificationForm objects={state.orderRelations?.objects} key={selected.id} lead={selected} onSave={patch => updateLead(selected.id, { ...patch, qualification: { ...patch.qualification, updatedAt: new Date().toISOString(), updatedBy: actor } })} />
+          {(selected.projectId || handoffTarget) && <div className="entity-detail-section"><strong>Связанный проект</strong><p><Link to={workspacePath(selected.projectId || handoffTarget!.id, 'project')}>{handoffTarget?.code || 'Открыть'} · {handoffTarget?.name || 'Подготовка объекта'}</Link></p><small>Передача в подготовку не считается подписанным договором.</small></div>}
+          <div className="entity-detail-section"><span className="eyebrow">Текущий этап</span><div className="stage-choice">{stageOrder.map((stage) => <button type="button" key={stage} disabled={handoffBusy} className={selected.stage === stage ? 'active' : ''} onClick={() => updateLead(selected.id, { stage })}>{stageLabels[stage]}</button>)}</div></div>
           <div className="entity-detail-section"><span className="eyebrow">Следующий шаг</span><h3>{selected.nextAction}</h3><p>{selected.nextActionAt ? formatDateTime(selected.nextActionAt) : 'Срок не задан'} · {selected.notes ?? 'Комментариев пока нет'}</p></div>
-          <div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => window.location.href = `tel:${selected.phone.replace(/\s/g, '')}`}><Phone size={17} /> Позвонить</button>{!['won', 'lost'].includes(selected.stage) && <button type="button" className="button button--primary" onClick={() => advanceLead(selected)}>Следующий этап <ArrowRight size={17} /></button>}</div>
+          <div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => window.location.href = `tel:${selected.phone.replace(/\s/g, '')}`}><Phone size={17} /> Позвонить</button>{!['won', 'lost'].includes(selected.stage) && <button type="button" className="button button--primary" disabled={handoffBusy} onClick={() => advanceLead(selected)}>{handoffBusy ? 'Создаём проект…' : selected.stage === 'negotiation' ? 'Передать в проект' : 'Следующий этап'} <ArrowRight size={17} /></button>}</div>
         </Modal>
       )}
     </div>

@@ -3,7 +3,7 @@ import type { ProcurementItem } from '../entities/index';
 
 export interface RequirementDraft {
   stageId: string; item: string; quantity: number; unit: string; neededBy: string;
-  budget: number; supplierId: string; owner: string;
+  budget: number; budgetKnown?: boolean; supplierId: string; owner: string;
 }
 
 export const prepareRequirement = (state: SupplySnapshot, input: RequirementDraft, id: string, actor: string): { ok: true; item: ProcurementItem } | { ok: false; error: string } => {
@@ -22,7 +22,7 @@ export const prepareRequirement = (state: SupplySnapshot, input: RequirementDraf
   return { ok: true, item: {
     id, stageId: input.stageId, budgetLineId: budgetLine?.id, item: input.item.trim(),
     quantity: input.quantity, unit: input.unit.trim(), neededBy: input.neededBy, status: 'need',
-    budget: input.budget, supplier: supplier?.name ?? 'Не выбран', supplierId: supplier?.id,
+    budget: input.budget, budgetKnown: input.budgetKnown ?? true, supplier: supplier?.name ?? 'Не выбран', supplierId: supplier?.id,
     owner: input.owner.trim() || actor,
   } };
 };

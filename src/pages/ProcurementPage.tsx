@@ -1,3 +1,4 @@
+import './operations-pages.css';
 import { useModuleRepository } from '../useModuleRepository';
 import { createSupplyRepository } from '../infrastructure/module-project';
 import { procurementSnapshot } from '../domain/procurement-workflow';
@@ -52,11 +53,13 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
   const [requirementProjectId, setRequirementProjectId] = useState(state.project.id);
   const [requirementError, setRequirementError] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [filter, setFilter] = useState<'active' | 'all' | 'risk'>('active');
+  const [filter, setFilter] = useState<'active' | 'all' | 'risk' | 'soon'>('soon');
   const [statusFilter, setStatusFilter] = useState<ProcurementStatus | null>(null);
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [counterpartyId, setCounterpartyId] = useState<string | null>(null);
+  const [receiptId, setReceiptId] = useState<string | null>(null);
+  const [receiptForm, setReceiptForm] = useState({ received: '', accepted: '', expected: '', note: '' });
   const [workflowError, setWorkflowError] = useState('');
   const [quoteExpected, setQuoteExpected] = useState('');
   const [quoteForId, setQuoteForId] = useState<string | null>(null);
@@ -67,6 +70,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
   }, [focusId, state.procurement]);
 
   const visibleItems = useMemo(() => state.procurement.filter((item) => {
+    if (filter === 'soon' && (['accepted', 'issued'].includes(item.status) || item.neededBy && item.neededBy > dateAfterDays(14))) return false;
     if (statusFilter && item.status !== statusFilter) return false;
     if (filter === 'active' && ['accepted', 'issued'].includes(item.status)) return false;
     if (filter === 'risk' && !item.risk) return false;
@@ -77,18 +81,22 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
     active: state.procurement.filter((item) => !['accepted', 'issued'].includes(item.status)).length,
     transit: state.procurement.filter((item) => item.status === 'in_transit').length,
     risks: state.procurement.filter((item) => item.risk).length,
-    accepted: state.procurement.filter((item) => ['accepted', 'issued'].includes(item.status)).reduce((sum, item) => sum + item.budget, 0),
+    accepted: state.procurement.filter((item) => ['accepted', 'issued'].includes(item.status)).length,
   };
 
   const addRequirement = (event: FormEvent) => {
     event.preventDefault();
-    const result = procurement.createRequirement({ projectId: requirementProjectId, draft: { ...form, quantity: Number(form.quantity), budget: Number(form.budget) } });
+    const result = procurement.createRequirement({ projectId: requirementProjectId, draft: { ...form, quantity: Number(form.quantity), budget: Number(form.budget), budgetKnown: form.budget.trim() !== '' } });
     if (!result.ok) { setRequirementError(result.error); return; }
     setShowForm(false);
     setForm({ ...form, item: '', quantity: '', budget: '', supplierId: '' });
   };
 
   const moveNext = (id: string) => {
+    const item = state.procurement.find(row => row.id === id);
+    if (item && ['in_transit', 'delivered'].includes(item.status)) {
+      setReceiptId(id); setReceiptForm({ received: String(item.receivedQuantity ?? 0), accepted: String(item.acceptedQuantity ?? 0), expected: item.expectedDeliveryDate ?? '', note: item.receiptNote ?? '' }); setSelectedId(null); return;
+    }
     const result = procurement.change({ action: 'advance', itemId: id, expected: procurementSnapshot(state, id) });
     setWorkflowError(result.ok ? '' : result.error);
   };
@@ -109,13 +117,13 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
   };
 
   return (
-    <div className="page-stack">
+    <div className="page-stack operations-page">
       {workflowError && !quoteForId && !selected && <p role="alert" className="form-warning">{workflowError}</p>}
       <section className="page-title-row">
         <div>
-          <span className="eyebrow">От потребности до списания</span>
+          <span className="eyebrow">{state.project.code} · Материалы к началу работ</span>
           <h1>Снабжение и материалы</h1>
-          <p>Материал появляется в закупке из графика работ и проходит приёмку до выдачи бригаде.</p>
+          <p>Что нужно заказать, когда материал приедет и кто отвечает за поставку.</p>
         </div>
         {role !== 'client' && <button type="button" data-tour="procurement-add" className="button button--primary" onClick={() => { setRequirementProjectId(state.project.id); setRequirementError(''); setShowForm(true); }}><Plus size={18} /> Создать потребность</button>}
       </section>
@@ -124,11 +132,11 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
         <button type="button" onClick={() => { setFilter('active'); setStatusFilter(null); }}><span><ClipboardList size={19} /></span><div><small>Активные позиции</small><strong>{metrics.active}</strong></div></button>
         <button type="button" onClick={() => { setFilter('all'); setStatusFilter('in_transit'); }}><span><Truck size={19} /></span><div><small>Сейчас в пути</small><strong>{metrics.transit}</strong></div></button>
         <button type="button" className={metrics.risks ? 'supply-metric--risk' : ''} onClick={() => { setFilter('risk'); setStatusFilter(null); }}><span><AlertTriangle size={19} /></span><div><small>Риски поставки</small><strong>{metrics.risks}</strong></div></button>
-        <button type="button" onClick={() => { setFilter('all'); setStatusFilter('accepted'); }}><span><PackageCheck size={19} /></span><div><small>Принято материалов</small><strong>{money(metrics.accepted)}</strong></div></button>
+        <button type="button" onClick={() => { setFilter('all'); setStatusFilter('accepted'); }}><span><PackageCheck size={19} /></span><div><small>Принято позиций</small><strong>{metrics.accepted}</strong></div></button>
       </section>
 
-      <section className="panel supply-pipeline-panel">
-        <SectionHeader eyebrow="Единый маршрут" title="Воронка снабжения" />
+      <details className="panel supply-pipeline-panel">
+        <summary>Все статусы поставок</summary>
         <div className="supply-pipeline">
           {statusOrder.map((status, index) => (
             <button type="button" className={statusFilter === status ? 'supply-pipeline__step supply-pipeline__step--active' : 'supply-pipeline__step'} key={status} onClick={() => { setFilter('all'); setStatusFilter(statusFilter === status ? null : status); }}>
@@ -138,14 +146,14 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
             </button>
           ))}
         </div>
-      </section>
+      </details>
 
       <section className="panel supply-register">
         <div className="supply-register__header">
-          <div><span className="eyebrow">Реестр</span><h2>Позиции проекта</h2></div>
+          <div><span className="eyebrow">Реестр</span><h2>{filter === 'soon' ? 'Нужно в ближайшие 14 дней' : 'Позиции проекта'}</h2></div>
           <div className="supply-register__tools">
             <label className="search-field"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Материал или поставщик" /></label>
-            <div className="segmented-control"><button className={filter === 'active' ? 'active' : ''} onClick={() => setFilter('active')}>Активные</button><button className={filter === 'risk' ? 'active' : ''} onClick={() => setFilter('risk')}>Риски</button><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Все</button></div>
+            <div className="segmented-control segmented-control--wrap"><button className={filter === 'soon' ? 'active' : ''} onClick={() => { setFilter('soon'); setStatusFilter(null); }}>14 дней</button><button className={filter === 'active' ? 'active' : ''} onClick={() => setFilter('active')}>Активные</button><button className={filter === 'risk' ? 'active' : ''} onClick={() => setFilter('risk')}>Риски</button><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Все</button></div>
           </div>
         </div>
         <div className="supply-table">
@@ -159,7 +167,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
                 <span data-label="Этап">{stage?.shortName ?? '—'}</span>
                 <span data-label="Нужно к">{formatDate(item.neededBy)}</span>
                 <span data-label="Поставщик">{item.supplier}</span>
-                <strong data-label="Бюджет">{money(item.budget)}</strong>
+                <strong data-label="Бюджет">{item.budgetKnown === false || item.budget === 0 && item.budgetKnown !== true ? 'Уточняется' : money(item.budget)}</strong>
                 <span data-label="Статус"><StatusBadge label={statusLabels[item.status]} tone={toneForStatus(item.status)} /></span>
                 <span>{role !== 'client' && !isFinal && <button type="button" className="advance-button" onClick={(event) => { event.stopPropagation(); moveNext(item.id); }} title={`Перевести в статус «${statusLabels[statusOrder[statusOrder.indexOf(item.status) + 1]]}»`}>{item.status === 'delivered' ? <Check size={16} /> : <ArrowRight size={16} />}</button>}</span>
               </div>
@@ -169,11 +177,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
         </div>
       </section>
 
-      <section className="supply-rule-grid">
-        <article><span><ShoppingCart size={20} /></span><div><strong>Закупка начинается из потребности</strong><p>Прораб не пишет список в мессенджере: материал привязан к этапу и сроку.</p></div></article>
-        <article><span><PackageCheck size={20} /></span><div><strong>Приёмка до оплаты</strong><p>Количество, состояние и документы фиксируются при доставке на объект.</p></div></article>
-        <article><span><Warehouse size={20} /></span><div><strong>Выдача и остаток</strong><p>Следующий слой добавит склад, списание на дом и возврат неиспользованного.</p></div></article>
-      </section>
+      <div className="operations-context"><Truck size={19} /><span><strong>Кто ведёт:</strong> руководитель строительства задаёт потребность; ответственный за закупку организует поставку; принимающий фиксирует количество и замечания. Оплата учитывается отдельно.</span></div>
 
       {showForm && (
         <Modal title="Новая потребность" subtitle="Создаётся до запроса цен — с привязкой к этапу и дате потребности." onClose={() => setShowForm(false)}>
@@ -187,7 +191,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
             </div>
             <Field label="Этап работ"><select value={form.stageId} onChange={(event) => setForm({ ...form, stageId: event.target.value })}>{state.stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.order}. {stage.name}</option>)}</select></Field>
             <div className="form-grid">
-              <Field label="Ориентир бюджета, ₽"><input min="0" type="number" value={form.budget} onChange={(event) => setForm({ ...form, budget: event.target.value })} placeholder="0" /></Field>
+              <Field label="Ориентир бюджета, ₽"><input min="0" type="number" value={form.budget} onChange={(event) => setForm({ ...form, budget: event.target.value })} placeholder="Пока неизвестен" /></Field>
               <Field label="Предпочтительный поставщик"><select value={form.supplierId} onChange={(event) => setForm({ ...form, supplierId: event.target.value })}><option value="">Будет выбран после сравнения</option>{state.counterparties.filter((item) => (item.type === 'supplier' || item.type === 'contractor') && item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}{item.specialty ? ` · ${item.specialty}` : ''}</option>)}</select></Field>
             </div>
             <Field label="Ответственный"><input value={form.owner} onChange={(event) => setForm({ ...form, owner: event.target.value })} /></Field>
@@ -202,9 +206,11 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
           <div className="entity-detail-grid">
             <section className="entity-detail-card"><small>Потребность</small><strong>{selected.quantity} {selected.unit}</strong><span>{selected.reason ?? 'Основание не заполнено'}</span></section>
             <section className="entity-detail-card"><small>Проект и этап</small><strong>{state.stages.find((item) => item.id === selected.stageId)?.name ?? 'Этап не найден'}</strong><span>{state.budgetLines.find((item) => item.id === selected.budgetLineId)?.name ?? 'Без статьи бюджета'}</span></section>
-            <section className="entity-detail-card"><small>Поставщик</small><button type="button" className="entity-link" disabled={!selected.supplierId} onClick={() => { setSelectedId(null); setCounterpartyId(selected.supplierId ?? null); }}>{selected.supplier}</button><span>{money(selected.budget)}</span></section>
+            <section className="entity-detail-card"><small>Поставщик</small><button type="button" className="entity-link" disabled={!selected.supplierId} onClick={() => { setSelectedId(null); setCounterpartyId(selected.supplierId ?? null); }}>{selected.supplier}</button><span>{selected.budgetKnown === false || selected.budget === 0 && selected.budgetKnown !== true ? 'Стоимость уточняется' : money(selected.budget)}</span></section>
             <section className="entity-detail-card"><small>Ответственный</small><strong>{selected.owner}</strong><span>{selected.deliveryAddress ?? `Объект ${state.project.code}`}</span></section>
           </div>
+          {selected.receivedQuantity !== undefined && <div className="supply-next-action">Получено {selected.receivedQuantity} из {selected.quantity} {selected.unit} · принято {selected.acceptedQuantity ?? 0}{selected.expectedDeliveryDate ? ` · ожидаем ${formatDate(selected.expectedDeliveryDate)}` : ''}{selected.receiptNote ? ` · ${selected.receiptNote}` : ''}</div>}
+          {role !== 'client' && ['ordered', 'in_transit', 'delivered', 'accepted'].includes(selected.status) && <button type="button" className="button button--secondary" onClick={() => { setReceiptId(selected.id); setReceiptForm({ received: String(selected.receivedQuantity ?? 0), accepted: String(selected.acceptedQuantity ?? 0), expected: selected.expectedDeliveryDate ?? '', note: selected.receiptNote ?? '' }); setSelectedId(null); }}>Уточнить получение и приёмку</button>}
           {selected.risk && <div className="entity-alert"><AlertTriangle size={18} /><span><strong>Риск поставки</strong>{selected.risk}</span></div>}
           <div className="entity-detail-section"><SectionHeader eyebrow="Сравнение" title="Предложения поставщиков" action={<div className="section-action-row"><span className="count-badge">{state.supplierQuotes.filter((item) => item.procurementItemId === selected.id).length}</span>{role !== 'client' && <button type="button" className="button button--secondary button--compact" onClick={() => { setQuoteExpected(procurementSnapshot(state, selected.id)); setWorkflowError(''); setQuoteForId(selected.id); setSelectedId(null); }}><Plus size={15} /> Добавить КП</button>}</div>} />
             <div className="quote-list">{state.supplierQuotes.filter((item) => item.procurementItemId === selected.id).map((quote) => <article key={quote.id} className={quote.status === 'selected' ? 'quote-card quote-card--selected' : 'quote-card'}><div><button type="button" className="entity-link entity-link--compact" disabled={!quote.supplierId} onClick={() => { setSelectedId(null); setCounterpartyId(quote.supplierId ?? null); }}>{quote.supplier}</button><small>{quote.source} · {quote.deliveryDays} дн.</small></div><strong>{money(quote.amount)}</strong><p>{quote.paymentTerms}{quote.comment ? ` · ${quote.comment}` : ''}</p>{quote.status === 'selected' ? <StatusBadge label="Выбрано" tone="positive" /> : role !== 'client' ? <button type="button" className="button button--secondary button--compact" onClick={() => selectQuote(quote.id)}>Выбрать</button> : <StatusBadge label="Предложение" />}</article>)}</div>
@@ -215,6 +221,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
         </Modal>
       )}
       {quoteForId && <Modal title="Добавить коммерческое предложение" subtitle={state.procurement.find((item) => item.id === quoteForId)?.item} onClose={() => setQuoteForId(null)}><form className="modal-form" onSubmit={addQuote}>{workflowError && <p role="alert" className="form-warning">{workflowError}</p>}{!state.counterparties.some((item) => (item.type === 'supplier' || item.type === 'contractor') && item.status !== 'blocked') && <div className="form-warning"><AlertTriangle size={18} /><span>Сначала добавьте поставщика в единый справочник.</span></div>}<Field label="Поставщик"><select required value={quoteForm.supplierId} onChange={(event) => setQuoteForm({ ...quoteForm, supplierId: event.target.value })}><option value="">Выберите поставщика</option>{state.counterparties.filter((item) => (item.type === 'supplier' || item.type === 'contractor') && item.status !== 'blocked').map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field><div className="form-grid"><Field label="Цена, ₽"><input required min="1" type="number" inputMode="numeric" value={quoteForm.amount} onChange={(event) => setQuoteForm({ ...quoteForm, amount: event.target.value })} /></Field><Field label="Срок поставки, дней"><input required min="0" type="number" inputMode="numeric" value={quoteForm.deliveryDays} onChange={(event) => setQuoteForm({ ...quoteForm, deliveryDays: event.target.value })} /></Field></div><Field label="Условия оплаты"><input required value={quoteForm.paymentTerms} onChange={(event) => setQuoteForm({ ...quoteForm, paymentTerms: event.target.value })} placeholder="Аванс / постоплата / отсрочка" /></Field><div className="form-grid"><Field label="Источник"><input value={quoteForm.source} onChange={(event) => setQuoteForm({ ...quoteForm, source: event.target.value })} /></Field><Field label="Комментарий"><input value={quoteForm.comment} onChange={(event) => setQuoteForm({ ...quoteForm, comment: event.target.value })} /></Field></div><div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setQuoteForId(null)}>Отмена</button><button type="submit" className="button button--primary" disabled={!quoteForm.supplierId}>Сохранить предложение</button></div></form></Modal>}
+      {receiptId && <Modal title="Получение материалов" subtitle={state.procurement.find(item => item.id === receiptId)?.item} onClose={() => setReceiptId(null)}><form className="modal-form" onSubmit={event => { event.preventDefault(); const result = procurement.change({ action: 'receipt', itemId: receiptId, expected: procurementSnapshot(state, receiptId), receivedQuantity: Number(receiptForm.received), acceptedQuantity: Number(receiptForm.accepted), expectedDeliveryDate: receiptForm.expected, note: receiptForm.note }); if (!result.ok) { setWorkflowError(result.error); return; } setWorkflowError(''); setSelectedId(receiptId); setReceiptId(null); }}><div className="form-grid"><Field label="Получено всего"><input required type="number" min="0" step="0.01" value={receiptForm.received} onChange={event => setReceiptForm({ ...receiptForm, received: event.target.value })} /></Field><Field label="Принято без замечаний"><input required type="number" min="0" step="0.01" value={receiptForm.accepted} onChange={event => setReceiptForm({ ...receiptForm, accepted: event.target.value })} /></Field></div><Field label="Ожидаем следующую поставку"><input type="date" value={receiptForm.expected} onChange={event => setReceiptForm({ ...receiptForm, expected: event.target.value })} /></Field><Field label="Недопоставка, брак или возврат"><textarea value={receiptForm.note} onChange={event => setReceiptForm({ ...receiptForm, note: event.target.value })} /></Field>{workflowError && <p role="alert" className="form-warning">{workflowError}</p>}<div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setReceiptId(null)}>Отмена</button><button type="submit" className="button button--primary">Сохранить получение</button></div></form></Modal>}
       {counterpartyId && <CounterpartyModal state={state} counterpartyId={counterpartyId} onClose={() => setCounterpartyId(null)} />}
     </div>
   );

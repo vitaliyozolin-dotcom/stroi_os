@@ -1,3 +1,4 @@
+import { receiveQualityReply } from './quality-replies.js';
 import { clean } from '../lib/validation.js';
 import { addDays, dateKey } from '../lib/date.js';
 import { telegramSend } from './transport.js';
@@ -19,7 +20,7 @@ export const telegramMessageMentionsBot = (message, botUsername) => {
   });
 };
 
-export const createTelegramUpdateProcessor = ({ readSnapshot, bindingsForTelegramUser, bindingForTelegramUser, bindingForTelegramProject, telegramBotUsername, telegramGroupChatAuthorized, bindTelegramUser, createTelegramDraft, telegramReadCommands, telegramWriteDrafts, telegramAttachmentDrafts, telegramConfirmTask, telegramConfirmNote, telegramConfirmExpense, telegramConfirmFile, telegramChangeTaskStatus }) => {
+export const createTelegramUpdateProcessor = ({ readSnapshot, bindingsForTelegramUser, bindingForTelegramUser, bindingForTelegramProject, telegramBotUsername, telegramGroupChatAuthorized, bindTelegramUser, createTelegramDraft, telegramReadCommands, telegramWriteDrafts, telegramAttachmentDrafts, telegramConfirmTask, telegramConfirmNote, telegramConfirmExpense, telegramConfirmFile, telegramChangeTaskStatus, mutateProjectFromTelegram, mutationNoop }) => {
   const runClaimedTelegramDraft = async (callback, draft, env, action) => {
     const lease = await claimTelegramDraft(env.DB, draft);
     if (!lease) {
@@ -191,6 +192,7 @@ export const createTelegramUpdateProcessor = ({ readSnapshot, bindingsForTelegra
     }
 
     if (message.document || message.photo || message.voice) {
+      if (message.photo && (message.reply_to_message || message.media_group_id) && await receiveQualityReply({ message, bindings, env, botUsername: botUsername || await telegramBotUsername(env), readSnapshot, mutateProjectFromTelegram, mutationNoop })) return;
       const captionCommand = commandFromText(message.caption);
       const acceptedAttachment = isPrivate || (
         telegramCommandTargetsBot(captionCommand, botUsername)

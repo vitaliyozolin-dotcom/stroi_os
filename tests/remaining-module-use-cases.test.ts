@@ -86,7 +86,7 @@ test('review command restricts reporter, validates input, and does not forge con
  assert.ok(result.change.state.stages[0].siteUpdate?.requestId); assert.equal(result.change.state.stages[0].siteUpdate?.confirmationId, undefined); assert.equal(result.change.state.stages[0].siteUpdate?.updatedAt, undefined);
 });
 test('stage control commits metadata and uses injected clocks/IDs without changing financial facts', () => {
- const state = scheduleFixture(), stage = state.stages[0]; state.tasks = []; state.checkpoints = [];
+ const state = scheduleFixture(), stage = state.stages[0]; stage.schedule!.updatedAt = now; state.tasks = []; state.checkpoints = [];
  const next = commitStageControl(state, stage.id, 'start', { date: '2026-10-20', note: 'Работы начаты', tasks: [] }, identity.name, identity.role, identity.id, stageCommandSnapshot(state, stage.id), clock, idGenerator(), (candidate, metadata) => { assert.equal(metadata?.action, 'schedule_updated'); assert.equal(candidate.activity[0].timestamp, now); });
  assert.equal(next.activity[0].id, 'activity-1'); assert.equal(next.stages[0].status, 'in_progress'); assert.deepEqual(next.financeEntries, state.financeEntries);
  assert.throws(() => commitStageControl(next, stage.id, 'complete', { date: '2026-10-20', note: 'Готово', tasks: [] }, identity.name, identity.role, identity.id, stageCommandSnapshot(state, stage.id), clock, idGenerator(), () => {}));

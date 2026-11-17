@@ -13,14 +13,14 @@ export const createIntegrationStatus = ({ ensureSchema, resolveTelegramConnectio
       const [bindingRow, outboxRow, outboxErrorRow] = await Promise.all([
         env.DB.prepare('SELECT COUNT(*) AS count FROM telegram_bindings').first(),
         env.DB.prepare(`
-          SELECT COUNT(*) AS count, SUM(CASE WHEN status = 'dead' THEN 1 ELSE 0 END) AS dead_count
+          SELECT COUNT(*) AS count, SUM(CASE WHEN status IN ('dead', 'uncertain') THEN 1 ELSE 0 END) AS dead_count
           FROM telegram_outbox
-          WHERE status != 'sent'
+          WHERE status NOT IN ('sent', 'canceled')
         `).first(),
         env.DB.prepare(`
           SELECT last_error
           FROM telegram_outbox
-          WHERE status != 'sent' AND last_error IS NOT NULL
+          WHERE status NOT IN ('sent', 'canceled') AND last_error IS NOT NULL
           ORDER BY updated_at DESC
           LIMIT 1
         `).first(),

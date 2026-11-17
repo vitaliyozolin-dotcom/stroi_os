@@ -18,6 +18,8 @@ import { validateOrderRelationsChanges } from '../../src/domain/order-relations.
 import { validateOrderDirectoryReferences } from '../orders/directory.js';
 import { validateSharedPaymentWrite } from './shared-payment.js';
 
+import { createLifecycle, validateLifecycleChanges, lifecycleItemBlockers } from '../../src/domain/project-lifecycle.js';
+
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_JSON_BODY_BYTES = 32 * 1024;
 
@@ -87,6 +89,11 @@ const write = async (request, env, context, atomicFinance = false, afterCommit, 
     const mergedState = mergeStateForRole(previousSnapshot?.state ?? null, incomingState, identity, {
       serverManagedRoster: env.AUTH_ROSTER_MODE === 'local_password',
     });
+    // A newly created project always enters preparation, including API/import callers.
+    // Historical stored projects retain their existing facts and opt into review separately.
+    if ((!previousSnapshot || previousSnapshot.state.project.status === 'workspace') && mergedState.project.status !== 'workspace' && !mergedState.project.lifecycle) {
+      mergedState.project.lifecycle = createLifecycle(now);
+    }
     if (previousSnapshot?.state.project.creationRequestId) {
       if (mergedState.project.creationRequestId && mergedState.project.creationRequestId !== previousSnapshot.state.project.creationRequestId) return json({ ok: false, error: 'immutable_creation_request' }, 422);
       mergedState.project.creationRequestId = previousSnapshot.state.project.creationRequestId;
@@ -101,6 +108,21 @@ const write = async (request, env, context, atomicFinance = false, afterCommit, 
     if (directoryError) return json({ ok: false, error: 'invalid_order_references', message: directoryError }, 422);
     const orderError = validateOrderRelationsChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
     if (orderError) return json({ ok: false, error: 'invalid_order_relations', message: orderError }, 422);
+    for (const lead of mergedState.leads ?? []) {
+      const old = previousSnapshot?.state.leads?.find(row => row.id === lead.id);
+      if (old?.projectId && old.projectId !== lead.projectId) return json({ ok: false, error: 'invalid_lead_transition', message: 'Связь обращения с проектом неизменяема.' }, 422);
+      if (lead.stage === 'won' && old?.stage !== 'won') {
+        const linked = lead.projectId === mergedState.project.id ? { state: mergedState } : lead.projectId ? await readSnapshot(env.DB, lead.projectId) : null;
+        const contract = linked?.state.project.lifecycle?.items?.find(item => item.key === 'contract');
+        if (!linked || linked.state.project.lifecycle?.sourceLeadId !== lead.id || contract?.status !== 'done' || lifecycleItemBlockers(linked.state, 'contract').length) return json({ ok: false, error: 'invalid_lead_transition', message: 'Договор подтверждается в связанном проекте после сметы и загрузки подписанного оригинала.' }, 422);
+      }
+      if (lead.stage === 'preparation' && (old?.stage !== 'preparation' || old?.projectId !== lead.projectId)) {
+        const linked = lead.projectId ? await readSnapshot(env.DB, lead.projectId) : null;
+        if (!linked || linked.state.project.lifecycle?.sourceLeadId !== lead.id) return json({ ok: false, error: 'invalid_lead_transition', message: 'Сначала создайте связанный проект через передачу в подготовку.' }, 422);
+      }
+    }
+    const lifecycleError = validateLifecycleChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
+    if (lifecycleError) return json({ ok: false, error: 'invalid_project_lifecycle', message: lifecycleError }, 422);
     const stageError = validateStageControl(previousSnapshot?.state ?? null, mergedState, identity, now);
     if (stageError) return json({ ok: false, error: 'invalid_stage_transition', message: stageError }, 422);
     const baselineError = validateBaselineChanges(previousSnapshot?.state ?? null, mergedState, identity, now);

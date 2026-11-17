@@ -14,9 +14,9 @@ export type PageId =
 
 export const pageLabels: Record<PageId, string> = {
   overview: 'Главная', project: 'Карточка проекта', tasks: 'Задачи',
-  marketing: 'Маркетинг', counterparties: 'Подрядчики и поставщики',
+  marketing: 'Клиенты и воронка', counterparties: 'Подрядчики и поставщики',
   customers: 'Заказчики и заказы',
-  finance: 'Финансы', schedule: 'График работ', procurement: 'Снабжение',
+  finance: 'Финансы', schedule: 'График строительства', procurement: 'Снабжение',
   quality: 'Контроль качества', client: 'Кабинет клиента', settings: 'Настройки',
 };
 

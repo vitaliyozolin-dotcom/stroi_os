@@ -7,7 +7,7 @@ export interface TreasuryEntry {
   payments?: { id: string; amount: number; date: string }[];
 }
 export interface TreasuryProject {
-  project: { id: string };
+  project: { id: string; funding?: { escrowAccountId?: string } };
   treasury?: TreasuryState;
   financeLedger?: FinanceLedgerState;
   financeEntries: TreasuryEntry[];

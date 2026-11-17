@@ -1,15 +1,18 @@
-import { clean, safeFileName } from '../lib/validation.js';
+import { clean, safeFileName, validProjectId, detectRasterImageType } from '../lib/validation.js';
+import { readStreamPrefix } from '../lib/request-body.js';
 import { claimUploadAdmission } from '../lib/upload-admission.js';
 import { parseTelegramBody, telegramApiUrl, telegramRequest, telegramTransportHeaders } from './transport.js';
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
-export const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uploadedBy, draftId) => {
+export const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeType, uploadedBy, draftId, checkpointId = '') => {
+  if (checkpointId && !validProjectId(checkpointId)) throw new Error('invalid_checkpoint');
+  const maxBytes = checkpointId ? 12 * 1024 * 1024 : MAX_FILE_BYTES;
   const metadataResponse = await telegramRequest(env.TELEGRAM_BOT_TOKEN, 'getFile', { file_id: fileId });
   const metadataBody = await parseTelegramBody(metadataResponse);
   if (!metadataResponse.ok || !metadataBody?.ok || !metadataBody.result?.file_path) throw new Error('telegram_file_unavailable');
   const declaredSize = Number(metadataBody.result.file_size) || 0;
-  if (declaredSize > MAX_FILE_BYTES) throw new Error('telegram_file_too_large');
+  if (declaredSize > maxBytes) throw new Error('telegram_file_too_large');
   const releaseUpload = claimUploadAdmission();
   if (!releaseUpload) throw new Error('upload_busy');
   try {
@@ -20,11 +23,14 @@ export const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeTyp
     if (!sourceResponse.ok || !sourceResponse.body) throw new Error('telegram_file_unavailable');
     const safeName = safeFileName(fileName);
     const stableDraftId = clean(draftId, 80) || crypto.randomUUID();
-    const key = `${projectId}/telegram/${stableDraftId}-${safeName}`;
+    const key = checkpointId ? `${projectId}/quality/${checkpointId}/${stableDraftId}-${safeName}` : `${projectId}/telegram/${stableDraftId}-${safeName}`;
+    let body = sourceResponse.body;
+    let qualityMime = '';
+    if (checkpointId) { const [probe, original] = body.tee(); body = original; qualityMime = detectRasterImageType(await readStreamPrefix(probe)); if (!qualityMime) throw new Error('unsupported_quality_photo'); }
     const uploadedAt = new Date().toISOString();
-    await env.BUCKET.put(key, sourceResponse.body, {
-      maxBytes: MAX_FILE_BYTES,
-      httpMetadata: { contentType: clean(mimeType, 120) || sourceResponse.headers.get('content-type') || 'application/octet-stream' },
+    await env.BUCKET.put(key, body, {
+      maxBytes,
+      httpMetadata: { contentType: qualityMime || clean(mimeType, 120) || sourceResponse.headers.get('content-type') || 'application/octet-stream' },
       customMetadata: {
         projectId,
         originalName: safeName,
@@ -37,7 +43,7 @@ export const telegramFileToR2 = async (env, projectId, fileId, fileName, mimeTyp
       id: `attachment-telegram-${stableDraftId}`,
       key,
       name: safeName,
-      mimeType: clean(mimeType, 120) || sourceResponse.headers.get('content-type') || 'application/octet-stream',
+      mimeType: qualityMime || clean(mimeType, 120) || sourceResponse.headers.get('content-type') || 'application/octet-stream',
       sizeBytes: declaredSize || Number(sourceResponse.headers.get('content-length')) || 0,
       uploadedAt,
       uploadedBy: clean(uploadedBy, 160),

@@ -25,10 +25,11 @@ export const validFinanceDueDate = (value: unknown): value is string => {
 };
 
 // Legacy dates include today; treasury shows the seven days after its end-of-day cutoff.
-export function financeCalendarItems(state: AppState | Pick<AppState, 'financeEntries'> & Partial<Pick<AppState, 'financeLedger'>>, today = financeCalendarToday()): FinanceCalendarItem[] {
+export function financeCalendarItems(state: AppState | Pick<AppState, 'financeEntries'> & Partial<Pick<AppState, 'financeLedger'>>, today = financeCalendarToday(), horizonDays = 7): FinanceCalendarItem[] {
   if (!validFinanceDueDate(today)) throw new Error('Invalid calendar date');
+  if (!Number.isSafeInteger(horizonDays) || horizonDays < 1 || horizonDays > 365) throw new Error('Invalid calendar horizon');
   const end = new Date(`${today}T12:00:00Z`);
-  end.setUTCDate(end.getUTCDate() + ('treasury' in state && state.treasury?.enabled ? 7 : 6));
+  end.setUTCDate(end.getUTCDate() + ('treasury' in state && state.treasury?.enabled ? horizonDays : horizonDays - 1));
   const cutoff = end.toISOString().slice(0, 10);
   const groups: FinanceCalendarGroup[] = ['overdue', 'next7', 'later', 'undated'];
   let items: FinanceCalendarItem[];

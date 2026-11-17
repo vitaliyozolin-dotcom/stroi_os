@@ -46,7 +46,7 @@ import type {
 import type { PageId } from '../presentation/navigation';
 import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 
-type TaskScope = 'all' | 'mine' | 'today' | 'overdue' | 'review' | 'done';
+type TaskScope = 'all' | 'mine' | 'today' | 'overdue' | 'review' | 'done' | 'unassigned' | 'undated';
 type TaskView = 'tasks' | 'kanban' | 'people';
 
 const today = planToday;
@@ -118,7 +118,10 @@ export function TasksPage({
     ? state.tasks
     : state.tasks.filter((task) => task.assigneeId === session.id || task.assigneeName === session.name);
 
-  const [view, setView] = useState<TaskView>('tasks');
+  const viewKey = `ikioma.tasks.view:${state.project.id}:${session.id}`;
+  const [view, setStoredView] = useState<TaskView>(() => { try { const saved = localStorage.getItem(viewKey); return ['tasks', 'kanban', 'people'].includes(saved || '') ? saved as TaskView : 'kanban'; } catch { return 'kanban'; } });
+  useEffect(() => { try { const saved = localStorage.getItem(viewKey); setStoredView(['tasks', 'kanban', 'people'].includes(saved || '') ? saved as TaskView : 'kanban'); } catch { setStoredView('kanban'); } }, [viewKey]);
+  const setView = (next: TaskView) => { setStoredView(next); try { localStorage.setItem(viewKey, next); } catch { /* The board also works without storage. */ } };
   const [scope, setScope] = useState<TaskScope>(role === 'management' ? 'all' : 'mine');
   const [search, setSearch] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
@@ -136,7 +139,6 @@ export function TasksPage({
   useEffect(() => {
     if (focusId && visibleTasks.some((task) => task.id === focusId)) {
       setSelectedId(focusId);
-      setView('tasks');
     }
   }, [focusId, visibleTasks]);
 
@@ -153,6 +155,8 @@ export function TasksPage({
         if (scope === 'today' && task.dueDate !== todayKey) return false;
         if (scope === 'overdue' && !isTaskOverdue(task, todayKey)) return false;
         if (scope === 'review' && task.status !== 'review') return false;
+        if (scope === 'unassigned' && (isTaskClosed(task.status) || task.assigneeId)) return false;
+        if (scope === 'undated' && (isTaskClosed(task.status) || task.dueDate)) return false;
         if (scope === 'done' && task.status !== 'done') return false;
         if (assigneeFilter && task.assigneeId !== assigneeFilter) return false;
         if (!query) return true;
@@ -257,6 +261,7 @@ export function TasksPage({
     { id: 'overdue', label: 'Просроченные', count: overdueTasks.length },
     { id: 'review', label: 'На проверке', count: reviewTasks.length },
     { id: 'done', label: 'Выполненные' },
+    ...(role === 'management' ? [{ id: 'unassigned' as const, label: 'Без ответственного', count: openTasks.filter(task => !task.assigneeId).length }, { id: 'undated' as const, label: 'Без срока', count: openTasks.filter(task => !task.dueDate).length }] : []),
   ];
 
   return (
@@ -264,24 +269,24 @@ export function TasksPage({
       <section className="page-title-row">
         <div>
           <span className="eyebrow">Внутренняя работа команды</span>
-          <h1>Задачи и ответственность</h1>
-          <p>Один ответственный, понятный срок, связь с проектом и полная история изменений.</p>
+          <h1>Задачи</h1>
+          <p>Кто делает следующий шаг и к какому сроку.</p>
         </div>
         {role === 'management' && <button type="button" data-tour="task-add" className="button button--primary" onClick={openCreate}><Plus size={17} /> Новая задача</button>}
       </section>
 
       <section className="task-metric-grid">
-        <button type="button" onClick={() => { setView('tasks'); setScope('all'); }}><span><ClipboardList size={19} /></span><small>Активные</small><strong>{openTasks.length}</strong><p>{openTasks.filter((task) => task.status === 'in_progress').length} сейчас в работе</p></button>
-        <button type="button" className={overdueTasks.length ? 'task-metric--danger' : ''} onClick={() => { setView('tasks'); setScope('overdue'); }}><span><AlertTriangle size={19} /></span><small>Просрочены</small><strong>{overdueTasks.length}</strong><p>{overdueTasks.length ? 'нужна новая дата или действие' : 'сроки под контролем'}</p></button>
-        <button type="button" onClick={() => { setView('tasks'); setScope('today'); }}><span><CalendarClock size={19} /></span><small>Срок сегодня</small><strong>{todayTasks.length}</strong><p>{todayTasks.filter((task) => task.status === 'review').length} ожидают проверки</p></button>
-        <button type="button" onClick={() => { setView('tasks'); setScope('review'); }}><span><ShieldCheck size={19} /></span><small>На проверке</small><strong>{reviewTasks.length}</strong><p>не закрываются без результата</p></button>
+        <button type="button" onClick={() => { setScope('all'); }}><span><ClipboardList size={19} /></span><small>Активные</small><strong>{openTasks.length}</strong><p>{openTasks.filter((task) => task.status === 'in_progress').length} сейчас в работе</p></button>
+        <button type="button" className={overdueTasks.length ? 'task-metric--danger' : ''} onClick={() => { setScope('overdue'); }}><span><AlertTriangle size={19} /></span><small>Просрочены</small><strong>{overdueTasks.length}</strong><p>{overdueTasks.length ? 'нужна новая дата или действие' : 'сроки под контролем'}</p></button>
+        <button type="button" onClick={() => { setScope('today'); }}><span><CalendarClock size={19} /></span><small>Срок сегодня</small><strong>{todayTasks.length}</strong><p>{todayTasks.filter((task) => task.status === 'review').length} ожидают проверки</p></button>
+        <button type="button" onClick={() => { setScope('review'); }}><span><ShieldCheck size={19} /></span><small>На проверке</small><strong>{reviewTasks.length}</strong><p>не закрываются без результата</p></button>
       </section>
 
       <section className="panel task-workspace" data-tour="task-workspace">
         <div className="task-workspace__head">
           <div className="task-view-switch">
-            <button type="button" className={view === 'tasks' ? 'active' : ''} onClick={() => setView('tasks')}><ClipboardList size={17} /> Задачи</button>
             <button type="button" className={view === 'kanban' ? 'active' : ''} onClick={() => setView('kanban')}><Kanban size={17} /> Канбан</button>
+            <button type="button" className={view === 'tasks' ? 'active' : ''} onClick={() => setView('tasks')}><ClipboardList size={17} /> Список</button>
             {role === 'management' && <button type="button" className={view === 'people' ? 'active' : ''} onClick={() => setView('people')}><UsersRound size={17} /> Ответственные</button>}
           </div>
           {view !== 'people' && <div className="task-search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Найти задачу, этап или человека" /></div>}
@@ -297,7 +302,7 @@ export function TasksPage({
               </select>}
             </div>
 
-            {view === 'kanban' ? <TaskKanban tasks={filteredTasks} stages={state.stages} today={todayKey} onOpen={id => { const task = filteredTasks.find(item => item.id === id); setSelectedId(id); setComment(''); setCompletionNote(task?.completionNote ?? ''); }} /> : <div className="task-list">
+            {view === 'kanban' ? <TaskKanban projectCode={state.project.code} tasks={filteredTasks} stages={state.stages} today={todayKey} onOpen={id => { const task = filteredTasks.find(item => item.id === id); setSelectedId(id); setComment(''); setCompletionNote(task?.completionNote ?? ''); }} /> : <div className="task-list">
               {filteredTasks.map((task) => {
                 const stage = state.stages.find((item) => item.id === task.stageId);
                 const overdue = isTaskOverdue(task, todayKey);

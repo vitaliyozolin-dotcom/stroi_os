@@ -53,7 +53,11 @@ test('only the owner can create a project at revision zero', async () => {
   assert.equal(response.status, 200);
   assert.equal(body.ok, true);
   assert.equal(body.snapshot.revision, 1);
-  assert.deepEqual(body.snapshot.state, state);
+  const created = body.snapshot.state as typeof state & { project: { lifecycle: { phase: string; items: {status: string}[] } } };
+  assert.equal(created.project.lifecycle.phase, 'preparation');
+  assert.ok(created.project.lifecycle.items.every(item => item.status === 'pending'));
+  const { lifecycle, ...project } = created.project;
+  assert.deepEqual({ ...created, project }, state);
   await backgroundTask;
 });
 
@@ -66,4 +70,17 @@ test('project write rejects mismatched payload and URL project identifiers', asy
   const response = await handlerFor()(request, { DB: {}, OWNER_EMAIL: 'owner@example.test' }, { waitUntil() {} });
   assert.equal(response.status, 422);
   assert.equal((await response.json() as { error: string }).error, 'invalid_state');
+});
+
+
+test('revision zero cannot import started work by omitting lifecycle preparation', async () => {
+  const state = { ...projectState(), stages: [{ id: 'work', name: 'Work', status: 'in_progress', actualStart: '2026-11-01' }] };
+  const request = new Request('https://example.test/api/state?projectId=project-1', { method: 'PUT', headers: ownerHeaders, body: JSON.stringify({ projectId: 'project-1', expectedRevision: 0, state }) });
+  let persisted = false;
+  const response = await handlerFor()(request, { DB: { batch: async () => { persisted = true; throw new Error('must not persist'); } }, OWNER_EMAIL: 'owner@example.test' }, { waitUntil() {} });
+  assert.equal(response.status, 422);
+  const body = await response.json();
+  assert.equal(body.error, 'invalid_project_lifecycle');
+  assert.match(body.message, /этап 0/);
+  assert.equal(persisted, false);
 });

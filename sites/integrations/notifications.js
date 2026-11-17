@@ -1,6 +1,7 @@
 import { clean } from '../lib/validation.js';
 import { telegramDurableSend } from '../telegram/outbox.js';
 import { taskActionMarkup } from '../telegram/rendering.js';
+import { missingQualityShots } from '../automations/project-coordinator.js';
 
 const notificationStatusLabels = {
   ordered: 'заказано', in_transit: 'в пути', delivered: 'доставлено', accepted: 'принято',
@@ -49,6 +50,15 @@ export const notificationEvents = (previous, next, today = new Date().toISOStrin
   const beforeTasks = new Map((previous.tasks ?? []).map((item) => [item.id, item]));
   for (const item of next.tasks ?? []) {
     const before = beforeTasks.get(item.id);
+    if (item.id?.startsWith('auto-photo-')) {
+      const point = (next.checkpoints ?? []).find(row => row.id === item.checkpointId);
+      const missing = missingQualityShots(point);
+      if (enabled.qualityRework !== false && point && missing.length && !['done', 'canceled'].includes(item.status)
+        && (!before || ['done', 'canceled'].includes(before.status) || before.description !== item.description || before.assigneeId !== item.assigneeId)) {
+        events.push({ ...notificationEvent(`${item.assigneeName || 'Команда'}, нужны фото: ${point.title}. ${missing.join('; ')}.`, 'quality', point.id, item.assigneeId), qualityRequest: { projectId: next.project.id, checkpointId: point.id } });
+      }
+      continue;
+    }
     if (enabled.taskAssigned && (!before || before.assigneeId !== item.assigneeId)) events.push(notificationEvent(`Задача: «${item.title}» → ${item.assigneeName}, срок ${item.dueDate}`, 'tasks', item.id, item.assigneeId));
     if (enabled.taskAssigned && before && before.dueDate !== item.dueDate) events.push(notificationEvent(`Срок задачи «${item.title}» перенесён: ${before.dueDate} → ${item.dueDate}`, 'tasks', item.id, item.assigneeId));
     if (enabled.taskAssigned && before && before.status !== item.status && ['waiting', 'review', 'done'].includes(item.status)) events.push(notificationEvent(`Задача: «${item.title}» → ${notificationStatusLabels[item.status] ?? item.status}`, 'tasks', item.id, item.assigneeId));
@@ -79,20 +89,22 @@ export const createNotificationService = ({ resolveTelegramConnection, sha256 })
     const lifecycleChanged = previous?.orderRelations?.status !== next.orderRelations?.status || previous?.project?.status !== next.project?.status;
     if (!events.length && allActivity && clean(summary, 300) && (!stoppedWork(next) || lifecycleChanged)) events = [notificationEvent(clean(summary, 300), 'overview')];
     if (!events.length) return { channels, message: '', deliveries: [] };
-    const lines = events.map((event) => `• ${event.text}\n  ${deepLink(origin, next.project.id, event.page, event.entityId)}`);
+    const ordinaryEvents = events.filter(event => !event.qualityRequest);
+    const photoEvents = events.filter(event => event.qualityRequest);
+    const lines = ordinaryEvents.map((event) => `• ${event.text}\n  ${deepLink(origin, next.project.id, event.page, event.entityId)}`);
     const message = `ИКИОМА ОС · ${next.project?.code ?? 'проект'}\nИзменил: ${actor}\n\n${lines.join('\n')}`;
     const deliveryKey = clean(eventKey, 120) || clean(next.activity?.[0]?.id, 120) || crypto.randomUUID();
     const deliveries = [];
     const telegramConnection = channels.telegram && env.TELEGRAM_BOT_TOKEN ? await resolveTelegramConnection(env, { discover: false }) : null;
     const commonChatId = clean(telegramConnection?.chat?.id, 120);
-    if (channels.telegram && env.TELEGRAM_BOT_TOKEN && commonChatId) deliveries.push({
+    if (ordinaryEvents.length && channels.telegram && env.TELEGRAM_BOT_TOKEN && commonChatId) deliveries.push({
       chatId: commonChatId, text: message, options: {},
       stableId: `telegram-notification-${(await sha256(`${next.project.id}:${deliveryKey}:${commonChatId}`)).slice(0, 40)}`,
     });
     if (channels.telegram && env.TELEGRAM_BOT_TOKEN) {
       const users = new Map((next.settings?.users ?? []).map((user) => [clean(user.id, 100), user]));
       const directByChat = new Map();
-      for (const event of events) {
+      for (const event of ordinaryEvents) {
         if (!event.recipientId) continue;
         const user = users.get(clean(event.recipientId, 100));
         let chatId = clean(user?.telegramChatId, 120);
@@ -118,6 +130,20 @@ export const createNotificationService = ({ resolveTelegramConnection, sha256 })
           stableId: `telegram-personal-${(await sha256(`${next.project.id}:${deliveryKey}:${chatId}`)).slice(0, 40)}`,
         });
       }
+    }
+    if (channels.telegram && env.TELEGRAM_BOT_TOKEN) for (const event of photoEvents) {
+      const user = (next.settings?.users ?? []).find(row => row.id === event.recipientId && row.status === 'active');
+      let chatId = clean(user?.telegramChatId, 120);
+      if (!chatId && env.DB && user?.id) {
+        const binding = await env.DB.prepare('SELECT private_chat_id FROM telegram_bindings WHERE project_id = ? AND system_user_id = ? ORDER BY updated_at DESC LIMIT 1').bind(next.project.id, user.id).first();
+        chatId = clean(binding?.private_chat_id, 120);
+      }
+      chatId ||= commonChatId;
+      if (!chatId) continue;
+      deliveries.push({ chatId,
+        text: `${next.project.code || 'Объект'} · ${event.text}\nПришлите фото ответом на это сообщение или добавьте в карточке: ${deepLink(origin, next.project.id, 'quality', event.entityId)}`,
+        options: { _qualityRequest: event.qualityRequest },
+        stableId: `telegram-quality-${(await sha256(`${next.project.id}:${deliveryKey}:${event.entityId}:${chatId}`)).slice(0, 40)}` });
     }
     return { channels, message, deliveries };
   };

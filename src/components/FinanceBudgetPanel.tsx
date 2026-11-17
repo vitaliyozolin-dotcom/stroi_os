@@ -5,6 +5,8 @@ import { financeTotals, effectiveBudgetLines, lineForecast, lineTotals, paidAmou
 import { costGroupLabels, costGroups, costGroupTotals, expenseCostGroup } from '../domain/cost-groups';
 import { formatDate, money } from '../presentation/formatting';
 import { CostGroups } from './CostGroups';
+import { financeWorkspaceSummary } from '../domain/finance-workspace.js';
+import { financeToday } from '../presentation/finance-view';
 import './finance-budget-panel.css';
 
 type FinanceBudgetPanelProps = {
@@ -23,7 +25,7 @@ const deviationText = (forecast: number, plan: number) => {
 
 function BudgetLineRow({ state, line, onOpen }: { state: AppState; line: BudgetLine; onOpen?: () => void }) {
   const values = lineTotals(state, line);
-  const forecast = lineForecast(state, line);
+  const forecast = state.budgetMeta.estimateKind === 'internal_cost' ? lineForecast(state, line) : null;
   return <button type="button" className="money-budget__line" onClick={onOpen} disabled={!onOpen}>
     <span className="money-budget__line-name">
       <strong>{line.name}</strong>
@@ -31,14 +33,16 @@ function BudgetLineRow({ state, line, onOpen }: { state: AppState; line: BudgetL
     </span>
     <span className="money-budget__number"><small>План</small>{money(line.plan)}</span>
     <span className="money-budget__number"><small>Оплачено</small>{money(values.paid)}</span>
-    <span className={`money-budget__number money-budget__forecast ${forecast > line.plan ? 'money-budget__forecast--over' : ''}`}>
-      <small>Прогноз</small><span>{money(forecast)}</span><span className="money-budget__deviation">{deviationText(forecast, line.plan)}</span>
+    <span className={`money-budget__number money-budget__forecast ${forecast !== null && forecast > line.plan ? 'money-budget__forecast--over' : ''}`}>
+      <small>Прогноз затрат</small><span>{forecast === null ? '—' : money(forecast)}</span><span className="money-budget__deviation">{forecast === null ? 'Нужна внутренняя смета' : deviationText(forecast, line.plan)}</span>
     </span>
   </button>;
 }
 
 export function FinanceBudgetPanel({ state, onClassify, onOpenLine, onOpenUnallocated, onImport }: FinanceBudgetPanelProps) {
   const totals = financeTotals(state);
+  const summary = financeWorkspaceSummary(state, financeToday());
+  const internal = summary.estimateKind === 'internal_cost';
   const budgetLines = effectiveBudgetLines(state);
   const activeVersion = state.treasury?.budgetVersions?.find(version => version.id === state.treasury?.activeBudgetVersionId);
   const groups = costGroupTotals(state);
@@ -56,17 +60,17 @@ export function FinanceBudgetPanel({ state, onClassify, onOpenLine, onOpenUnallo
 
   return <section className="money-budget" aria-label="Смета проекта" data-tour="budget-plan">
     <header className="money-budget__heading">
-      <div><h2>Смета</h2><p>План и расходы по разделам</p></div>
+      <div><h2>{internal ? 'Внутренняя смета' : summary.estimateKind === 'commercial' ? 'Смета заказчику' : 'Загруженная смета'}</h2><p>{internal ? 'Себестоимость и оплаты по разделам' : 'Исходные строки · не подтверждают внутреннюю себестоимость'}</p></div>
       <button type="button" className="button button--ghost" onClick={onImport}><Upload size={16} />Импорт сметы</button>
     </header>
 
     <div className="money-budget__totals">
-      <div><span>План</span><strong>{money(totals.plan)}</strong></div>
+      <div><span>{internal ? 'План себестоимости' : 'Итог загруженных строк'}</span><strong>{budgetLines.length ? money(totals.plan) : 'Нет сметы'}</strong></div>
       <div><span>Оплачено</span><strong>{money(totals.paid)}</strong></div>
-      <div className={totals.forecast > totals.plan ? 'money-budget__total--over' : ''}><span>Предварительный прогноз</span><strong>{money(totals.forecast)}</strong><small>{deviationText(totals.forecast, totals.plan)}</small></div>
+      <div className={summary.forecastCents !== null && summary.internalBudgetCents !== null && summary.forecastCents > summary.internalBudgetCents ? 'money-budget__total--over' : ''}><span>Прогноз себестоимости</span><strong>{summary.forecastCents === null ? 'Нет оценки' : money(summary.forecastCents / 100)}</strong><small>{summary.forecastComplete ? 'По оценке оставшихся затрат' : 'Оценка достройки неполная'}</small></div>
     </div>
     {activeVersion && <p className="money-budget__forecast-note">Действующий план: {activeVersion.name} · {activeVersion.taxBasis === 'gross' ? 'с НДС' : activeVersion.taxBasis === 'net' ? 'без НДС' : 'НДС не применяется'}. {activeVersion.taxNote} Изменение плана — через новую версию бюджета.</p>}
-    <p className="money-budget__forecast-note">Прогноз учитывает внесённые суммы. Стоимость оставшихся работ ещё нужно сверить.</p>
+    <p className="money-budget__forecast-note">Оплаты отражаются отдельно от приёмки работ. Полный прогноз — в финансировании.</p>
 
     {!budgetLines.length && <div className="money-budget__empty"><strong>Смета ещё не загружена</strong><p>Добавьте план, чтобы сравнивать расходы по статьям.</p></div>}
 

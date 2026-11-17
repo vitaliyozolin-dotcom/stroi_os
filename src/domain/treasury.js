@@ -27,7 +27,7 @@ const stable = value => JSON.stringify(value, (_, item) => item && !Array.isArra
 export const emptyTreasury = () => ({ version: 1, enabled: false, accounts: [], entryPlans: [], costEstimates: [] });
 export function treasuryScopeFingerprint(state) {
   const semantic = rows => (rows ?? []).map(({ recordedAt, recordedBy, approvedAt, approvedBy, ...row }) => row);
-  const input = stable({ projectId: state.project.id, financeEntries: state.financeEntries ?? [], budgetLines: state.budgetLines ?? [],
+  const input = stable({ projectId: state.project.id, ...(state.project.funding?.escrowAccountId ? { escrowAccountId: state.project.funding.escrowAccountId } : {}), financeEntries: state.financeEntries ?? [], budgetLines: state.budgetLines ?? [],
     costEstimates: state.treasury?.costEstimates ?? [], entryPlans: state.treasury?.entryPlans ?? [], cashPlans: state.treasury?.cashPlans ?? [],
     delayRates: state.treasury?.delayRates ?? [], inventoryLots: semantic(state.treasury?.inventoryLots), inventoryMovements: semantic(state.treasury?.inventoryMovements),
     budgetVersions: semantic(state.treasury?.budgetVersions), activeBudgetVersionId: state.treasury?.activeBudgetVersionId ?? null,
@@ -227,7 +227,8 @@ export function treasuryProjection(state, { today, horizonDays = 91, scenario = 
   const savedScenario = savedScenarioId ? (treasury.savedScenarios ?? []).find(row => row.id === savedScenarioId) : null;
   if (savedScenarioId && !savedScenario) throw new Error('Сохранённый сценарий не найден.');
   if (savedScenario && savedScenario.basisFingerprint !== treasuryScenarioFingerprint(state)) warnings.push('Данные изменились после сохранения сценария; допущения применены к текущему состоянию.');
-  const accounts = treasury.accounts.filter(account => !accountId || account.id === accountId);
+  const escrowAccountId = state.project.funding?.escrowAccountId;
+  const accounts = treasury.accounts.filter(account => account.id !== escrowAccountId && (!accountId || account.id === accountId));
   const accountMap = new Map(treasury.accounts.map(account => [account.id, account]));
   const plans = new Map(treasury.entryPlans.map(plan => [plan.entryId, plan]));
   const schedule = (state.stages ?? []).some(stage => stage.schedule) ? forecastSchedule(state, today) : null;
@@ -303,7 +304,7 @@ export function treasuryProjection(state, { today, horizonDays = 91, scenario = 
     if (date && entry.kind === 'income' && delay && !entry.financing) date = shift(date, delay);
     const forecastDifference = dayDifference(date, contractualDueDate);
     const forecastDelayDays = forecastDifference === null ? null : Math.max(0, forecastDifference);
-    const excluded = outside || entry.kind === 'income' && certainty === 'tentative' && scenario !== 'base';
+    const excluded = outside || Boolean(sourceAccountId && sourceAccountId === escrowAccountId) || entry.kind === 'income' && certainty === 'tentative' && scenario !== 'base';
     // Contracted obligations do not increase in value just because a scenario changed.
     const contracted = ['committed', 'accepted', 'paid'].includes(entry.status) || Boolean(entry.approvedAt) || entry.acceptedAmount > 0 || paidPositive(entry) || (ledgerSettlements.get(entry.id) ?? 0) !== 0;
     const amount = entry.kind === 'expense' && certainty === 'tentative' && costIncrease && !contracted ? percentAmount(amountCents, costIncrease) : amountCents;

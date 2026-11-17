@@ -47,3 +47,16 @@ export const registerFieldReport = (repository, input, context) => register(repo
   const action = input.source === 'web' ? 'field_report_uploaded' : input.attachments.length ? 'telegram.field_report.create' : 'telegram.note.create';
   return { ok: true, change: moduleChange(state, { fieldReports: [report, ...state.fieldReports] }, action, summary, context) };
 });
+
+export const updateProjectDocumentStatus = (repository, input, context) => executeModule(repository, state => {
+  if (context.identity.role !== 'management') return { ok: false, error: 'Статус документа изменяет управление.' };
+  const document = state.documents.find(item => item.id === input.id);
+  if (!document) return { ok: false, error: 'Документ не найден.' };
+  if (!['draft', 'current', 'signed'].includes(input.status)) return { ok: false, error: 'Неизвестный статус документа.' };
+  if (input.status === document.status) return { ok: true, change: null };
+  if (input.status === 'signed' && (!document.fileKey || input.confirmSignedOriginal !== true)) return { ok: false, error: 'Откройте оригинал и подтвердите, что он подписан.' };
+  const now = context.clock.now();
+  const updated = { ...document, status: input.status, updatedAt: now, signedAt: input.status === 'signed' ? document.signedAt || now : undefined };
+  const labels = { draft: 'Черновик', current: 'Актуальный', signed: 'Подписан' };
+  return { ok: true, change: moduleChange(state, { documents: state.documents.map(item => item.id === updated.id ? updated : item) }, 'document_updated', `Документ «${document.name}»: ${labels[input.status]}`, context) };
+});

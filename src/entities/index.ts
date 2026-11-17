@@ -16,3 +16,6 @@ export type * from './quality';
 export type * from './stage';
 export type * from './task';
 export type * from './user';
+export type * from './project-lifecycle';
+
+export type * from './project-funding';

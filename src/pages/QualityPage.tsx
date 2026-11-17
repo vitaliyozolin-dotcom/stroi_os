@@ -27,9 +27,9 @@ import {
 import { formatDateTime } from '../presentation/formatting';
 import type { StateChangeSink } from '../application';
 import { runtimeIdGenerator, systemClock } from '../infrastructure/runtime';
-import { photoStandard } from '../seed';
+import './operations-pages.css';
 import type { AppState, CheckpointStatus, EvidencePhoto, UserRole } from '../entities/index';
-import { ProgressBar, StatusBadge } from '../components/Ui';
+import { ProgressBar, StatusBadge, Modal, Field } from '../components/Ui';
 
 const checkpointLabels: Record<CheckpointStatus, string> = {
   pending: 'Не начат',
@@ -54,6 +54,9 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
   const defaultCheckpoint = state.checkpoints.find((item) => item.status === 'in_review') ?? state.checkpoints[0];
   const [selectedId, setSelectedId] = useState(defaultCheckpoint?.id ?? '');
   const [filter, setFilter] = useState<'all' | CheckpointStatus>('all');
+  const [checklistOpen, setChecklistOpen] = useState(false);
+  const [checklistText, setChecklistText] = useState('');
+  const [checklistError, setChecklistError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
@@ -73,10 +76,10 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
 
   if (!selected) {
     return (
-      <div className="page-stack">
+      <div className="page-stack operations-page">
         <section className="page-title-row">
           <div>
-            <span className="eyebrow">Доказательства вместо обещаний</span>
+            <span className="eyebrow">{state.project.code} · Приёмка работ</span>
             <h1>Контроль качества</h1>
             <p>Здесь появятся фотофиксация, замеры, замечания и результаты независимой приёмки.</p>
           </div>
@@ -136,31 +139,27 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
   };
 
   const completedShots = Math.min(selected.photos.length, selected.requiredShots.length);
-  const canSubmit = completedShots >= selected.requiredShots.length;
+  const canSubmit = (selected.requiredShots.length > 0 || Boolean(selected.measurement?.trim())) && completedShots >= selected.requiredShots.length;
   const completionPercent = selected.requiredShots.length ? completedShots / selected.requiredShots.length * 100 : 0;
   const photoUrl = (photo: EvidencePhoto) => previewUrls[photo.id]
     || (photo.fileKey ? `/api/quality/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(photo.fileKey)}` : '')
     || (/^data:image\/(?:jpeg|png|webp);base64,/i.test(photo.dataUrl ?? '') ? photo.dataUrl ?? '' : '');
 
   return (
-    <div className="page-stack">
+    <div className="page-stack operations-page">
       <section className="page-title-row">
         <div>
-          <span className="eyebrow">Доказательства вместо обещаний</span>
+          <span className="eyebrow">{state.project.code} · Приёмка работ</span>
           <h1>Контроль качества</h1>
-          <p>Скрытая работа не закрывается без обязательных кадров, замера и независимой приёмки.</p>
+          <p>Фото по текущим работам запрашиваются у ответственного. Здесь — проверка результата и замечания.</p>
         </div>
         <div className="quality-head-stat"><ShieldCheck size={21} /><span><small>Принято без замечаний</small><strong>{state.checkpoints.filter((item) => item.status === 'accepted').length} из {state.checkpoints.length}</strong></span></div>
       </section>
 
-      <section className="photo-standard-panel">
-        <div className="photo-standard-panel__intro"><span className="eyebrow">Стандарт фотофиксации v1.0</span><h2>7 обязательных кадров</h2><p>До того, как конструкция будет закрыта следующим слоем.</p></div>
-        <div className="photo-standard-list">
-          {photoStandard.map((item, index) => {
-            const Icon = standardIcons[index];
-            return <div key={item}><span><Icon size={17} /></span><small>0{index + 1}</small><strong>{item}</strong></div>;
-          })}
-        </div>
+      <section className="operations-summary">
+        <article><small>Ожидают фото</small><strong>{state.checkpoints.filter(point => point.status !== 'accepted' && point.photos.length < point.requiredShots.length).length}</strong><span>По списку конкретной работы</span></article>
+        <article><small>На приёмке</small><strong>{state.checkpoints.filter(point => point.status === 'in_review').length}</strong><span>Нужно решение проверяющего</span></article>
+        <article><small>Замечания</small><strong>{state.checkpoints.filter(point => point.status === 'rework').length}</strong><span>Исправление и повторная проверка</span></article>
       </section>
 
       <section className="quality-layout">
@@ -195,13 +194,16 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
             <StatusBadge label={checkpointLabels[selected.status]} tone={checkpointTone(selected.status)} />
           </div>
           <div className="checkpoint-detail__people">
-            <span><UserRound size={16} /><small>Исполнитель</small><strong>{selected.assignee}</strong></span>
-            <span><ShieldCheck size={16} /><small>Проверяет</small><strong>{selected.reviewer}</strong></span>
+            <span><UserRound size={16} /><small>Исполнитель</small><strong>{selected.assignee || 'Не назначен'}</strong></span>
+            <span><ShieldCheck size={16} /><small>Проверяет</small><strong>{selected.reviewer || 'Не назначен'}</strong></span>
           </div>
 
           {selected.status === 'rework' && <div className="quality-warning"><AlertTriangle size={19} /><div><strong>Возвращено на доработку</strong><p>{selected.note}</p></div></div>}
           {selected.measurement && <div className="measurement-card"><Ruler size={19} /><div><small>Контрольный замер</small><strong>{selected.measurement}</strong>{selected.status === 'accepted' && <span><Check size={14} /> подтверждено</span>}</div></div>}
 
+          {selected.requiredShots.length === 0 && <div className="quality-warning"><AlertTriangle size={19} /><div><strong>Нужен список проверки</strong><p>Руководитель определяет нужные кадры для этой работы. Пустой список не означает, что контроль пройден.</p></div></div>}
+          {role === 'management' && selected.status !== 'accepted' && selected.photos.length === 0 && <button type="button" className="button button--secondary" onClick={() => { setChecklistText(selected.requiredShots.join('\n')); setChecklistError(''); setChecklistOpen(true); }}>Настроить список кадров</button>}
+          {state.tasks.some(task => task.id === `auto-photo-${selected.id}` && !['done', 'canceled'].includes(task.status)) && <div className="operations-context"><Camera size={18} /><span>Задача собрать фото создана для ответственного. Доставка запроса зависит от подключённого канала.</span></div>}
           <div className="evidence-head">
             <div><strong>Фотофиксация</strong><span>{completedShots} из {selected.requiredShots.length} обязательных кадров</span></div>
             <strong>{Math.round(completionPercent)}%</strong>
@@ -238,11 +240,8 @@ export function QualityPage({ state, role, actor, focusId, onChange }: { state: 
         </article>
       </section>
 
-      <section className="quality-principles">
-        <article><span>01</span><div><strong>Оригинал сохраняется на сервере</strong><p>Дата, автор, дом, этап и зона становятся частью доказательства и не раздувают общий снимок проекта.</p></div></article>
-        <article><span>02</span><div><strong>Фото не заменяет акт</strong><p>Замеры, испытания и исполнительная документация остаются обязательными.</p></div></article>
-        <article><span>03</span><div><strong>Оплата после приёмки</strong><p>Принятая контрольная точка открывает оплату выполненного объёма.</p></div></article>
-      </section>
+      <div className="operations-context"><ShieldCheck size={18} /><span>Фото, замеры и документы подтверждают результат. Приёмка и оплата учитываются отдельно.</span></div>
+      {checklistOpen && <Modal title="Фото для приёмки" subtitle={selected.title} onClose={() => setChecklistOpen(false)}><form className="modal-form" onSubmit={event => { event.preventDefault(); const result = quality.update({ checkpointId: selected.id, expected: checkpointSnapshot(state, selected.id), patch: { requiredShots: checklistText.split('\n') }, summary: `Уточнены требования фото: ${selected.title}` }); if (!result.ok) { setChecklistError(result.error); return; } setChecklistOpen(false); }}><Field label="Один необходимый кадр — одна строка"><textarea rows={7} value={checklistText} onChange={event => setChecklistText(event.target.value)} placeholder="Общий вид результата\nУзел крепления\nКонтрольный замер" /></Field>{checklistError && <p role="alert" className="form-warning">{checklistError}</p>}<div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setChecklistOpen(false)}>Отмена</button><button type="submit" className="button button--primary">Сохранить</button></div></form></Modal>}
     </div>
   );
 }

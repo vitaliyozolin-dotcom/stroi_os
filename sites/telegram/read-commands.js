@@ -1,7 +1,7 @@
 import { dateKey } from '../lib/date.js';
 import { clean } from '../lib/validation.js';
 import { deepLink } from '../integrations/notifications.js';
-import { taskStatusLabel } from './rendering.js';
+import { buildMeetingBrief } from '../automations/project-coordinator.js';
 import { telegramSend } from './transport.js';
 
 const telegramOrigin = (env) => clean(env.APP_PUBLIC_URL, 500) || 'https://stroios-work-2026.ozolin.chatgpt.site';
@@ -17,15 +17,10 @@ export const createTelegramReadCommands = ({ readSnapshot, telegramSendPhoto }) 
 
   const tasks = async (message, binding, env) => {
     const { snapshot, user } = await projectForBinding(env, binding);
-    const items = (snapshot.state.tasks ?? [])
-      .filter((item) => !['done', 'canceled'].includes(item.status))
-      .filter((item) => user.role === 'management' || item.assigneeId === user.id)
-      .sort((a, b) => clean(a.dueDate, 20).localeCompare(clean(b.dueDate, 20)))
-      .slice(0, 10);
-    const title = user.role === 'management' ? 'Открытые задачи проекта' : 'Ваши открытые задачи';
-    const text = items.length
-      ? `${title} · ${snapshot.state.project?.code ?? ''}\n\n${items.map((item) => `• ${item.dueDate} · ${taskStatusLabel(item.status)}\n  ${item.title}${user.role === 'management' ? ` — ${item.assigneeName}` : ''}\n  ${deepLink(telegramOrigin(env), binding.project_id, 'tasks', item.id)}`).join('\n\n')}`
-      : `${title}: сейчас ничего открытого.`;
+    const brief = buildMeetingBrief(snapshot.state, { userId: user.id, management: user.role === 'management', today: dateKey(), limit: 10 });
+    const text = brief.rows.length
+      ? `${brief.rows.join('\n')}${brief.remaining ? `\nЕщё ${brief.remaining} задач — в проекте.` : ''}\n${deepLink(telegramOrigin(env), binding.project_id, 'tasks')}`
+      : 'Открытых задач нет.';
     await telegramSend(env.TELEGRAM_BOT_TOKEN, message.chat.id, text);
   };
 
@@ -71,19 +66,19 @@ export const createTelegramReadCommands = ({ readSnapshot, telegramSendPhoto }) 
       '',
       `Расходы: обязательства ${money(committed)} · оплачено ${money(paid)}`,
       `Доходы: ожидается ${money(expectedIncome)} · получено ${money(received)}`,
-      `Денежный баланс: ${money(received - paid)}`,
+      `Поступления минус выплаты по учёту: ${money(received - paid)}`,
       '',
       deepLink(telegramOrigin(env), binding.project_id, 'finance'),
     ].join('\n'));
   };
 
   const projectStatus = async (message, binding, env) => {
-    const { snapshot } = await projectForBinding(env, binding);
+    const { snapshot, user } = await projectForBinding(env, binding);
     const state = snapshot.state;
     const today = dateKey();
     const activeStages = (state.stages ?? []).filter((item) => ['in_progress', 'blocked', 'awaiting_inspection', 'rework'].includes(item.status));
-    const openTasks = (state.tasks ?? []).filter((item) => !['done', 'canceled'].includes(item.status));
-    const overdue = openTasks.filter((item) => clean(item.dueDate, 20) < today);
+    const openTasks = (state.tasks ?? []).filter((item) => !['done', 'canceled'].includes(item.status)).filter(item => user.role === 'management' || item.assigneeId === user.id);
+    const overdue = openTasks.filter((item) => item.dueDate && clean(item.dueDate, 20) < today);
     const riskySupply = (state.procurement ?? []).filter((item) => item.risk || ['need', 'rfq'].includes(item.status));
     const accepted = (state.financeEntries ?? []).reduce((sum, item) => sum + (Number(item.acceptedAmount) || 0), 0);
     const paid = (state.financeEntries ?? []).reduce((sum, item) => sum + (Number(item.paidAmount) || 0), 0);
@@ -93,7 +88,7 @@ export const createTelegramReadCommands = ({ readSnapshot, telegramSendPhoto }) 
       `Работы сейчас: ${activeStages.length ? activeStages.map((item) => item.name).join(', ') : 'активных этапов нет'}`,
       `Задачи: ${openTasks.length} открыто · ${overdue.length} просрочено`,
       `Снабжение: ${riskySupply.length} требуют внимания`,
-      `Принято / оплачено: ${accepted.toLocaleString('ru-RU')} ₽ / ${paid.toLocaleString('ru-RU')} ₽`,
+      ...(user.role === 'management' ? [`Принято / оплачено: ${accepted.toLocaleString('ru-RU')} ₽ / ${paid.toLocaleString('ru-RU')} ₽`] : []),
       `Прогноз сдачи: ${state.project?.forecastDate ?? 'не указан'}`,
       '',
       deepLink(telegramOrigin(env), binding.project_id, 'overview'),

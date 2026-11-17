@@ -4,7 +4,7 @@ import { moduleChange, executeModule, type ModuleRepository } from './module-rep
 import { stageControlFingerprint } from '../domain/construction/index.js';
 import type { ActivityEvent, UserRole } from '../entities/index';
 import { planToday, validPlanDate } from '../domain/construction/index.js';
-import { stageCanStart, stageGaps } from '../domain/construction/index.js';
+import { stageCanStart, stageGaps, stageDependencyIssue } from '../domain/construction/index.js';
 import { addScheduleDays } from '../domain/construction/index.js';
 
 export type StageAction = 'start' | 'not_started' | 'complete' | 'accept' | 'owner_accept' | 'delay' | 'rework';
@@ -15,9 +15,16 @@ export function applyStageControl(state: ConstructionSnapshot, id: string, actio
   if (role === 'client') throw new Error('Нет прав на изменение этапа.');
   const next = structuredClone(state), stage = next.stages.find((s) => s.id === id);
   if (!stage || stage.status === 'accepted') throw new Error('Этап уже принят или не найден.');
+  if (['start', 'complete', 'accept', 'owner_accept'].includes(action)) {
+    const issue = stageDependencyIssue(state, stage, action === 'start' ? 'start' : 'finish', input.completionDateUnknown ? todayKey : input.date);
+    if (issue) throw new Error(issue);
+  }
+
   if (action === 'owner_accept') {
     if (role !== 'management' || userId !== 'owner') throw new Error('Подтверждение по факту доступно владельцу.');
     if (stage.schedule?.kind === 'summary') throw new Error('Подтвердите вложенные работы по отдельности.');
+    const gaps = stageGaps(next, id);
+    if (gaps.tasks.length || gaps.checkpoints.length || stage.blocker) throw new Error('Сначала завершите задачи, примите контрольные точки и устраните препятствия.');
     const today = todayKey, now = timestamp;
     if (!validPlanDate(input.date) || input.date > today) throw new Error('Укажите дату выполнения не позже сегодня.');
     if (stage.actualStart && (input.completionDateUnknown ? today : input.date) < stage.actualStart) throw new Error('Выполнение не может быть раньше начала.');

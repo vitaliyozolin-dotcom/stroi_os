@@ -32,37 +32,50 @@ export function recordedScheduleStatus(state, today = planToday()) {
     tasks: group(tasks, (t) => t.dueDate, taskBaselineEnd, 'review', 'done') };
 }
 
-export const stageCanStart = (state, stage) => {
-  if (stage.schedule) {
-    if (!stage.schedule.updatedAt || stage.schedule.kind === 'summary') return false;
-    return (stage.schedule.dependencies ?? []).every((dependency) => {
-      const previous = (state.stages ?? []).find((s) => s.id === dependency.stageId);
-      const type = dependency.type ?? 'FS';
-      if (!previous || !['FS', 'SS', 'FF'].includes(type) || !['completed', 'accepted'].includes(dependency.gate) || type === 'SS' && previous.schedule?.kind === 'summary' || !Number.isInteger(dependency.lagDays) || dependency.lagDays < -365 || dependency.lagDays > 365
-        || dependency.gate === 'accepted' && (type === 'SS' || dependency.lagDays < 0)) return false;
-      // Finish-to-finish restricts completion, not permission to begin.
-      if (type === 'FF') return true;
-      if (type === 'SS') return validPlanDate(previous.actualStart) && planDays(planToday(), previous.actualStart) >= dependency.lagDays;
-      const complete = (row, seen = new Set()) => {
-        if (!row || seen.has(row.id)) return null;
-        seen.add(row.id);
-        if (row.schedule?.kind === 'summary') {
-          const dates = row.schedule.summaryOf.map((id) => complete(state.stages.find((s) => s.id === id), new Set(seen)));
-          if (!dates.length || !dates.every(Boolean)) return null;
-          const childrenEnd = dates.sort().at(-1), fact = row.completedOn || row.actualEnd;
-          if (['accepted', 'awaiting_inspection'].includes(row.status)) return validPlanDate(fact) && fact >= childrenEnd ? fact : null;
-          return childrenEnd;
-        }
-        return ['accepted', 'awaiting_inspection'].includes(row.status) ? row.completedOn || row.actualEnd : null;
-      };
-      const day = dependency.gate === 'accepted' ? (previous?.status === 'accepted' && Number.isFinite(Date.parse(previous.acceptedAt || '')) ? planToday(new Date(previous.acceptedAt)) : null) : complete(previous);
-      return validPlanDate(day) && planDays(planToday(), day) > dependency.lagDays;
-    });
+const dependencyCompletedOn = (state, stage, seen = new Set()) => {
+  if (!stage || seen.has(stage.id)) return null;
+  seen.add(stage.id);
+  if (stage.schedule?.kind === 'summary') {
+    const dates = (stage.schedule.summaryOf ?? []).map(id => dependencyCompletedOn(state, (state.stages ?? []).find(row => row.id === id), new Set(seen)));
+    if (!dates.length || !dates.every(Boolean)) return null;
+    const childrenEnd = dates.sort().at(-1), fact = stage.completedOn || stage.actualEnd;
+    return ['accepted', 'awaiting_inspection'].includes(stage.status) ? validPlanDate(fact) && fact >= childrenEnd ? fact : null : childrenEnd;
   }
-  if (!stage.dependencyId && !stage.dependency) return true;
-  const previous = (state.stages ?? []).find((s) => stage.dependencyId ? s.id === stage.dependencyId : [s.name, s.shortName].includes(stage.dependency));
-  return previous?.status === 'accepted';
+  const fact = stage.completedOn || stage.actualEnd;
+  return ['accepted', 'awaiting_inspection'].includes(stage.status) && validPlanDate(fact) ? fact : null;
 };
+
+/** Shared by UI commands and every server write path. Forecast dates never unlock a gate. */
+export function stageDependencyIssue(state, stage, action = 'start', on = planToday()) {
+  if (!validPlanDate(on)) return 'Укажите фактическую дату действия.';
+  if (stage.schedule?.kind === 'summary') return action === 'start' ? 'Сводный этап начинается через вложенные работы.' : null;
+  if (stage.schedule && !stage.schedule.updatedAt) return 'Сначала подтвердите состав и зависимости этой работы.';
+  if (!stage.schedule) {
+    if (!stage.dependencyId && !stage.dependency) return null;
+    const previous = (state.stages ?? []).find(row => stage.dependencyId ? row.id === stage.dependencyId : [row.name, row.shortName].includes(stage.dependency));
+    if (!previous || previous.status !== 'accepted') return `Сначала примите предыдущий этап: ${previous?.shortName || previous?.name || stage.dependency || 'не найден'}.`;
+    const acceptedOn = Number.isFinite(Date.parse(previous.acceptedAt || '')) ? planToday(new Date(previous.acceptedAt)) : null;
+    return acceptedOn && on < acceptedOn ? 'Дата действия не может быть раньше приёмки предыдущего этапа.' : null;
+  }
+  for (const dependency of stage.schedule.dependencies ?? []) {
+    const previous = (state.stages ?? []).find(row => row.id === dependency.stageId), type = dependency.type ?? 'FS';
+    if (!previous || !['FS', 'SS', 'FF'].includes(type) || !['completed', 'accepted'].includes(dependency.gate)
+      || !Number.isInteger(dependency.lagDays) || dependency.lagDays < -365 || dependency.lagDays > 365
+      || type === 'SS' && previous.schedule?.kind === 'summary'
+      || dependency.gate === 'accepted' && (type === 'SS' || dependency.lagDays < 0)) return 'Проверьте зависимость и технологическую паузу в графике.';
+    if (type === 'FF' && action === 'start') continue;
+    const title = previous.shortName || previous.name;
+    let day;
+    if (type === 'SS') day = previous.actualStart;
+    else if (dependency.gate === 'accepted') day = previous.status === 'accepted' && Number.isFinite(Date.parse(previous.acceptedAt || '')) ? planToday(new Date(previous.acceptedAt)) : null;
+    else day = dependencyCompletedOn(state, previous);
+    if (!validPlanDate(day)) return `Сначала ${type === 'SS' ? 'подтвердите начало' : dependency.gate === 'accepted' ? 'примите результат' : 'подтвердите выполнение'}: ${title}.`;
+    const elapsed = planDays(on, day), required = dependency.lagDays + (type === 'FS' ? 1 : 0);
+    if (elapsed < required) return `Не выдержана пауза после «${title}»: ещё ${required - elapsed} кал. дн.`;
+  }
+  return null;
+}
+export const stageCanStart = (state, stage, on = planToday()) => !stageDependencyIssue(state, stage, 'start', on);
 export const stageGaps = (state, id) => ({
   tasks: (state.tasks ?? []).filter((t) => t.stageId === id && t.id !== `auto-stage-${id}` && !['done', 'canceled'].includes(t.status)),
   checkpoints: (state.checkpoints ?? []).filter((p) => p.stageId === id && p.status !== 'accepted'),
