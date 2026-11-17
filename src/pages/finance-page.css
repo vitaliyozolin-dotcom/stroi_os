@@ -5,7 +5,8 @@
 .finance-commercial-strip strong { font-size:19px; line-height:1.35; font-weight:600; font-variant-numeric:tabular-nums; }
 .finance-commercial-strip small { color:#697060; font-size:12px; line-height:1.45; }
 .finance-page .finance-money--lifecycle { border:0; gap:12px; padding:0; margin:0 0 27px; }
-.finance-page .finance-money--lifecycle > button { background:#eeeee5; border:1px solid #e0e2d6; border-radius:12px; padding:21px; gap:13px; }
+.finance-page .finance-money.finance-money--lifecycle > button { border:1px solid #e0e2d6; border-radius:12px; padding:21px; gap:13px; }
+.finance-page .finance-money--lifecycle > button { background:#eeeee5; }
 .finance-page .finance-money--lifecycle > .finance-money__available { background:#293323; color:#fff; }
 .finance-page .finance-money--lifecycle > button > span { font-size:13px; min-height:0; }
 .finance-page .finance-money--lifecycle > button > strong { font-size:29px; letter-spacing:-.025em; }
@@ -47,7 +48,7 @@
  .finance-commercial-strip { gap:20px 16px; }
  .finance-commercial-strip strong { font-size:17px; }
  .finance-commercial-strip span { font-size:12px; }
- .finance-page .finance-money--lifecycle > button { padding:16px; display:flex; }
+ .finance-page .finance-money.finance-money--lifecycle > button { padding:16px; display:flex; }
  .finance-page .finance-money--lifecycle > button > strong { font-size:23px; }
  .finance-page .finance-money--lifecycle > button > span,.finance-page .finance-money--lifecycle > button > small { font-size:12px; }
  .finance-priority-actions > button { grid-template-columns:minmax(0,1fr) 18px; gap:8px; }
