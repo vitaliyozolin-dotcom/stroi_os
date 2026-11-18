@@ -13,6 +13,8 @@ export interface HouseProject {
   id: string;
   code: string;
   name: string;
+  /** Previous display names retained for search and historical context. */
+  nameAliases?: string[];
   address: string;
   model: string;
   area: number;

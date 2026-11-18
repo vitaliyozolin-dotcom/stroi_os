@@ -5,6 +5,7 @@ import App from './App';
 import './styles.css';
 import './dashboard-refinement.css';
 import './mobile-app.css';
+import './design-system.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

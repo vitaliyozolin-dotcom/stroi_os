@@ -1,3 +1,4 @@
+import { projectDisplayName } from './domain/project-naming.js';
 import { useSession } from './presentation/useSession';
 import { useWorkspaceProject } from './presentation/useWorkspaceProject';
 import { CreateProjectDialog } from './presentation/CreateProjectDialog';
@@ -137,7 +138,7 @@ function App() {
 
         <button className="project-switcher" data-tour="project-switcher" type="button" onClick={() => setProjectOpen(true)}>
           <span className="project-switcher__icon"><House size={19} /></span>
-          <span><small>{state.project.code}</small><strong>{state.project.name}</strong>
+          <span><small>{state.project.code}</small><strong>{projectDisplayName(state.project, projects)}</strong>
             {state.project.status !== 'workspace' && <small className="project-switcher__progress" title="Выполнение внесённых этапов и задач ППР, не готовность всего дома">ППР · {state.stages.length ? `${projectProgressTotals(state).physical}%` : '—'}</small>}
           </span>
           <ChevronDown size={15} />
@@ -252,7 +253,7 @@ function App() {
       {projectOpen && (
         <Modal title="Проекты и заказы" subtitle="Откройте существующий заказ или создайте новый." onClose={() => setProjectOpen(false)}>
           {role !== 'client' && <button type="button" className="project-picker__open-card" onClick={() => { setProjectOpen(false); navigate('project'); }}><FolderKanban size={18} /><span><strong>Открыть карточку текущего проекта</strong><small>Реквизиты объекта, команда и документы</small></span></button>}
-          <div className="project-picker__list" data-tour="project-list">{projects.map((project) => <button type="button" key={project.id} className={project.id === state.project.id ? 'project-picker__item project-picker__item--active' : 'project-picker__item'} onClick={() => { setProjectOpen(false); void changeLocation(workspacePath(project.id, page)); }}><span><House size={20} /></span><div><small>{project.code}{project.id === state.project.id ? ' · активный проект' : ''}</small><strong>{project.name}</strong><p>{[project.model, project.unknownFields?.includes('area') ? 'Площадь уточняется' : `${project.area} м²`].filter(Boolean).join(' · ')}</p></div><StatusBadge label={project.id === state.project.id ? 'Выбран' : 'Открыть'} tone={project.id === state.project.id ? 'positive' : 'neutral'} /></button>)}</div>
+          <div className="project-picker__list" data-tour="project-list">{projects.map((project) => <button type="button" key={project.id} className={project.id === state.project.id ? 'project-picker__item project-picker__item--active' : 'project-picker__item'} onClick={() => { setProjectOpen(false); void changeLocation(workspacePath(project.id, page)); }}><span><House size={20} /></span><div><small>{project.code}{project.id === state.project.id ? ' · активный проект' : ''}</small><strong>{projectDisplayName(project, projects)}</strong><p>{[project.model, project.unknownFields?.includes('area') ? 'Площадь уточняется' : `${project.area} м²`].filter(Boolean).join(' · ')}</p></div><StatusBadge label={project.id === state.project.id ? 'Выбран' : 'Открыть'} tone={project.id === state.project.id ? 'positive' : 'neutral'} /></button>)}</div>
           {session.isOwner && <button type="button" data-tour="new-project" className="project-picker__add" onClick={() => {
             setProjectOpen(false);
             setNewOrderCustomerId(undefined);

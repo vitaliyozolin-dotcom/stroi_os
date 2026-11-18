@@ -29,3 +29,5 @@ export {
 export { isTaskClosed, isTaskOverdue } from './tasks.ts';
 export type { ChangeMetadata, MutationContext, StateChange } from './change.ts';
 export { addTaskComment, changeCheckpoint, changeTaskStatus, saveTask } from './mutations.ts';
+
+export { constructionLocation, projectDisplayName, withProjectLocationName } from './project-naming.js';

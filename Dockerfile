@@ -17,6 +17,7 @@ COPY --from=build /app/dist/client ./dist/client
 COPY --from=build /app/server ./server
 COPY --from=build /app/src/domain/finance-totals.js ./src/domain/finance-totals.js
 COPY --from=build /app/src/domain/project-lifecycle.js ./src/domain/project-lifecycle.js
+COPY --from=build /app/src/domain/project-naming.js ./src/domain/project-naming.js
 COPY --from=build /app/src/domain/project-funding.js ./src/domain/project-funding.js
 COPY --from=build /app/src/domain/treasury.js ./src/domain/treasury.js
 COPY --from=build /app/src/domain/finance-ledger.js ./src/domain/finance-ledger.js

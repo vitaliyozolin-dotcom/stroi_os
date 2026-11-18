@@ -1,9 +1,4 @@
 import type { StateChangeSink } from '../application';
-import { useFinance } from '../useFinance';
-import { OverviewFocus } from '../components/OverviewFocus';
-import { ConstructionNow } from '../components/ConstructionNow';
-import { CostGroups } from '../components/CostGroups';
-import { ScheduleBrief } from '../components/ScheduleBrief';
 import {
   ArrowUpRight,
   Banknote,
@@ -12,16 +7,17 @@ import {
   Clock3,
   TrendingUp,
 } from 'lucide-react';
+import { projectDisplayName } from '../domain/project-naming.js';
 import { financeWorkspaceSummary } from '../domain/finance-workspace.js';
 import { useScheduleToday } from '../components/ProjectScheduleDates';
-import { ProjectDashboardTimeline, ProjectPosition, ProjectSectionCards } from '../components/ProjectDashboard';
+import { ProjectDashboardTimeline, ProjectPosition, OverviewWorkCards, OverviewLatestPhoto } from '../components/ProjectDashboard';
 import { formatDateTime, shortMoney } from '../presentation/formatting';
 import type { AppState, DashboardWidget, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { MetricCard, SectionHeader, StatusBadge } from '../components/Ui';
+import './overview-dashboard.css';
 
-export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: StateChangeSink; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
-  const financeCommands = useFinance(state, { name: actor, role }, onChange);
+export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: StateChangeSink; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
   const today = useScheduleToday();
   const finance = financeWorkspaceSummary(state, today);
   const amount = (cents: number | null) => cents === null ? 'Не указано' : shortMoney(cents / 100);
@@ -76,7 +72,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
             <StatusBadge label={`${state.project.code} · ${state.project.status === 'draft' ? 'черновик заказа' : 'проект'}`} tone={state.project.status === 'draft' ? 'neutral' : 'positive'} />
             <span>{lastUpdated ? `Обновлено ${formatDateTime(lastUpdated)}` : 'Изменений пока нет'}</span>
           </div>
-          <h1>{role === 'foreman' ? 'Сегодня на объекте' : state.project.name}</h1>
+          <h1>{role === 'foreman' ? 'Сегодня на объекте' : projectDisplayName(state.project)}</h1>
           <p>{[state.project.model, state.project.area ? `${state.project.area} м²` : '', state.project.address].filter(Boolean).join(' · ') || 'Заполните параметры первого объекта'}</p>
         </div>
       </section>}
@@ -94,16 +90,13 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
         </section>
       </>}
       <ProjectDashboardTimeline state={state} role={role} onNavigate={onNavigate} />
-      <ProjectSectionCards state={state} role={role} onNavigate={onNavigate} />
-      {show('progress') && <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />}
-      <OverviewFocus state={state} role={role} show={show} onNavigate={onNavigate} />
-      <details className="panel dashboard-more"><summary>Сроки, исходный план и сверка</summary><ScheduleBrief state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} /></details>
-      {role === 'management' && show('finance') && <details className="panel dashboard-more"><summary>Бюджет по статьям</summary><CostGroups state={state} onClassify={financeCommands.classifyCosts} compact /></details>}
+      <OverviewWorkCards state={state} role={role} show={show} onNavigate={onNavigate} />
+      <OverviewLatestPhoto state={state} role={role} onNavigate={onNavigate} />
 
       {show('activity') && <details className="overview-history"><summary>История проекта</summary>
         <SectionHeader eyebrow="Журнал проекта" title="История изменений" />
         <div className="activity-row">
-          {state.activity.map((event) => (
+          {state.activity.slice(0, 8).map((event) => (
             <div className={`activity-card activity-card--${event.tone}`} key={event.id}>
               <span className="activity-card__dot" />
               <div><strong>{event.text}</strong><p>{event.actor} · {formatDateTime(event.timestamp)}</p></div>

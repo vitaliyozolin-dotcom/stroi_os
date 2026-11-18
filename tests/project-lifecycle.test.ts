@@ -13,7 +13,7 @@ const fixture = () => { const s = structuredClone(seedState); s.project.id = 'so
 test('lead conversion keeps client money out of internal budget, transfers qualification and creates stage0', async () => {
   const source = fixture(); const identity = await leadProjectIdentity(lead.id);
   const target = createLeadProjectState(source, lead, identity, owner.name, now);
-  assert.equal(target.project.name, 'Рощино, участок 7');
+  assert.equal(target.project.name, 'Рощино');
   assert.equal(target.project.contractValue, 0); assert.equal(target.project.targetCost, 0);
   assert.ok(target.project.unknownFields?.includes('targetCost'));
   assert.deepEqual(target.budgetLines, []); assert.deepEqual(target.financeEntries, []);

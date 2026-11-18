@@ -1,3 +1,4 @@
+import { projectDisplayName } from './project-naming.js';
 import { emptyOrderRelations } from './order-relations.js';
 const clone = value => JSON.parse(JSON.stringify(value));
 const clean = (value, max = 500) => typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -149,7 +150,7 @@ export const createLeadProjectState = (base, lead, identity, actor, now) => {
   const linkedObject = relations?.objects?.find(object => object.id === linkedObjectId);
   const orderRelations = linkedObject ? { ...emptyOrderRelations(), customerId: relations.customerId, mode: relations.mode, plotIds: [...relations.plotIds], participants: clone(relations.participants), objects: [{ ...clone(linkedObject), status: 'planned', actualStart: undefined, actualEnd: undefined, specifications: clone(linkedObject.specifications ?? []).map(spec => ({ ...spec, status: 'draft', documentIds: [], approvedAt: undefined, approvedBy: undefined, source: `Исходный заказ ${base.project.id}; спецификация ${spec.id}` })), activeSpecificationId: linkedObject.activeSpecificationId }], links: [{ id: `source-lead:${lead.id}`, kind: 'lead', entityId: lead.id, objectId: linkedObject.id }] } : emptyOrderRelations();
   const sourceDocumentIds = linkedObject ? [...new Set([...(linkedObject.specifications ?? []).flatMap(spec => spec.documentIds ?? []), ...(relations.links ?? []).filter(link => link.kind === 'document' && link.objectId === linkedObject.id).map(link => link.entityId)])].filter(id => base.documents.some(doc => doc.id === id)) : [];
-  const name = address || `${clean(lead.region, 200)} · участок уточняется`;
+  const name = projectDisplayName({ id: identity.id, code: identity.code, address: address || clean(lead.region, 200) });
   return {
     version: 1, schemaVersion: base.schemaVersion ?? 17,
     project: { ...identity, name, address, model: clean(lead.qualification?.projectModel, 200), area: Number(lead.houseArea) || 0,
