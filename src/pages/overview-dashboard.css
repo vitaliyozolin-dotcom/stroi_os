@@ -1,26 +1,122 @@
-/* The overview uses the same compact scale as the rest of the workspace. */
-.overview-page{gap:16px}
-.overview-page .overview-contract-line{margin:0;font-size:13px;gap:12px;align-items:center}
-.overview-page .overview-contract-line strong{font-size:18px}
-.overview-page .overview-money{margin:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.overview-page .overview-money .metric-card__icon{flex-shrink:0}
-.overview-page .overview-work-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:stretch}
-.overview-page .overview-work-card{padding:16px;border-radius:var(--workspace-radius);display:flex;flex-direction:column;gap:0;min-width:0}
-.overview-page .overview-work-card>header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.overview-page .overview-work-card>header>svg{width:18px;height:18px;flex-shrink:0;color:#697456}
-.app-shell .page-container .overview-work-card>header h2{flex:1;font-size:16px;line-height:1.3;margin:0}
-.overview-page .overview-work-card>header>span{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
-.overview-page .overview-work-row{border:0;border-top:1px solid var(--border);border-radius:0;background:transparent;color:inherit;padding:10px 0;display:grid;gap:4px;width:100%;text-align:left;min-width:0;min-height:44px;cursor:pointer}
+/* The gaps mark sections; smaller spacing and dividers group the records inside. */
+.app-shell .page-container .overview-page {
+  --block-inset: 16px;
+  --block-gap: 20px;
+  --block-border: #c9cfc2;
+  gap: var(--block-gap);
+}
+.overview-page :is(.overview-finance, .overview-work-card, .construction-now) {
+  min-width: 0;
+  border: 1px solid var(--block-border);
+  border-radius: var(--workspace-radius);
+  background: #fff;
+  box-shadow: 0 2px 5px rgb(41 52 32 / 6%);
+}
+.overview-page .overview-finance,
+.overview-page .overview-work-card {
+  padding: 0 var(--block-inset);
+}
+.overview-page .overview-finance {
+  --heading-bg: #e2e9db;
+  --heading-ink: #344d30;
+  padding-bottom: var(--block-inset);
+}
+.overview-work-card--tasks { --heading-bg: #e9eddf; --heading-ink: #455437; }
+.overview-work-card--supply { --heading-bg: #f4e8da; --heading-ink: #704b2a; }
+.overview-work-card--quality { --heading-bg: #e1ece7; --heading-ink: #31574b; }
+.overview-work-card--documents { --heading-bg: #e6eaef; --heading-ink: #43546a; }
+
+.overview-page .overview-block-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0 calc(-1 * var(--block-inset));
+  padding: 0 var(--block-inset);
+  color: var(--heading-ink);
+  background: var(--heading-bg);
+  border-bottom: 1px solid var(--block-border);
+  border-radius: calc(var(--workspace-radius) - 1px) calc(var(--workspace-radius) - 1px) 0 0;
+}
+.app-shell .page-container .overview-block-heading h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+  color: inherit;
+}
+.overview-block-heading > svg { flex-shrink: 0; }
+.overview-page .overview-block-heading > span {
+  min-width: 24px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 75%);
+  text-align: center;
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.app-shell .page-container .overview-block-heading .text-button {
+  min-height: 44px;
+  font-size: 13px;
+  color: inherit;
+}
+.overview-page .overview-contract-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 12px 0;
+  font-size: 13px;
+}
+.overview-page .overview-contract-line strong { margin: 0; font-size: 18px; }
+.app-shell .page-container .overview-money {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  gap: 8px;
+}
+.app-shell .page-container .overview-money .metric-card {
+  padding: 10px 12px;
+  min-height: 0;
+  gap: 6px;
+  border-radius: 8px;
+}
+.overview-page .overview-money .metric-card:not(.metric-card--warning) {
+  background: #f5f6f1;
+}
+.app-shell .page-container .overview-money .metric-card > strong {
+  margin: 0;
+  font-size: 20px;
+  white-space: normal;
+}
+.overview-page .overview-money .metric-card__icon { flex-shrink: 0; }
+.overview-page .overview-work-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--block-gap);
+  align-items: stretch;
+}
+.overview-page .overview-work-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.overview-page .overview-work-row{border:0;border-radius:0;background:transparent;color:inherit;padding:10px 0;display:grid;gap:4px;width:100%;text-align:left;min-width:0;min-height:44px;cursor:pointer}
+.overview-page .overview-work-row + .overview-work-row{border-top:1px solid #e5e7e1}
 .overview-page .overview-work-row:hover strong{color:#5a702e}
 .overview-page .overview-work-row strong{font-size:14px;line-height:1.4;font-weight:600;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .overview-page .overview-work-row small{font-size:12px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
-.overview-page .overview-work-empty{font-size:13px;line-height:1.5;color:var(--muted);margin:0 0 12px}
+.overview-page .overview-work-empty{font-size:13px;line-height:1.5;color:var(--muted);margin:12px 0}
 .app-shell .page-container .overview-work-link{margin-top:auto;padding-top:8px;min-height:44px;justify-content:space-between;font-size:13px;gap:8px;text-align:left}
 .overview-page .overview-work-link svg{flex-shrink:0;width:16px;height:16px}
 .overview-page .overview-history{padding:0;margin:0}
 .overview-page .overview-history>summary{font-size:13px;color:var(--muted);cursor:pointer;min-height:44px;padding:10px 0}
 .overview-page .danger-text,.overview-page small.danger-text{color:#ae4231}
-.overview-page .construction-now{margin:0;padding:16px;border:1px solid var(--border);border-radius:var(--workspace-radius);background:var(--surface)}
+.overview-page .construction-now{margin:0;padding:var(--block-inset)}
 .overview-page .construction-now__body{gap:16px}
 .overview-page .construction-now__body--no-photo{grid-template-columns:minmax(0,1fr)}
 .overview-page .construction-now__focus{display:flex;flex-direction:column;min-width:0;gap:8px;order:-1}
@@ -46,6 +142,16 @@
 .overview-page .construction-stage__line{top:19px}
 .overview-page .construction-stage__name{font-size:12px;line-height:1.3;overflow-wrap:normal;word-break:normal}
 .overview-page .construction-now__legend{font-size:11px;line-height:1.4;gap:8px;flex-wrap:wrap}
-@media(max-width:1250px){.overview-page .overview-work-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:900px){.overview-page .overview-money{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:600px){.overview-page .overview-work-grid{grid-template-columns:1fr}.overview-page .overview-work-card,.overview-page .construction-now{padding:12px}.overview-page .overview-money .metric-card__icon{display:none}.overview-page .overview-money{gap:10px}.app-shell .page-container .overview-contract-line .text-button{font-size:13px}.overview-page .overview-contract-line strong{font-size:18px}}
+
+@media (max-width: 1250px) {
+  .overview-page .overview-work-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .app-shell .page-container .overview-money { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .app-shell .page-container .overview-page { --block-inset: 12px; --block-gap: 18px; }
+  .overview-page .overview-work-grid { grid-template-columns: minmax(0, 1fr); }
+  .overview-page .overview-money .metric-card__icon { display: none; }
+  .app-shell .page-container .overview-money .metric-card > strong { font-size: 18px; }
+}
