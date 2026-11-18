@@ -6,9 +6,9 @@ const BATTLE_SCHEMA_KEY = 'battle_schema_version';
 let schemaPromise;
 let battleReadyPromise;
 
-const ensureTelegramClaimColumn = async (db) => {
+const ensureColumn = async (db, sql) => {
   try {
-    await db.prepare('ALTER TABLE telegram_link_codes ADD COLUMN claim_id TEXT').run();
+    await db.prepare(sql).run();
   } catch (error) {
     if (!/duplicate column|already exists/i.test(String(error?.message || error))) throw error;
   }
@@ -193,7 +193,10 @@ export const ensureSchema = async (db) => {
           reason TEXT NOT NULL
         )
       `).run(),
-    ]).then(() => ensureTelegramClaimColumn(db)).then(() => db.prepare(`
+    ]).then(() => Promise.all([
+      ensureColumn(db, 'ALTER TABLE telegram_link_codes ADD COLUMN claim_id TEXT'),
+      ensureColumn(db, 'ALTER TABLE lead_inbox ADD COLUMN vela_details TEXT'),
+    ])).then(() => db.prepare(`
       CREATE TABLE IF NOT EXISTS shared_payment_project_shares (
         payment_id TEXT NOT NULL REFERENCES shared_payment_records(id),
         project_id TEXT NOT NULL REFERENCES project_state(project_id),
