@@ -94,3 +94,15 @@
 .modal input,.modal select,.modal textarea{font-size:16px;line-height:1.5}
 @media(max-width:1100px){.app-shell .page-container{padding:24px}.app-shell .page-container .project-identity-card__facts{grid-template-columns:repeat(2,minmax(0,1fr))}.app-shell .page-container .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:780px){.app-shell .page-container{padding:20px 16px 100px}.app-shell .page-container h1{font-size:28px}.app-shell .page-container .page-stack{gap:20px}.app-shell .page-container .metric-grid{gap:12px}.app-shell .page-container .metric-card{padding:18px;min-height:160px}.app-shell .page-container .metric-card>strong{font-size:32px}.app-shell .page-container .panel{border-radius:16px}.app-shell .page-container .project-passport-page .panel,.app-shell .page-container .marketing-page .panel{padding:20px}.app-shell .page-container .task-kanban-view{padding:16px}.app-shell .page-container .task-workspace__head,.app-shell .page-container .task-filters{padding:16px}.app-shell .page-container .task-kanban__column{flex-basis:270px}.app-shell .page-container .project-identity-card__facts{grid-template-columns:1fr}.app-shell .page-container .project-quick-card{padding:20px}.app-shell .page-container .finance-money.finance-money--lifecycle>button{padding:18px}.app-shell .page-container .finance-money.finance-money--lifecycle strong{font-size:32px}.app-shell .page-container .marketing-funnel{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Supply tables share the same readable scale as tasks and CRM. */
+.app-shell .page-container .supply-register,.app-shell .page-container .checkpoint-register{padding:24px}
+.app-shell .page-container .supply-table__head{font-size:13px;line-height:1.5;padding:16px 0}
+.app-shell .page-container .supply-table__row{font-size:14px;line-height:1.5;padding:20px 0;gap:16px}
+.app-shell .page-container .supply-item-name strong{font-size:15px;line-height:1.5}
+.app-shell .page-container .supply-item-name small{font-size:13px;line-height:1.5}
+.app-shell .page-container .supply-pipeline__step{padding:16px;border-radius:12px}
+.app-shell .page-container .supply-pipeline__step strong{font-size:14px}
+.app-shell .page-container .supply-pipeline__step small{font-size:13px}
+.app-shell .page-container .operations-summary>article>small{font-size:13px}
+.app-shell .page-container .operations-summary>article>span{font-size:14px;line-height:1.5}

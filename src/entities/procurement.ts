@@ -12,6 +12,7 @@ export interface ProcurementItem {
   stageId: string;
   item: string;
   quantity: number;
+  quantityKnown?: boolean;
   unit: string;
   neededBy: string;
   status: ProcurementStatus;
