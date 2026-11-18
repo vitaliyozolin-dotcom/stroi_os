@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
+import { financeWorkspaceSummary } from '../src/domain/finance-workspace.js';
+import { seedState } from '../src/seed.ts';
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -76,5 +78,24 @@ test('finance repository is scoped and redundant whole-project application facad
   for (const file of ['src/application/finance-planning.ts', 'src/application/finance-facts.ts', 'src/application/finance-history.ts', 'src/application/finance-commitment.js', 'src/domain/history-import.ts']) {
     assert.equal(existsSync(new URL(`../${file}`, import.meta.url)), false, file);
   }
-  for (const page of ['FinancePage', 'OverviewPage']) assert.match(source(`src/pages/${page}.tsx`), /useFinance\(state,/);
+  assert.match(source('src/pages/FinancePage.tsx'), /useFinance\(state,/);
+});
+
+// The overview no longer hosts the CostGroups editor. It consumes the shared
+// financial read model; bringing back commands merely to satisfy a hook check
+// would recreate a write dependency in a navigation-only dashboard.
+test('overview consumes the financial read model and has no financial write boundary', () => {
+  const overview = source('src/pages/OverviewPage.tsx');
+  assert.match(overview, /from '..\/domain\/finance-workspace\.js'/);
+  assert.match(overview, /financeWorkspaceSummary\(state, today\)/);
+  assert.doesNotMatch(overview, /useFinance\(|createProjectFinanceRepository|from ['"][^'"]*infrastructure/);
+  assert.doesNotMatch(overview, /\bonChange\s*\(|\bonClassify\s*=|financeEntries\s*:|budgetLines\s*:|budgetMeta\s*:/);
+  for (const field of ['internalBudgetCents', 'paidCents', 'availableCashCents', 'forecastCents']) {
+    assert.ok(overview.includes(`amount(finance.${field})`), `KPI must read the shared summary: ${field}`);
+  }
+  const state = structuredClone(seedState);
+  const before = structuredClone(state);
+  const summary = financeWorkspaceSummary(state, '2026-11-18');
+  assert.ok(Object.hasOwn(summary, 'internalBudgetCents'));
+  assert.deepEqual(state, before, 'building the dashboard read model must not change project or financial facts');
 });

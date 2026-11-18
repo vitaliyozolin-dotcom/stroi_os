@@ -1,3 +1,4 @@
+import { projectDisplayName } from '../domain/project-naming.js';
 import { useModuleRepository } from '../useModuleRepository';
 import { createDocumentsRepository } from '../infrastructure/module-project';
 import { updateProjectDocumentStatus } from '../application/project-records.js';
@@ -148,7 +149,7 @@ export function ProjectPage({
       <section className="page-title-row">
         <div>
           <span className="eyebrow">Единая карточка объекта</span>
-          <h1>{state.project.name}</h1>
+          <h1>{projectDisplayName(state.project)}</h1>
           <p>{[state.project.code, state.project.model, state.project.unknownFields?.includes('area') ? 'Площадь уточняется' : `${state.project.area} м²`].filter(Boolean).join(' · ')}</p>
         </div>
         {session.role !== 'client' && <button type="button" className="button button--primary" onClick={() => setShowUpload(true)}><UploadCloud size={17} /> Загрузить документ</button>}
@@ -162,7 +163,7 @@ export function ProjectPage({
           <span className="project-identity-card__icon"><House size={27} /></span>
           <div>
             <span className="eyebrow">Объект</span>
-            <h2>{state.project.name}</h2>
+            <h2>{projectDisplayName(state.project)}</h2>
             <p><MapPin size={15} /> {state.project.address || 'Адрес ещё не заполнен'}</p>
           </div>
           <div className="project-identity-card__facts">

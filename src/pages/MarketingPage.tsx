@@ -144,7 +144,7 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
   };
 
   return (
-    <div className="page-stack">
+    <div className="page-stack marketing-page">
       {importError && <p role="alert">{importError} <button type="button" onClick={() => setImportAttempt(value => value + 1)}>Повторить загрузку заявок</button></p>}
       {commandError && !showForm && !selected && <p role="alert">{commandError}</p>}
       <section className="page-title-row">

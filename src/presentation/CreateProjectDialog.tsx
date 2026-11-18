@@ -59,7 +59,7 @@ export function CreateProjectDialog({ state, actor, nextCode, initialCustomerId,
     onSubmit={async values => {
       if (attempt.current) { await onCreate(attempt.current); return; }
       if (!values.code?.trim()) throw new Error('Укажите номер проекта.');
-      values.name = values.address?.trim() || values.name?.trim() || 'Участок уточняется';
+      values.name = values.name?.trim() || 'Место уточняется';
       if (values.customerId && values.newCustomerName?.trim()) throw new Error('Выберите существующего заказчика либо укажите имя нового.');
       const area = template ? orderNumberInput(values.area ?? '', 'Площадь') : undefined;
       const contractCents = template ? orderMoneyInput(values.contractValue ?? '') : undefined;

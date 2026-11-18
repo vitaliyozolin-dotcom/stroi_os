@@ -25,6 +25,7 @@ await mkdir(`${projectRoot}dist/server/runtime`, { recursive: true });
 
 await Promise.all([
   copyFile(`${projectRoot}src/domain/project-lifecycle.js`, `${projectRoot}dist/src/domain/project-lifecycle.js`),
+  copyFile(`${projectRoot}src/domain/project-naming.js`, `${projectRoot}dist/src/domain/project-naming.js`),
   copyFile(`${projectRoot}src/domain/project-funding.js`, `${projectRoot}dist/src/domain/project-funding.js`),
   copyFile(`${projectRoot}sites/leads/preparation.js`, `${projectRoot}dist/server/leads/preparation.js`),
   copyFile(`${projectRoot}sites/automations/project-coordinator.js`, `${projectRoot}dist/server/automations/project-coordinator.js`),

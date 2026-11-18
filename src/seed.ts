@@ -1,3 +1,4 @@
+import { projectDisplayName } from './domain/project-naming.js';
 import type { AppState, BudgetLine, Stage, SystemUser } from './entities/index';
 import { uid } from './infrastructure/runtime.ts';
 import { emptyOrderRelations } from './domain/order-relations.js';
@@ -185,7 +186,7 @@ export const createProjectState = (base: AppState, input: {
     project: {
       id: uid('house'),
       code: input.code.trim(),
-      name: input.name.trim(),
+      name: projectDisplayName(input), nameAliases: input.name.trim() && input.name.trim() !== projectDisplayName(input) ? [input.name.trim()] : [],
       address: input.address.trim(),
       model: input.model.trim(),
       area: input.area,
@@ -231,7 +232,7 @@ export const createProjectState = (base: AppState, input: {
       id: uid('activity'),
       timestamp: createdAt,
       actor: input.actor,
-      text: `Создан проект ${input.code.trim()} · ${input.name.trim()}`,
+      text: `Создан проект ${input.code.trim()} · ${projectDisplayName(input)}`,
       tone: 'positive',
     }],
   };
@@ -248,7 +249,7 @@ export const createDraftOrderState = (base: AppState, input: {
     schemaVersion: 17,
     project: {
       id: uid('order'), creationRequestId: uid('create'), createdAt,
-      code: input.code.trim(), name: input.name.trim(), address: input.address?.trim() ?? '',
+      code: input.code.trim(), name: projectDisplayName(input), nameAliases: input.name.trim() && input.name.trim() !== projectDisplayName(input) ? [input.name.trim()] : [], address: input.address?.trim() ?? '',
       model: '', area: 0, clientNames: input.customerName?.trim() ?? '',
       contractValue: 0, targetCost: 0, unknownFields: ['area', 'contractValue', 'targetCost'],
       startDate: '', targetDate: '', forecastDate: '', foreman: '', cameraStatus: 'offline',
@@ -262,6 +263,6 @@ export const createDraftOrderState = (base: AppState, input: {
       ...structuredClone(base.settings),
       users: base.settings.users.filter(user => user.id === 'user-owner').map(user => ({ ...user })),
     },
-    activity: [{ id: uid('activity'), timestamp: createdAt, actor: input.actor, text: `Создан черновик заказа ${input.code.trim()} · ${input.name.trim()}`, tone: 'positive' }],
+    activity: [{ id: uid('activity'), timestamp: createdAt, actor: input.actor, text: `Создан черновик заказа ${input.code.trim()} · ${projectDisplayName(input)}`, tone: 'positive' }],
   };
 };

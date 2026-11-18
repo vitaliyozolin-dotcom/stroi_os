@@ -44,7 +44,7 @@ import type {
   UserRole,
 } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
-import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
+import { Field, MetricCard, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 
 type TaskScope = 'all' | 'mine' | 'today' | 'overdue' | 'review' | 'done' | 'unassigned' | 'undated';
 type TaskView = 'tasks' | 'kanban' | 'people';
@@ -265,7 +265,7 @@ export function TasksPage({
   ];
 
   return (
-    <div className="page-stack">
+    <div className="page-stack tasks-page">
       <section className="page-title-row">
         <div>
           <span className="eyebrow">Внутренняя работа команды</span>
@@ -275,11 +275,11 @@ export function TasksPage({
         {role === 'management' && <button type="button" data-tour="task-add" className="button button--primary" onClick={openCreate}><Plus size={17} /> Новая задача</button>}
       </section>
 
-      <section className="task-metric-grid">
-        <button type="button" onClick={() => { setScope('all'); }}><span><ClipboardList size={19} /></span><small>Активные</small><strong>{openTasks.length}</strong><p>{openTasks.filter((task) => task.status === 'in_progress').length} сейчас в работе</p></button>
-        <button type="button" className={overdueTasks.length ? 'task-metric--danger' : ''} onClick={() => { setScope('overdue'); }}><span><AlertTriangle size={19} /></span><small>Просрочены</small><strong>{overdueTasks.length}</strong><p>{overdueTasks.length ? 'нужна новая дата или действие' : 'сроки под контролем'}</p></button>
-        <button type="button" onClick={() => { setScope('today'); }}><span><CalendarClock size={19} /></span><small>Срок сегодня</small><strong>{todayTasks.length}</strong><p>{todayTasks.filter((task) => task.status === 'review').length} ожидают проверки</p></button>
-        <button type="button" onClick={() => { setScope('review'); }}><span><ShieldCheck size={19} /></span><small>На проверке</small><strong>{reviewTasks.length}</strong><p>не закрываются без результата</p></button>
+      <section className="metric-grid">
+        <MetricCard label="Активные" value={String(openTasks.length)} detail={`${openTasks.filter(task => task.status === 'in_progress').length} сейчас в работе`} icon={ClipboardList} onClick={() => setScope('all')} />
+        <MetricCard label="Просрочены" value={String(overdueTasks.length)} detail={overdueTasks.length ? 'Нужна новая дата или действие' : 'Сроки под контролем'} icon={AlertTriangle} tone={overdueTasks.length ? 'warning' : 'default'} onClick={() => setScope('overdue')} />
+        <MetricCard label="Срок сегодня" value={String(todayTasks.length)} detail={`${todayTasks.filter(task => task.status === 'review').length} ожидают проверки`} icon={CalendarClock} onClick={() => setScope('today')} />
+        <MetricCard label="На проверке" value={String(reviewTasks.length)} detail="Ожидают приёмки результата" icon={ShieldCheck} onClick={() => setScope('review')} />
       </section>
 
       <section className="panel task-workspace" data-tour="task-workspace">
