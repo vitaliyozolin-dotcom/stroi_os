@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { formatDate, money } from '../presentation/formatting';
 import type { AppState, ProcurementStatus, UserRole } from '../entities/index';
-import { Field, Modal, SectionHeader, StatusBadge } from '../components/Ui';
+import { Field, MetricCard, Modal, SectionHeader, StatusBadge } from '../components/Ui';
 import { CounterpartyModal } from '../components/CounterpartyModal';
 
 const statusOrder: ProcurementStatus[] = ['need', 'rfq', 'ordered', 'in_transit', 'delivered', 'accepted', 'issued'];
@@ -128,11 +128,11 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
         {role !== 'client' && <button type="button" data-tour="procurement-add" className="button button--primary" onClick={() => { setRequirementProjectId(state.project.id); setRequirementError(''); setShowForm(true); }}><Plus size={18} /> Создать потребность</button>}
       </section>
 
-      <section className="supply-metrics">
-        <button type="button" onClick={() => { setFilter('active'); setStatusFilter(null); }}><span><ClipboardList size={19} /></span><div><small>Активные позиции</small><strong>{metrics.active}</strong></div></button>
-        <button type="button" onClick={() => { setFilter('all'); setStatusFilter('in_transit'); }}><span><Truck size={19} /></span><div><small>Сейчас в пути</small><strong>{metrics.transit}</strong></div></button>
-        <button type="button" className={metrics.risks ? 'supply-metric--risk' : ''} onClick={() => { setFilter('risk'); setStatusFilter(null); }}><span><AlertTriangle size={19} /></span><div><small>Риски поставки</small><strong>{metrics.risks}</strong></div></button>
-        <button type="button" onClick={() => { setFilter('all'); setStatusFilter('accepted'); }}><span><PackageCheck size={19} /></span><div><small>Принято позиций</small><strong>{metrics.accepted}</strong></div></button>
+      <section className="metric-grid">
+        <MetricCard label="Активные позиции" value={String(metrics.active)} detail="Потребности и открытые поставки" icon={ClipboardList} onClick={() => { setFilter('active'); setStatusFilter(null); }} />
+        <MetricCard label="Сейчас в пути" value={String(metrics.transit)} detail="Ожидаем доставку на объект" icon={Truck} onClick={() => { setFilter('all'); setStatusFilter('in_transit'); }} />
+        <MetricCard label="Риски поставки" value={String(metrics.risks)} detail="Требуют решения ответственного" icon={AlertTriangle} tone={metrics.risks ? 'warning' : 'default'} onClick={() => { setFilter('risk'); setStatusFilter(null); }} />
+        <MetricCard label="Принято позиций" value={String(metrics.accepted)} detail="Поставка проверена на объекте" icon={PackageCheck} onClick={() => { setFilter('all'); setStatusFilter('accepted'); }} />
       </section>
 
       <details className="panel supply-pipeline-panel">
@@ -163,7 +163,7 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
             const isFinal = item.status === 'issued';
             return (
               <div className={`supply-table__row supply-table__row--clickable ${item.risk ? 'supply-table__row--risk' : ''}`} role="button" tabIndex={0} key={item.id} onClick={() => setSelectedId(item.id)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedId(item.id); }}>
-                <div className="supply-item-name"><span className="supply-item-name__icon">{item.status === 'in_transit' ? <Truck size={18} /> : item.status === 'issued' ? <Warehouse size={18} /> : <Boxes size={18} />}</span><span><strong>{item.item}</strong><small>{item.quantity} {item.unit} · {item.owner}</small>{item.risk && <em><AlertTriangle size={13} /> {item.risk}</em>}</span></div>
+                <div className="supply-item-name"><span className="supply-item-name__icon">{item.status === 'in_transit' ? <Truck size={18} /> : item.status === 'issued' ? <Warehouse size={18} /> : <Boxes size={18} />}</span><span><strong>{item.item}</strong><small>{item.quantityKnown === false ? 'Количество уточняется' : `${item.quantity} ${item.unit}`} · {item.owner}</small>{item.risk && <em><AlertTriangle size={13} /> {item.risk}</em>}</span></div>
                 <span data-label="Этап">{stage?.shortName ?? '—'}</span>
                 <span data-label="Нужно к">{formatDate(item.neededBy)}</span>
                 <span data-label="Поставщик">{item.supplier}</span>
@@ -204,12 +204,12 @@ export function ProcurementPage({ state, role, actor, focusId, onChange }: { sta
         <Modal wide title={selected.item} subtitle={`${statusLabels[selected.status]} · нужно к ${formatDate(selected.neededBy, true)}`} onClose={() => setSelectedId(null)}>
           {workflowError && <p role="alert" className="form-warning">{workflowError}</p>}
           <div className="entity-detail-grid">
-            <section className="entity-detail-card"><small>Потребность</small><strong>{selected.quantity} {selected.unit}</strong><span>{selected.reason ?? 'Основание не заполнено'}</span></section>
+            <section className="entity-detail-card"><small>Потребность</small><strong>{selected.quantityKnown === false ? 'Количество уточняется' : `${selected.quantity} ${selected.unit}`}</strong><span>{selected.reason ?? 'Основание не заполнено'}</span></section>
             <section className="entity-detail-card"><small>Проект и этап</small><strong>{state.stages.find((item) => item.id === selected.stageId)?.name ?? 'Этап не найден'}</strong><span>{state.budgetLines.find((item) => item.id === selected.budgetLineId)?.name ?? 'Без статьи бюджета'}</span></section>
             <section className="entity-detail-card"><small>Поставщик</small><button type="button" className="entity-link" disabled={!selected.supplierId} onClick={() => { setSelectedId(null); setCounterpartyId(selected.supplierId ?? null); }}>{selected.supplier}</button><span>{selected.budgetKnown === false || selected.budget === 0 && selected.budgetKnown !== true ? 'Стоимость уточняется' : money(selected.budget)}</span></section>
             <section className="entity-detail-card"><small>Ответственный</small><strong>{selected.owner}</strong><span>{selected.deliveryAddress ?? `Объект ${state.project.code}`}</span></section>
           </div>
-          {selected.receivedQuantity !== undefined && <div className="supply-next-action">Получено {selected.receivedQuantity} из {selected.quantity} {selected.unit} · принято {selected.acceptedQuantity ?? 0}{selected.expectedDeliveryDate ? ` · ожидаем ${formatDate(selected.expectedDeliveryDate)}` : ''}{selected.receiptNote ? ` · ${selected.receiptNote}` : ''}</div>}
+          {selected.receivedQuantity !== undefined && <div className="supply-next-action">Получено {selected.receivedQuantity} из {selected.quantityKnown === false ? 'Количество уточняется' : `${selected.quantity} ${selected.unit}`} · принято {selected.acceptedQuantity ?? 0}{selected.expectedDeliveryDate ? ` · ожидаем ${formatDate(selected.expectedDeliveryDate)}` : ''}{selected.receiptNote ? ` · ${selected.receiptNote}` : ''}</div>}
           {role !== 'client' && ['ordered', 'in_transit', 'delivered', 'accepted'].includes(selected.status) && <button type="button" className="button button--secondary" onClick={() => { setReceiptId(selected.id); setReceiptForm({ received: String(selected.receivedQuantity ?? 0), accepted: String(selected.acceptedQuantity ?? 0), expected: selected.expectedDeliveryDate ?? '', note: selected.receiptNote ?? '' }); setSelectedId(null); }}>Уточнить получение и приёмку</button>}
           {selected.risk && <div className="entity-alert"><AlertTriangle size={18} /><span><strong>Риск поставки</strong>{selected.risk}</span></div>}
           <div className="entity-detail-section"><SectionHeader eyebrow="Сравнение" title="Предложения поставщиков" action={<div className="section-action-row"><span className="count-badge">{state.supplierQuotes.filter((item) => item.procurementItemId === selected.id).length}</span>{role !== 'client' && <button type="button" className="button button--secondary button--compact" onClick={() => { setQuoteExpected(procurementSnapshot(state, selected.id)); setWorkflowError(''); setQuoteForId(selected.id); setSelectedId(null); }}><Plus size={15} /> Добавить КП</button>}</div>} />
