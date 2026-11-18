@@ -7,7 +7,6 @@ import {
   Clock3,
   TrendingUp,
 } from 'lucide-react';
-import { projectDisplayName } from '../domain/project-naming.js';
 import { financeWorkspaceSummary } from '../domain/finance-workspace.js';
 import { useScheduleToday } from '../components/ProjectScheduleDates';
 import { OverviewWorkCards } from '../components/ProjectDashboard';
@@ -22,7 +21,6 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
   const today = useScheduleToday();
   const finance = financeWorkspaceSummary(state, today);
   const amount = (cents: number | null) => cents === null ? 'Не указано' : shortMoney(cents / 100);
-  const lastUpdated = state.activity[0]?.timestamp ?? state.project.createdAt;
   const show = (widget: DashboardWidget) => role === 'foreman' || state.settings.dashboardWidgets.includes(widget);
 
   if (state.project.status === 'workspace') {
@@ -67,29 +65,18 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
 
   return (
     <div className="page-stack overview-page">
-      {show('project') && <section className="project-heading project-heading--overview">
-        <div>
-          <div className="project-heading__meta">
-            <StatusBadge label={`${state.project.code} · ${state.project.status === 'draft' ? 'черновик заказа' : 'проект'}`} tone={state.project.status === 'draft' ? 'neutral' : 'positive'} />
-            <span>{lastUpdated ? `Обновлено ${formatDateTime(lastUpdated)}` : 'Изменений пока нет'}</span>
-          </div>
-          <h1>{role === 'foreman' ? 'Сегодня на объекте' : projectDisplayName(state.project)}</h1>
-          <p>{[state.project.model, state.project.area ? `${state.project.area} м²` : '', state.project.address].filter(Boolean).join(' · ') || 'Заполните параметры первого объекта'}</p>
-        </div>
-      </section>}
-
-      {role === 'management' && state.project.status === 'draft' && <section className="panel"><p>Объём, сроки и стоимость этого заказа ещё уточняются. Заполните участников, объекты и условия, затем добавьте план работ.</p><button type="button" className="button button--primary" onClick={() => onNavigate('customers')}>Заполнить заказ</button></section>}
-
       <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
       {role === 'management' && show('finance') && <>
         <div className="overview-contract-line"><span>Цена договора <strong>{amount(finance.contractCents)}</strong></span><button type="button" className="text-button" onClick={() => onNavigate('finance')}>Открыть финансы <ArrowUpRight size={15} /></button></div>
         <section className="metric-grid overview-money" aria-label="Деньги проекта">
           <MetricCard label="Смета себестоимости" value={amount(finance.internalBudgetCents)} detail={<span>{finance.internalBudgetCents === null ? 'Нужна внутренняя смета' : finance.internalBudgetApproved ? 'Утверждённый бюджет' : 'Требует утверждения'}</span>} icon={CircleDollarSign} onClick={() => onNavigate('finance')} />
-          <MetricCard label="Оплачено по объекту" value={amount(finance.paidCents)} detail={<span>{finance.paidCents === null ? 'Оплаты ещё не внесены' : 'Учтённые денежные операции'}</span>} icon={Banknote} onClick={() => onNavigate('finance')} />
-          <MetricCard label="Доступно сейчас" value={amount(finance.availableCashCents)} detail={<span>{finance.availableCashCents === null ? 'Нужны остатки и распределение денег' : 'Без средств на эскроу'}</span>} icon={CircleDollarSign} tone={finance.availableCashCents !== null && finance.availableCashCents < 0 ? 'warning' : 'default'} onClick={() => onNavigate('finance')} />
-          <MetricCard label="Прогноз себестоимости" value={amount(finance.forecastCents)} detail={<span>{finance.forecastCents === null ? 'Нужна оценка оставшихся затрат' : finance.forecastComplete ? 'С учётом оставшихся работ' : 'Предварительно · есть пробелы'}</span>} icon={TrendingUp} onClick={() => onNavigate('finance')} />
+          <MetricCard label="Оплачено" value={amount(finance.paidCents)} detail={<span>{finance.paidCents === null ? 'Оплаты ещё не внесены' : 'Учтённые денежные операции'}</span>} icon={Banknote} onClick={() => onNavigate('finance')} />
+          <MetricCard label="Доступно сейчас" value={amount(finance.availableCashCents)} detail={<span>{finance.availableCashCents === null ? 'Остаток не внесён' : 'Без средств на эскроу'}</span>} icon={CircleDollarSign} tone={finance.availableCashCents !== null && finance.availableCashCents < 0 ? 'warning' : 'default'} onClick={() => onNavigate('finance')} />
+          <MetricCard label="Прогноз затрат" value={amount(finance.forecastCents)} detail={<span>{finance.forecastCents === null ? 'Остаток работ не оценён' : finance.forecastComplete ? 'С учётом оставшихся работ' : 'Предварительно · есть пробелы'}</span>} icon={TrendingUp} onClick={() => onNavigate('finance')} />
         </section>
       </>}
+      {role === 'management' && state.project.status === 'draft' && <section className="panel"><p>Объём, сроки и стоимость этого заказа ещё уточняются. Заполните участников, объекты и условия, затем добавьте план работ.</p><button type="button" className="button button--primary" onClick={() => onNavigate('customers')}>Заполнить заказ</button></section>}
+
       <OverviewWorkCards state={state} role={role} show={show} onNavigate={onNavigate} />
 
       {show('activity') && <details className="overview-history"><summary>История проекта</summary>

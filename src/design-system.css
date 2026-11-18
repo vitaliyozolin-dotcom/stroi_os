@@ -1,21 +1,21 @@
 /* Shared workspace scale. Page styles own composition; these tokens own the visual language. */
-:root{--workspace-radius:16px;--workspace-gap:24px;--workspace-padding:24px;--workspace-label:13px;--workspace-body:15px;--workspace-value:36px}
+:root{--workspace-radius:12px;--workspace-gap:16px;--workspace-padding:16px;--workspace-label:12px;--workspace-body:14px;--workspace-value:26px}
 .app-shell .page-container{width:100%;max-width:none;margin:0;padding:32px clamp(24px,2.5vw,48px) 56px;font-size:var(--workspace-body);line-height:1.5}
 #workspace-page:focus{outline:none}
 .app-shell .page-container .page-stack{gap:var(--workspace-gap)}
 .app-shell .page-container .finance-page{max-width:none;width:100%;margin:0}
 .app-shell .page-container .page-title-row{gap:24px;margin:0;align-items:center}
-.app-shell .page-container h1{font-size:32px;line-height:1.2;letter-spacing:-.025em}
-.app-shell .page-container h2{font-size:22px;line-height:1.3}
+.app-shell .page-container h1{font-size:26px;line-height:1.2;letter-spacing:-.025em}
+.app-shell .page-container h2{font-size:18px;line-height:1.3}
 .app-shell .page-container .page-title-row p{font-size:15px;line-height:1.5}
 .app-shell .page-container .eyebrow{font-size:12px;line-height:1.5;letter-spacing:.06em}
 .app-shell .page-container .panel{border-radius:var(--workspace-radius)}
-.app-shell .page-container .metric-grid{gap:20px;align-items:stretch}
-.app-shell .page-container .metric-card{border:1px solid var(--border);border-radius:var(--workspace-radius);padding:var(--workspace-padding);min-height:164px;display:flex;flex-direction:column;align-items:stretch;justify-content:space-between;gap:16px;min-width:0;text-align:left;background:var(--surface)}
+.app-shell .page-container .metric-grid{gap:12px;align-items:stretch}
+.app-shell .page-container .metric-card{border:1px solid var(--border);border-radius:var(--workspace-radius);padding:var(--workspace-padding);min-height:120px;display:flex;flex-direction:column;align-items:stretch;justify-content:space-between;gap:10px;min-width:0;text-align:left;background:var(--surface)}
 .app-shell .page-container .metric-card__top{font-size:var(--workspace-label);line-height:1.45;align-items:flex-start;gap:12px}
 .app-shell .page-container .metric-card>strong{font-size:var(--workspace-value);line-height:1.12;letter-spacing:-.035em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.app-shell .page-container .metric-card__detail{font-size:14px;line-height:1.5;color:var(--muted)}
-.app-shell .page-container .metric-card__icon{width:36px;height:36px;border-radius:10px;flex-shrink:0}
+.app-shell .page-container .metric-card__detail{font-size:12px;line-height:1.5;color:var(--muted)}
+.app-shell .page-container .metric-card__icon{width:28px;height:28px;border-radius:10px;flex-shrink:0}
 .app-shell .page-container .metric-card--dark{background:var(--forest);color:#fff;border-color:var(--forest)}
 .app-shell .page-container .metric-card--dark strong,.app-shell .page-container .metric-card--dark .metric-card__top{color:#fff}
 .app-shell .page-container .metric-card--dark .metric-card__detail{color:#d8dece}
@@ -24,7 +24,7 @@
 .app-shell .page-container .text-button{font-size:14px;line-height:1.5}
 .app-shell .page-container .status-badge,.app-shell .page-container .count-badge{font-size:12px;line-height:1.5;border-radius:8px}
 .app-shell .page-container .section-header{gap:16px;margin-bottom:24px}
-.app-shell .page-container .section-header h2{font-size:22px}
+.app-shell .page-container .section-header h2{font-size:18px}
 .app-shell .page-container input,.app-shell .page-container select,.app-shell .page-container textarea{font-size:15px}
 .app-shell .page-container table{font-size:14px}
 .app-shell .page-container th{font-size:13px;line-height:1.5}
@@ -62,8 +62,8 @@
 .app-shell .page-container .project-identity-card__facts>span{display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--surface-soft);border:1px solid var(--border);border-radius:12px;min-width:0}
 .app-shell .page-container .project-identity-card__facts small{font-size:13px;line-height:1.5;color:var(--muted)}
 .app-shell .page-container .project-identity-card__facts strong{font-size:18px;line-height:1.4;white-space:normal;overflow-wrap:anywhere}
-.app-shell .page-container .project-quick-card{padding:24px;border-radius:var(--workspace-radius);min-height:164px;gap:16px;background:var(--surface);border:1px solid var(--border)}
-.app-shell .page-container .project-quick-card strong{font-size:36px;line-height:1.2;margin:10px 0}
+.app-shell .page-container .project-quick-card{padding:var(--workspace-padding);border-radius:var(--workspace-radius);min-height:120px;gap:16px;background:var(--surface);border:1px solid var(--border)}
+.app-shell .page-container .project-quick-card strong{font-size:var(--workspace-value);line-height:1.2;margin:10px 0}
 .app-shell .page-container .project-quick-card small{font-size:13px;line-height:1.5}
 .app-shell .page-container .project-quick-card p{font-size:14px;line-height:1.5}
 .app-shell .page-container .project-document-row{padding:18px 0;gap:16px}
@@ -72,28 +72,28 @@
 .app-shell .page-container .project-passport-nav{gap:12px;flex-wrap:wrap}
 .app-shell .page-container .project-passport-nav a{font-size:14px;min-height:44px;padding:11px 16px;border-radius:10px}
 .app-shell .page-container .finance-money.finance-money--lifecycle{gap:20px}
-.app-shell .page-container .finance-money.finance-money--lifecycle>button{padding:24px;border-radius:16px;min-height:164px;background:var(--surface)}
-.app-shell .page-container .finance-money.finance-money--lifecycle strong{font-size:36px;line-height:1.12;letter-spacing:-.035em}
+.app-shell .page-container .finance-money.finance-money--lifecycle>button{padding:var(--workspace-padding);border-radius:var(--workspace-radius);min-height:120px;background:var(--surface)}
+.app-shell .page-container .finance-money.finance-money--lifecycle strong{font-size:var(--workspace-value);line-height:1.12;letter-spacing:-.035em}
 .app-shell .page-container .finance-money.finance-money--lifecycle small{font-size:13px}
 .app-shell .page-container .finance-money.finance-money--lifecycle span{font-size:14px}
 .app-shell .page-container .finance-commercial-strip{gap:20px}
-.app-shell .page-container .finance-commercial-strip>button{border:1px solid var(--border);border-radius:16px;padding:20px;background:var(--surface);gap:10px}
+.app-shell .page-container .finance-commercial-strip>button{border:1px solid var(--border);border-radius:var(--workspace-radius);padding:20px;background:var(--surface);gap:10px}
 .app-shell .page-container .finance-commercial-strip strong{font-size:24px;line-height:1.3}
 .app-shell .page-container .operations-summary{gap:20px}
-.app-shell .page-container .operations-summary>article{padding:24px;border-radius:16px;min-height:164px;background:var(--surface);border:1px solid var(--border)}
-.app-shell .page-container .operations-summary strong{font-size:36px;line-height:1.2}
+.app-shell .page-container .operations-summary>article{padding:var(--workspace-padding);border-radius:var(--workspace-radius);min-height:120px;background:var(--surface);border:1px solid var(--border)}
+.app-shell .page-container .operations-summary strong{font-size:var(--workspace-value);line-height:1.2}
 .app-shell .page-container .operations-summary small{font-size:14px;line-height:1.5}
-.app-shell .page-container .operations-page .panel{border-radius:16px}
+.app-shell .page-container .operations-page .panel{border-radius:var(--workspace-radius)}
 .app-shell .page-container .operations-row{font-size:14px;line-height:1.5;padding:18px 0}
 .app-shell .page-container .operations-row strong{font-size:15px;line-height:1.5}
 .app-shell .page-container .operations-row small{font-size:13px}
-.app-shell .page-container .schedule-workspace{border-radius:16px}
+.app-shell .page-container .schedule-workspace{border-radius:var(--workspace-radius)}
 .app-shell .page-container .schedule-workspace h3{font-size:16px}
 .app-shell .page-container .schedule-workspace small{font-size:13px;line-height:1.5}
 .modal .button{min-height:44px;border-radius:10px;font-size:14px}
 .modal input,.modal select,.modal textarea{font-size:16px;line-height:1.5}
 @media(max-width:1100px){.app-shell .page-container{padding:24px}.app-shell .page-container .project-identity-card__facts{grid-template-columns:repeat(2,minmax(0,1fr))}.app-shell .page-container .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:780px){.app-shell .page-container{padding:20px 16px 100px}.app-shell .page-container h1{font-size:28px}.app-shell .page-container .page-stack{gap:20px}.app-shell .page-container .metric-grid{gap:12px}.app-shell .page-container .metric-card{padding:18px;min-height:160px}.app-shell .page-container .metric-card>strong{font-size:32px}.app-shell .page-container .panel{border-radius:16px}.app-shell .page-container .project-passport-page .panel,.app-shell .page-container .marketing-page .panel{padding:20px}.app-shell .page-container .task-kanban-view{padding:16px}.app-shell .page-container .task-workspace__head,.app-shell .page-container .task-filters{padding:16px}.app-shell .page-container .task-kanban__column{flex-basis:270px}.app-shell .page-container .project-identity-card__facts{grid-template-columns:1fr}.app-shell .page-container .project-quick-card{padding:20px}.app-shell .page-container .finance-money.finance-money--lifecycle>button{padding:18px}.app-shell .page-container .finance-money.finance-money--lifecycle strong{font-size:32px}.app-shell .page-container .marketing-funnel{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:780px){:root{--workspace-value:22px;--workspace-padding:12px;--workspace-gap:14px}.app-shell .page-container{padding:12px 12px 100px}.app-shell .page-container h1{font-size:24px}.app-shell .page-container .page-stack{gap:14px}.app-shell .page-container .metric-grid{gap:12px}.app-shell .page-container .metric-card{padding:12px;min-height:112px}.app-shell .page-container .metric-card>strong{font-size:22px}.app-shell .page-container .panel{border-radius:var(--workspace-radius)}.app-shell .page-container .project-passport-page .panel,.app-shell .page-container .marketing-page .panel{padding:20px}.app-shell .page-container .task-kanban-view{padding:16px}.app-shell .page-container .task-workspace__head,.app-shell .page-container .task-filters{padding:16px}.app-shell .page-container .task-kanban__column{flex-basis:270px}.app-shell .page-container .project-identity-card__facts{grid-template-columns:1fr}.app-shell .page-container .project-quick-card{padding:12px}.app-shell .page-container .finance-money.finance-money--lifecycle>button{padding:12px}.app-shell .page-container .finance-money.finance-money--lifecycle strong{font-size:22px}.app-shell .page-container .marketing-funnel{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* Supply tables share the same readable scale as tasks and CRM. */
 .app-shell .page-container .supply-register,.app-shell .page-container .checkpoint-register{padding:24px}
