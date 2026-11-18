@@ -49,3 +49,19 @@
 @media(max-width:1250px){.overview-page .overview-work-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-page .overview-money .metric-card{padding:20px}.overview-page .overview-money .metric-card>strong{font-size:32px}.overview-page .project-position{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-page .project-position>.button{grid-column:1/-1;justify-self:start}}
 @media(max-width:900px){.overview-page .overview-money{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-page .overview-schedule__dates strong{font-size:24px}.overview-page .overview-work-grid{gap:20px}}
 @media(max-width:600px){.overview-page{gap:20px}.overview-page .project-heading--overview h1{font-size:26px}.overview-page .project-position{grid-template-columns:1fr;padding:20px;gap:20px}.overview-page .project-position strong{font-size:18px}.overview-page .overview-money{gap:12px}.overview-page .overview-money .metric-card{padding:16px;min-height:170px}.overview-page .overview-money .metric-card>strong{font-size:32px}.overview-page .overview-money .metric-card__detail{font-size:13px}.overview-page .overview-money .metric-card__icon{display:none}.overview-page .overview-schedule,.overview-page .overview-work-card,.overview-page .overview-latest-photo{padding:20px}.overview-page .overview-schedule .section-header{align-items:flex-start}.overview-page .overview-schedule .text-button{font-size:13px}.overview-page .overview-schedule__dates{grid-template-columns:1fr;gap:18px}.overview-page .overview-schedule__dates>div{display:flex;align-items:center;justify-content:space-between;gap:16px}.overview-page .overview-schedule__dates strong{font-size:22px;text-align:right}.overview-page .overview-schedule__dates small{flex:1}.overview-page .overview-schedule__foot{margin-top:20px}.overview-page .overview-work-grid{grid-template-columns:1fr}.overview-page .overview-latest-photo{grid-template-columns:1fr}.overview-page .overview-contract-line{align-items:center}.overview-page .overview-contract-line strong{font-size:20px}}
+
+.overview-page .construction-now{margin:0;padding:24px;border:1px solid var(--border);border-radius:16px;background:var(--surface)}
+.overview-page .construction-now__head{margin-bottom:20px}
+.overview-page .construction-now__body--no-photo{grid-template-columns:minmax(0,1fr)}
+.overview-page .construction-now__focus{display:flex;flex-direction:column;min-width:0;gap:16px}
+.overview-page .construction-now__focus h3{font-size:28px;line-height:1.25;margin:0}
+.overview-page .construction-now__focus p{font-size:15px;line-height:1.5}
+.overview-page .construction-now__eyebrow{font-size:13px}
+.overview-page .construction-now__action{padding:18px;border-radius:12px}
+.overview-page .construction-now__action strong{font-size:18px;line-height:1.4}
+.overview-page .construction-now__action small,.overview-page .construction-now__action span>span{font-size:13px;line-height:1.5}
+.overview-page .construction-now__stages{margin-top:24px}
+.overview-page .construction-now__stages li{flex:1 0 100px}
+.overview-page .construction-stage__name{font-size:13px;line-height:1.4;overflow-wrap:normal;word-break:normal}
+.overview-page .construction-now__legend{font-size:13px;line-height:1.5}
+@media(max-width:780px){.overview-page .construction-now{padding:20px}.overview-page .construction-now__focus h3{font-size:24px}.overview-page .construction-now__legend{gap:12px;flex-wrap:wrap}}

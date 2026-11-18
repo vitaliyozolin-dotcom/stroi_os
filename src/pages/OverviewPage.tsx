@@ -10,14 +10,15 @@ import {
 import { projectDisplayName } from '../domain/project-naming.js';
 import { financeWorkspaceSummary } from '../domain/finance-workspace.js';
 import { useScheduleToday } from '../components/ProjectScheduleDates';
-import { ProjectDashboardTimeline, ProjectPosition, OverviewWorkCards, OverviewLatestPhoto } from '../components/ProjectDashboard';
+import { OverviewWorkCards } from '../components/ProjectDashboard';
 import { formatDateTime, shortMoney } from '../presentation/formatting';
 import type { AppState, DashboardWidget, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { MetricCard, SectionHeader, StatusBadge } from '../components/Ui';
+import { ConstructionNow } from '../components/ConstructionNow';
 import './overview-dashboard.css';
 
-export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: StateChangeSink; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
+export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: StateChangeSink; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
   const today = useScheduleToday();
   const finance = financeWorkspaceSummary(state, today);
   const amount = (cents: number | null) => cents === null ? 'Не указано' : shortMoney(cents / 100);
@@ -79,7 +80,7 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
 
       {role === 'management' && state.project.status === 'draft' && <section className="panel"><p>Объём, сроки и стоимость этого заказа ещё уточняются. Заполните участников, объекты и условия, затем добавьте план работ.</p><button type="button" className="button button--primary" onClick={() => onNavigate('customers')}>Заполнить заказ</button></section>}
 
-      <ProjectPosition state={state} role={role} onNavigate={onNavigate} />
+      <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
       {role === 'management' && show('finance') && <>
         <div className="overview-contract-line"><span>Цена договора <strong>{amount(finance.contractCents)}</strong></span><button type="button" className="text-button" onClick={() => onNavigate('finance')}>Открыть финансы <ArrowUpRight size={15} /></button></div>
         <section className="metric-grid overview-money" aria-label="Деньги проекта">
@@ -89,9 +90,7 @@ export function OverviewPage({ state, role, onNavigate, onOpenProjects }: { stat
           <MetricCard label="Прогноз себестоимости" value={amount(finance.forecastCents)} detail={<span>{finance.forecastCents === null ? 'Нужна оценка оставшихся затрат' : finance.forecastComplete ? 'С учётом оставшихся работ' : 'Предварительно · есть пробелы'}</span>} icon={TrendingUp} onClick={() => onNavigate('finance')} />
         </section>
       </>}
-      <ProjectDashboardTimeline state={state} role={role} onNavigate={onNavigate} />
       <OverviewWorkCards state={state} role={role} show={show} onNavigate={onNavigate} />
-      <OverviewLatestPhoto state={state} role={role} onNavigate={onNavigate} />
 
       {show('activity') && <details className="overview-history"><summary>История проекта</summary>
         <SectionHeader eyebrow="Журнал проекта" title="История изменений" />

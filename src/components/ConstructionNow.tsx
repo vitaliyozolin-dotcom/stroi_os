@@ -18,11 +18,11 @@ export function ConstructionNow({ state, role, actor, userId, onChange, onNaviga
   const hasSiteProgress = role !== 'client' && Boolean(state.project.siteProgressHistory?.length);
   return <section className="construction-now" aria-label="Стройка сейчас">
     <div className="construction-now__head"><h2>Стройка сейчас</h2><button className="text-button" type="button" onClick={() => onNavigate('schedule')}>Все этапы <ArrowUpRight size={16} /></button></div>
-    <div className="construction-now__body">
-      <button type="button" className="construction-now__photo" onClick={() => onNavigate('project')} aria-label="Открыть полевой дневник объекта">
+    <div className={`construction-now__body${hasPhoto ? "" : " construction-now__body--no-photo"}`}>
+      {hasPhoto && <button type="button" className="construction-now__photo" onClick={() => onNavigate('project')} aria-label="Открыть полевой дневник объекта">
         {hasPhoto ? <img src={photoUrl} alt={view.photoStage ? `Фото из отчёта: ${view.photoStage.name}` : 'Последнее фото объекта из полевого дневника'} onError={() => setFailedPhoto(photoUrl)} /> : <span className="construction-now__empty-photo"><ImageIcon size={30} /><span>{photoUrl ? 'Фото недоступно' : 'Фото объекта пока нет'}</span></span>}
         {hasPhoto && view.photo && <span className="construction-now__caption">{view.photoStage?.shortName || 'Последнее фото объекта'} · отчёт {formatDate(view.photo.report.createdAt.slice(0, 10))}</span>}
-      </button>
+      </button>}
       <div className="construction-now__focus">
         <SiteProgress state={state} actor={actor} role={role} onChange={onChange} />
         {!hasSiteProgress && <>
