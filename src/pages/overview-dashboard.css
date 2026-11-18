@@ -1,67 +1,51 @@
-.overview-page{gap:24px}
-.overview-page .project-heading--overview{padding:0 0 4px;border:0;gap:20px}
-.overview-page .project-heading--overview h1{font-size:32px;line-height:1.2;margin:12px 0}
-.overview-page .project-heading--overview p{font-size:15px;line-height:1.5;margin:0}
-.overview-page .project-heading__meta{font-size:13px;gap:16px;flex-wrap:wrap}
-.overview-page .project-position{padding:24px;border-radius:16px;gap:24px;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto}
-.overview-page .project-position strong{font-size:20px;line-height:1.35}
-.overview-page .project-position small{font-size:13px}
-.overview-page .project-position span{font-size:14px;line-height:1.5}
-.overview-page .overview-contract-line{margin:0;font-size:15px}
-.overview-page .overview-contract-line strong{font-size:20px}
-.overview-page .overview-money{margin:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px}
-.overview-page .overview-money .metric-card{padding:24px;min-height:164px;border-radius:16px;gap:18px;min-width:0;display:flex;flex-direction:column;align-items:stretch;justify-content:space-between}
-.overview-page .overview-money .metric-card__top{font-size:13px;line-height:1.4;gap:12px;align-items:flex-start}
+/* The overview uses the same compact scale as the rest of the workspace. */
+.overview-page{gap:16px}
+.overview-page .overview-contract-line{margin:0;font-size:13px;gap:12px;align-items:center}
+.overview-page .overview-contract-line strong{font-size:18px}
+.overview-page .overview-money{margin:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .overview-page .overview-money .metric-card__icon{flex-shrink:0}
-.overview-page .overview-money .metric-card>strong{font-size:36px;line-height:1.12;letter-spacing:-.035em;overflow-wrap:anywhere}
-.overview-page .overview-money .metric-card__detail{font-size:14px;line-height:1.5}
-.overview-page .overview-schedule{padding:24px;border-radius:16px}
-.overview-page .overview-schedule .section-header{margin:0 0 24px;align-items:center;gap:16px}
-.overview-page .overview-schedule h2,.overview-page .overview-work-card h2,.overview-page .overview-latest-photo h2{font-size:20px;line-height:1.3;margin:0}
-.overview-page .overview-schedule__dates{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
-.overview-page .overview-schedule__dates>div{display:grid;align-content:start;gap:10px;min-width:0}
-.overview-page .overview-schedule__dates small{font-size:13px;color:var(--muted)}
-.overview-page .overview-schedule__dates strong{font-size:28px;line-height:1.25;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.overview-page .overview-schedule__foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border);font-size:14px;line-height:1.5;color:var(--muted)}
-.overview-page .overview-work-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;align-items:stretch}
-.overview-page .overview-work-card{padding:24px;border-radius:16px;display:flex;flex-direction:column;gap:0;min-width:0}
-.overview-page .overview-work-card>header{display:flex;align-items:center;gap:10px;margin-bottom:16px}
-.overview-page .overview-work-card>header>svg{flex-shrink:0;color:#697456}
-.overview-page .overview-work-card>header h2{flex:1;font-size:18px}
-.overview-page .overview-work-card>header>span{font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums}
-.overview-page .overview-work-row{border:0;border-top:1px solid var(--border);border-radius:0;background:transparent;color:inherit;padding:16px 0;display:grid;gap:8px;width:100%;text-align:left;min-width:0;cursor:pointer}
+.overview-page .overview-work-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:stretch}
+.overview-page .overview-work-card{padding:16px;border-radius:var(--workspace-radius);display:flex;flex-direction:column;gap:0;min-width:0}
+.overview-page .overview-work-card>header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.overview-page .overview-work-card>header>svg{width:18px;height:18px;flex-shrink:0;color:#697456}
+.app-shell .page-container .overview-work-card>header h2{flex:1;font-size:16px;line-height:1.3;margin:0}
+.overview-page .overview-work-card>header>span{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.overview-page .overview-work-row{border:0;border-top:1px solid var(--border);border-radius:0;background:transparent;color:inherit;padding:10px 0;display:grid;gap:4px;width:100%;text-align:left;min-width:0;min-height:44px;cursor:pointer}
 .overview-page .overview-work-row:hover strong{color:#5a702e}
-.overview-page .overview-work-row strong{font-size:15px;line-height:1.45;font-weight:600;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.overview-page .overview-work-row small{font-size:13px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
-.overview-page .overview-work-empty{font-size:14px;line-height:1.6;color:var(--muted);margin:0 0 20px}
-.overview-page .overview-work-link{margin-top:auto;padding-top:16px;justify-content:space-between;font-size:14px;gap:10px;text-align:left}
-.overview-page .overview-work-link svg{flex-shrink:0}
-.overview-page .overview-latest-photo{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;padding:24px;border-radius:16px}
-.overview-page .overview-latest-photo__image{padding:0;border:0;background:#ebede6;border-radius:12px;overflow:hidden;cursor:pointer;min-width:0;height:220px}
-.overview-page .overview-latest-photo__image img{width:100%;height:100%;object-fit:cover}
-.overview-page .overview-latest-photo>div{display:flex;align-items:flex-start;flex-direction:column;justify-content:center;gap:14px;min-width:0}
-.overview-page .overview-latest-photo .eyebrow{display:flex;align-items:center;gap:8px;font-size:12px}
-.overview-page .overview-latest-photo p{font-size:15px;line-height:1.5;margin:0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.overview-page .overview-latest-photo small{font-size:13px;line-height:1.5;color:var(--muted)}
+.overview-page .overview-work-row strong{font-size:14px;line-height:1.4;font-weight:600;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.overview-page .overview-work-row small{font-size:12px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
+.overview-page .overview-work-empty{font-size:13px;line-height:1.5;color:var(--muted);margin:0 0 12px}
+.app-shell .page-container .overview-work-link{margin-top:auto;padding-top:8px;min-height:44px;justify-content:space-between;font-size:13px;gap:8px;text-align:left}
+.overview-page .overview-work-link svg{flex-shrink:0;width:16px;height:16px}
 .overview-page .overview-history{padding:0;margin:0}
-.overview-page .overview-history>summary{font-size:14px;color:var(--muted);cursor:pointer}
+.overview-page .overview-history>summary{font-size:13px;color:var(--muted);cursor:pointer;min-height:44px;padding:10px 0}
 .overview-page .danger-text,.overview-page small.danger-text{color:#ae4231}
-@media(max-width:1250px){.overview-page .overview-work-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-page .overview-money .metric-card{padding:20px}.overview-page .overview-money .metric-card>strong{font-size:32px}.overview-page .project-position{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-page .project-position>.button{grid-column:1/-1;justify-self:start}}
-@media(max-width:900px){.overview-page .overview-money{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-page .overview-schedule__dates strong{font-size:24px}.overview-page .overview-work-grid{gap:20px}}
-@media(max-width:600px){.overview-page{gap:20px}.overview-page .project-heading--overview h1{font-size:26px}.overview-page .project-position{grid-template-columns:1fr;padding:20px;gap:20px}.overview-page .project-position strong{font-size:18px}.overview-page .overview-money{gap:12px}.overview-page .overview-money .metric-card{padding:16px;min-height:170px}.overview-page .overview-money .metric-card>strong{font-size:32px}.overview-page .overview-money .metric-card__detail{font-size:13px}.overview-page .overview-money .metric-card__icon{display:none}.overview-page .overview-schedule,.overview-page .overview-work-card,.overview-page .overview-latest-photo{padding:20px}.overview-page .overview-schedule .section-header{align-items:flex-start}.overview-page .overview-schedule .text-button{font-size:13px}.overview-page .overview-schedule__dates{grid-template-columns:1fr;gap:18px}.overview-page .overview-schedule__dates>div{display:flex;align-items:center;justify-content:space-between;gap:16px}.overview-page .overview-schedule__dates strong{font-size:22px;text-align:right}.overview-page .overview-schedule__dates small{flex:1}.overview-page .overview-schedule__foot{margin-top:20px}.overview-page .overview-work-grid{grid-template-columns:1fr}.overview-page .overview-latest-photo{grid-template-columns:1fr}.overview-page .overview-contract-line{align-items:center}.overview-page .overview-contract-line strong{font-size:20px}}
-
-.overview-page .construction-now{margin:0;padding:24px;border:1px solid var(--border);border-radius:16px;background:var(--surface)}
-.overview-page .construction-now__head{margin-bottom:20px}
+.overview-page .construction-now{margin:0;padding:16px;border:1px solid var(--border);border-radius:var(--workspace-radius);background:var(--surface)}
+.overview-page .construction-now__body{gap:16px}
 .overview-page .construction-now__body--no-photo{grid-template-columns:minmax(0,1fr)}
-.overview-page .construction-now__focus{display:flex;flex-direction:column;min-width:0;gap:16px}
-.overview-page .construction-now__focus h3{font-size:28px;line-height:1.25;margin:0}
-.overview-page .construction-now__focus p{font-size:15px;line-height:1.5}
-.overview-page .construction-now__eyebrow{font-size:13px}
-.overview-page .construction-now__action{padding:18px;border-radius:12px}
-.overview-page .construction-now__action strong{font-size:18px;line-height:1.4}
-.overview-page .construction-now__action small,.overview-page .construction-now__action span>span{font-size:13px;line-height:1.5}
-.overview-page .construction-now__stages{margin-top:24px}
-.overview-page .construction-now__stages li{flex:1 0 100px}
-.overview-page .construction-stage__name{font-size:13px;line-height:1.4;overflow-wrap:normal;word-break:normal}
-.overview-page .construction-now__legend{font-size:13px;line-height:1.5}
-@media(max-width:780px){.overview-page .construction-now{padding:20px}.overview-page .construction-now__focus h3{font-size:24px}.overview-page .construction-now__legend{gap:12px;flex-wrap:wrap}}
+.overview-page .construction-now__focus{display:flex;flex-direction:column;min-width:0;gap:8px;order:-1}
+.overview-page .construction-now__status{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.app-shell .page-container .construction-now__status .text-button{font-size:12px;min-height:44px;flex-shrink:0}
+.overview-page .construction-now__focus>h3{font-size:22px;line-height:1.25;margin:0;letter-spacing:-.02em}
+.overview-page .construction-now__focus p{font-size:13px;line-height:1.4;margin:0}
+.overview-page .construction-now__eyebrow{font-size:11px;line-height:1.4;letter-spacing:.02em}
+.overview-page .construction-now__action{padding:12px;border-radius:10px;min-height:72px;gap:8px}
+.overview-page .construction-now__action>span{gap:4px}
+.overview-page .construction-now__action strong{font-size:15px;line-height:1.4}
+.overview-page .construction-now__action small,.overview-page .construction-now__action span>span{font-size:12px;line-height:1.4}
+.overview-page .construction-now__focus>.button{margin-top:0}
+.overview-page .site-progress--compact{padding:0;font-size:13px}
+.overview-page .site-progress--compact .cost-groups__head{margin:0;justify-content:flex-end}
+.app-shell .page-container .site-progress--compact .text-button{font-size:12px;min-height:44px}
+.overview-page .site-progress--compact>details>summary{cursor:pointer;padding:8px 0;min-height:44px}
+.overview-page .site-progress--compact .site-progress__columns h3{font-size:14px;margin:8px 0}
+.overview-page .construction-now__stages{margin-top:8px}
+.overview-page .construction-now__stages li{flex:1 0 92px}
+.overview-page .construction-stage{min-height:68px;padding:8px 4px;gap:6px}
+.overview-page .construction-stage__point{width:24px;height:24px;font-size:10px}
+.overview-page .construction-stage__line{top:19px}
+.overview-page .construction-stage__name{font-size:12px;line-height:1.3;overflow-wrap:normal;word-break:normal}
+.overview-page .construction-now__legend{font-size:11px;line-height:1.4;gap:8px;flex-wrap:wrap}
+@media(max-width:1250px){.overview-page .overview-work-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.overview-page .overview-money{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.overview-page .overview-work-grid{grid-template-columns:1fr}.overview-page .overview-work-card,.overview-page .construction-now{padding:12px}.overview-page .overview-money .metric-card__icon{display:none}.overview-page .overview-money{gap:10px}.app-shell .page-container .overview-contract-line .text-button{font-size:13px}.overview-page .overview-contract-line strong{font-size:18px}}

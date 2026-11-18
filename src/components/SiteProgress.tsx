@@ -8,16 +8,18 @@ import { planToday } from '../domain/construction/index.js';
 import { formatDate } from '../presentation/formatting';
 import { Field, Modal } from './Ui';
 
-export function SiteProgress({ state, actor, role, onChange }: { state: AppState; actor: string; role: UserRole; onChange: (state: AppState) => void }) {
+export function SiteProgress({ state, actor, role, onChange, compact = false }: { compact?: boolean; state: AppState; actor: string; role: UserRole; onChange: (state: AppState) => void }) {
   const [editing, setEditing] = useState(false);
   const history = state.project.siteProgressHistory ?? [], latest = history.at(-1);
-  if (role === 'client') return null;
-  return <section className="site-progress" aria-label="Фактическая готовность объекта">
-    <div className="cost-groups__head"><h2>Готовность объекта</h2>{role === 'management' && <button type="button" className="text-button" onClick={() => setEditing(true)}>Обновить факт</button>}</div>
-    {latest ? <><div className="site-progress__columns"><div><h3>Сделано</h3><ul>{latest.completed.map((item, i) => <li key={i}>{item}</li>)}</ul></div><div><h3>Осталось</h3><ul>{latest.remaining.map((item, i) => <li key={i}>{item}</li>)}</ul></div></div>
-      <p className="muted">Состояние на {formatDate(latest.asOf)} · {latest.source}. Точные даты выполнения и приёмка отмечаются в этапах отдельно.</p>
-      {history.length > 1 && <details><summary>История состояния ({history.length - 1})</summary>{history.slice(0, -1).reverse().map(row => <p key={row.id}><strong>{formatDate(row.asOf)}</strong> · {row.source}<br />Сделано: {row.completed.join('; ')}.<br />Осталось: {row.remaining.join('; ')}.</p>)}</details>}
-    </> : <p className="muted">Укажите, что уже сделано и что осталось. Исходный ППР и приёмка сохраняются отдельно.</p>}
+  if (role === 'client' || (compact && !latest && role !== 'management')) return null;
+  const report = latest && <>
+    <div className="site-progress__columns"><div><h3>Сделано</h3><ul>{latest.completed.map((item, i) => <li key={i}>{item}</li>)}</ul></div><div><h3>Осталось</h3><ul>{latest.remaining.map((item, i) => <li key={i}>{item}</li>)}</ul></div></div>
+    <p className="muted">Состояние на {formatDate(latest.asOf)} · {latest.source}. Точные даты выполнения и приёмка отмечаются в этапах отдельно.</p>
+    {history.length > 1 && <details><summary>История состояния ({history.length - 1})</summary>{history.slice(0, -1).reverse().map(row => <p key={row.id}><strong>{formatDate(row.asOf)}</strong> · {row.source}<br />Сделано: {row.completed.join('; ')}.<br />Осталось: {row.remaining.join('; ')}.</p>)}</details>}
+  </>;
+  return <section className={`site-progress${compact ? " site-progress--compact" : ""}`} aria-label="Фактическая готовность объекта">
+    <div className="cost-groups__head">{!compact && <h2>Готовность объекта</h2>}{role === 'management' && <button type="button" className="text-button" onClick={() => setEditing(true)}>Обновить факт</button>}</div>
+    {latest ? compact ? <details><summary>Состояние на {formatDate(latest.asOf)}</summary>{report}</details> : report : !compact && <p className="muted">Укажите, что уже сделано и что осталось. Исходный ППР и приёмка сохраняются отдельно.</p>}
     {editing && <ProgressEditor state={state} actor={actor} role={role} onChange={onChange} onClose={() => setEditing(false)} />}
   </section>;
 }
