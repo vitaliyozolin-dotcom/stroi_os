@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { StateChangeSink } from '../application';
 import {
   ArrowUpRight,
@@ -18,6 +19,7 @@ import { ConstructionNow } from '../components/ConstructionNow';
 import './overview-dashboard.css';
 
 export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: StateChangeSink; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
+  const [preparationStep, setPreparationStep] = useState<string | null>(null);
   const today = useScheduleToday();
   const finance = financeWorkspaceSummary(state, today);
   const amount = (cents: number | null) => cents === null ? 'Не указано' : shortMoney(cents / 100);
@@ -65,7 +67,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
 
   return (
     <div className="page-stack overview-page">
-      <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} />
+      <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} preparationStep={preparationStep} onPreparationStep={setPreparationStep} />
       {role === 'management' && show('finance') && (
         <section className="panel overview-finance" aria-labelledby="overview-finance-title">
           <header className="overview-block-heading">
@@ -89,7 +91,7 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
       )}
       {role === 'management' && state.project.status === 'draft' && <section className="panel"><p>Объём, сроки и стоимость этого заказа ещё уточняются. Заполните участников, объекты и условия, затем добавьте план работ.</p><button type="button" className="button button--primary" onClick={() => onNavigate('customers')}>Заполнить заказ</button></section>}
 
-      <OverviewWorkCards state={state} role={role} show={show} onNavigate={onNavigate} />
+      <OverviewWorkCards state={state} role={role} show={show} onNavigate={onNavigate} onPreparationStep={setPreparationStep} />
 
       {show('activity') && <details className="overview-history"><summary>История проекта</summary>
         <SectionHeader eyebrow="Журнал проекта" title="История изменений" />
