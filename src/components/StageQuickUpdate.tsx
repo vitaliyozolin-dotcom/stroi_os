@@ -28,7 +28,7 @@ export function StageQuickUpdate({ state, stageId, role, actor, userId, onChange
   const ownerCanConfirm = role === 'management' && userId === 'owner' && stage.schedule?.kind !== 'summary';
   if (action) return <StageControlModal {...{ state, stageId, role, actor, userId, onChange, onNavigate }} action={action} onClose={() => setAction(null)} />;
   if (review) return <ScheduleReconciliation {...{ state, role, actor, userId, onChange }} initialId={stageId} onClose={() => setReview(false)} />;
-  return <Modal title={stage.shortName || stage.name} subtitle={stageStatusLabel[stage.status]} onClose={onClose}>
+  return <Modal side title={stage.shortName || stage.name} subtitle={stageStatusLabel[stage.status]} onClose={onClose}>
     <div className="stage-quick">
       {isSitePreparation && <details open>
         <summary>Готовность площадки</summary>

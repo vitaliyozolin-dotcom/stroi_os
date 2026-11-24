@@ -60,8 +60,8 @@ export function ConstructionNow({ state, role, actor, userId, onChange, onNaviga
       {launchLocked && <p className="launch-hint">Этап 01 доступен после закрытия этапа 00</p>}
       <div className="construction-now__legend"><span>Начало</span><span>{view.accepted} из {view.stages.length} приняты · выделены активные</span><span>Завершение</span></div>
     </>}
-    {preparationStep && <Modal wide title="00 · До стройки" onClose={() => onPreparationStep(null)}>
-      {role === 'management' && preparing ? <PreparationWizard state={state} actor={actor} role={role} onChange={onChange} defaultExpanded initialStep={preparationStep} /> :
+    {preparationStep && <Modal side title="00 · До стройки" onClose={() => onPreparationStep(null)}>
+      {role === 'management' && preparing ? <PreparationWizard state={state} actor={actor} role={role} onChange={onChange} defaultExpanded initialStep={preparationStep} embedded /> :
         <dl className="stage-facts">{lifecycleDefinitions.filter(def => def.group === 'preparation' && !(def.escrow && state.project.lifecycle?.usesEscrow === 'no')).map(def => {
           const item = state.project.lifecycle?.items.find(row => row.key === def.key);
           return <div key={def.key}><dt>{def.title}</dt><dd>{item?.owner ? `${item.owner} · ` : ''}{preparation.pending.includes(def.key) ? 'Не подтверждено' : item?.status === 'not_applicable' ? 'Не применяется' : 'Подтверждено'}</dd></div>;

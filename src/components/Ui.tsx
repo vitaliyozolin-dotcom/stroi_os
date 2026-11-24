@@ -67,7 +67,7 @@ export function SectionHeader({ title, eyebrow, action }: { title: string; eyebr
 let openModalCount = 0;
 let previousBodyOverflow = '';
 
-export function Modal({ title, subtitle, children, onClose, wide = false }: { title: string; subtitle?: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
+export function Modal({ title, subtitle, children, onClose, wide = false, side = false }: { title: string; subtitle?: string; children: ReactNode; onClose: () => void; wide?: boolean; side?: boolean }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -88,7 +88,7 @@ export function Modal({ title, subtitle, children, onClose, wide = false }: { ti
   }, []);
 
   return createPortal(
-    <dialog ref={dialogRef} className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title} onKeyDown={(event) => {
+    <dialog ref={dialogRef} className={side ? "modal-backdrop modal-backdrop--side" : "modal-backdrop"} role="dialog" aria-modal="true" aria-label={title} onKeyDown={(event) => {
       if (event.key !== 'Tab') return;
       const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex]:not([tabindex="-1"])')].filter(element => element.getClientRects().length > 0);
       const first = controls[0], last = controls.at(-1);

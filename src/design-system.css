@@ -239,3 +239,40 @@
 .app-shell .overview-page .construction-stage:is(.construction-stage--current, .construction-stage--in_progress, .construction-stage--awaiting_inspection) {
   border-bottom-color: var(--company-accent);
 }
+
+/* Modal is portalled to body and shares the workspace's visual primitives. */
+.modal-backdrop {
+  --ink: #202328;
+  --muted: #586069;
+  --surface: #fff;
+  --surface-soft: #f5f6f7;
+  --border: #dce0e4;
+  --forest: var(--company-graphite);
+}
+.modal-backdrop { background: #20232855; backdrop-filter: none; }
+.modal-backdrop::backdrop { background: transparent; }
+.modal-backdrop .modal { border-radius: 0; box-shadow: none; color: var(--ink); background: var(--surface); }
+.modal-backdrop .modal :is(button, input, textarea, select, .panel, .status-badge, .entity-detail-card) { border-radius: 0; }
+.modal-backdrop .modal__header h2 { font-size: 18px; font-weight: 550; }
+.modal-backdrop .modal .button { min-height: 36px; padding: 7px 12px; font-size: 13px; box-shadow: none; }
+.modal-backdrop--side {
+  justify-content: flex-end;
+  align-items: stretch;
+  padding: 0;
+}
+.modal-backdrop--side .modal {
+  width: min(100%, 660px);
+  max-height: 100dvh;
+  height: 100%;
+  padding: 0 18px 18px;
+  overflow-y: auto;
+}
+.modal-backdrop--side .modal__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 -18px 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
