@@ -1,4 +1,4 @@
-import { ArrowUpRight, Check, Image as ImageIcon } from 'lucide-react';
+import { ArrowUpRight, Check, Image as ImageIcon, LockKeyhole } from 'lucide-react';
 import { useState } from 'react';
 import { StageQuickUpdate } from './StageQuickUpdate';
 import { SiteProgress } from './SiteProgress';
@@ -6,17 +6,34 @@ import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { constructionOverview } from '../domain/construction-overview';
 import { formatDate } from '../presentation/formatting';
+import { constructionLaunchBlockers, lifecycleDefinitions, lifecycleGroupProgress } from '../domain/project-lifecycle.js';
+import { PreparationWizard } from './PreparationWizard';
+import { Modal } from './Ui';
 import { stageStatusLabel } from '../presentation/status-labels';
 
 export function ConstructionNow({ state, role, actor, userId, onChange, onNavigate }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId) => void }) {
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
+  const [showPreparation, setShowPreparation] = useState(false);
+  const preparing = state.project.lifecycle?.phase === 'preparation';
+  const preparation = lifecycleGroupProgress(state);
+  const nextStep = lifecycleDefinitions.find(item => item.key === preparation.pending[0]);
+  const nextOwner = state.project.lifecycle?.items.find(item => item.key === nextStep?.key)?.owner;
+  const launchLocked = preparing && constructionLaunchBlockers(state).length > 0;
   const view = constructionOverview(state, role);
   const [failedPhoto, setFailedPhoto] = useState('');
   const photoUrl = view.photo ? `/api/field-reports/file?projectId=${encodeURIComponent(state.project.id)}&key=${encodeURIComponent(view.photo.file.key)}&preview=1` : '';
   const hasPhoto = photoUrl && failedPhoto !== photoUrl;
   const allAccepted = view.stages.length > 0 && view.accepted === view.stages.length;
   return <section className="construction-now" aria-label="Текущий этап">
-    <div className={`construction-now__body${hasPhoto ? "" : " construction-now__body--no-photo"}`}>
+    {preparing ? <div className="launch-summary">
+      <span className="launch-summary__number">00</span>
+      <div><h2>До стройки</h2>
+        <p>{preparation.completed} из {preparation.total} подтверждено</p>
+        {nextStep && <p>{nextStep.title}{nextOwner ? ` · ${nextOwner}` : ''}</p>}
+      </div>
+      <button className="button button--light" type="button" onClick={() => setShowPreparation(true)}>Открыть чек-лист <ArrowUpRight size={14} /></button>
+      <progress value={preparation.completed} max={preparation.total || 1} aria-label="Готовность к строительству" />
+    </div> : <div className={`construction-now__body${hasPhoto ? "" : " construction-now__body--no-photo"}`}>
       {hasPhoto && <button type="button" className="construction-now__photo" onClick={() => onNavigate('project')} aria-label="Открыть полевой дневник объекта">
         {hasPhoto ? <img src={photoUrl} alt={view.photoStage ? `Фото из отчёта: ${view.photoStage.name}` : 'Последнее фото объекта из полевого дневника'} onError={() => setFailedPhoto(photoUrl)} /> : <span className="construction-now__empty-photo"><ImageIcon size={30} /><span>{photoUrl ? 'Фото недоступно' : 'Фото объекта пока нет'}</span></span>}
         {hasPhoto && view.photo && <span className="construction-now__caption">{view.photoStage?.shortName || 'Последнее фото объекта'} · отчёт {formatDate(view.photo.report.createdAt.slice(0, 10))}</span>}
@@ -33,15 +50,24 @@ export function ConstructionNow({ state, role, actor, userId, onChange, onNaviga
         {role !== 'client' && view.stages.length > 0 && <button className="button button--primary" type="button" onClick={() => setSelectedStage((view.current || view.next || view.stages[0]).id)}>Отметить ход работ</button>}
         <SiteProgress state={state} actor={actor} role={role} onChange={onChange} compact />
       </div>
-    </div>
+    </div>}
     {view.stages.length > 0 && <>
       <ol className="construction-now__stages" aria-label="Этапы от начала до завершения">
+        {state.project.lifecycle && <li><button type="button" className={`construction-stage${preparing ? ' construction-stage--current' : ''}`} onClick={() => setShowPreparation(true)}><span className="construction-stage__point">00</span><span className="construction-stage__name">До стройки</span></button></li>}
         {view.stages.map((stage, index) => <li key={stage.id}><button type="button" className={`construction-stage construction-stage--${stage.status}`} onClick={() => setSelectedStage(stage.id)} aria-label={`${stage.name}: ${stageStatusLabel[stage.status]}`} title={`${stage.name} · ${stageStatusLabel[stage.status]}`}>
-          <span className="construction-stage__line" /><span className="construction-stage__point">{stage.status === 'accepted' ? <Check size={12} /> : String(index + 1).padStart(2, '0')}</span><span className="construction-stage__name">{stage.shortName || stage.name}</span>
+          <span className="construction-stage__line" /><span className="construction-stage__point">{launchLocked && index === 0 ? <LockKeyhole size={13} /> : stage.status === 'accepted' ? <Check size={12} /> : String(index + 1).padStart(2, '0')}</span><span className="construction-stage__name">{stage.shortName || stage.name}</span>
         </button></li>)}
       </ol>
+      {launchLocked && <p className="launch-hint">Этап 01 доступен после закрытия этапа 00</p>}
       <div className="construction-now__legend"><span>Начало</span><span>{view.accepted} из {view.stages.length} приняты · выделены активные</span><span>Завершение</span></div>
     </>}
+    {showPreparation && <Modal wide title="00 · До стройки" onClose={() => setShowPreparation(false)}>
+      {role === 'management' && preparing ? <PreparationWizard state={state} actor={actor} role={role} onChange={onChange} defaultExpanded /> :
+        <dl className="stage-facts">{lifecycleDefinitions.filter(def => def.group === 'preparation' && !(def.escrow && state.project.lifecycle?.usesEscrow === 'no')).map(def => {
+          const item = state.project.lifecycle?.items.find(row => row.key === def.key);
+          return <div key={def.key}><dt>{def.title}</dt><dd>{item?.owner ? `${item.owner} · ` : ''}{preparation.pending.includes(def.key) ? 'Не подтверждено' : item?.status === 'not_applicable' ? 'Не применяется' : 'Подтверждено'}</dd></div>;
+        })}</dl>}
+    </Modal>}
     {selectedStage && <StageQuickUpdate {...{state, role, actor, userId, onChange, onNavigate}} stageId={selectedStage} onClose={() => setSelectedStage(null)} />}
   </section>;
 }
