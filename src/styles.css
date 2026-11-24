@@ -1,8 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;650;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=PT+Serif:wght@700&display=swap');
 
 :root {
-  font-family: 'Manrope', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --app-font: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
+  font-family: var(--app-font);
   color: #18221d;
   background: #f2f4ef;
   font-synthesis: none;
@@ -867,7 +866,7 @@ p {
 }
 
 .page-title-row h1 {
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: var(--app-font);
   font-size: clamp(26px, 3vw, 36px);
   line-height: 1.05;
   letter-spacing: -0.025em;
@@ -1136,7 +1135,7 @@ p {
 
 .project-heading h1 {
   margin-top: 14px;
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: var(--app-font);
   font-size: clamp(31px, 4vw, 46px);
   line-height: 0.95;
   letter-spacing: -0.035em;
@@ -3235,7 +3234,7 @@ p {
 .client-hero h1 {
   max-width: 700px;
   margin-top: 13px;
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: var(--app-font);
   font-size: clamp(30px, 4vw, 45px);
   line-height: 1;
   letter-spacing: -0.03em;
@@ -9054,7 +9053,7 @@ button.project-quick-card:hover {
   --shadow: none;
   color: var(--ink);
   background: var(--canvas);
-  font-family: 'Onest', Arial, sans-serif;
+  font-family: var(--app-font);
 }
 .app-shell--overview .sidebar { background: #111310; }
 .app-shell--overview .sidebar::after { display: none; }
@@ -9070,7 +9069,7 @@ button.project-quick-card:hover {
 .overview-page .panel { border-radius: 4px; box-shadow: none; background: transparent; }
 .overview-page h1,
 .overview-page h2,
-.overview-page h3 { font-family: 'Onest', Arial, sans-serif; }
+.overview-page h3 { font-family: var(--app-font); }
 .overview-page .project-heading--overview {
   min-height: 0;
   display: block;
@@ -9214,7 +9213,7 @@ button.project-quick-card:hover {
 .construction-now__head h2 { flex: 1 0 auto; white-space: nowrap; }
 
 /* The same navigation stays consistent across all project pages. */
-.app-shell .sidebar { font-family: 'Onest', Arial, sans-serif; background: #111310; }
+.app-shell .sidebar { font-family: var(--app-font); background: #111310; }
 .app-shell .sidebar::after { display: none; }
 .app-shell .sidebar__brand { flex: 0 0 auto; gap: 10px; padding: 0 10px; }
 .app-shell .brand-mark { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-basis: 32px; border-radius: 4px; background: #d5ff48; box-shadow: none; }
@@ -9264,7 +9263,7 @@ button.project-quick-card:hover {
 
 /* Shared project theme: presentation only, no state or form behaviour changes. */
 :root {
-  font-family: 'Onest', Arial, sans-serif;
+  font-family: var(--app-font);
   color: #111310;
   background: #f5f4ef;
   --ink: #111310;
@@ -9283,9 +9282,9 @@ button.project-quick-card:hover {
   --shadow: none;
 }
 body { background: var(--canvas); }
-.app-shell { font-family: 'Onest', Arial, sans-serif; }
+.app-shell { font-family: var(--app-font); }
 .app-shell .topbar { background: rgba(245,244,239,.97); border-color: var(--border); }
-.app-shell .page-title-row h1, .app-shell .project-heading h1 { font-family: 'Onest', Arial, sans-serif; font-weight: 600; letter-spacing: -.04em; }
+.app-shell .page-title-row h1, .app-shell .project-heading h1 { font-family: var(--app-font); font-weight: 600; letter-spacing: -.04em; }
 .app-shell .page-title-row h1 { font-size: clamp(26px,3vw,36px); }
 .app-shell .section-header h2 { font-weight: 600; letter-spacing: -.02em; }
 .app-shell .eyebrow { color: #65675f; font-size: 10px; font-weight: 500; letter-spacing: .08em; }

@@ -155,3 +155,17 @@
   .overview-page .overview-money .metric-card__icon { display: none; }
   .app-shell .page-container .overview-money .metric-card > strong { font-size: 18px; }
 }
+
+.overview-planned-work {
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
+}
+.overview-planned-work > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+.overview-page .launch-summary p {
+  font-size: 13px;
+  line-height: 1.4;
+}
