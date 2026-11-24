@@ -20,7 +20,7 @@ export const lifecycleDefinitions = [
   { key: 'bank_release', number: '3.4', title: 'Условия раскрытия эскроу', question: 'Банк подтвердил выполнение условий раскрытия?', role: 'Банковский специалист', group: 'handover', locked: true, documents: true, escrow: true },
   { key: 'settlement', number: '3.5', title: 'Деньги и взаиморасчёты', question: 'Деньги получены и итоговые взаиморасчёты сверены?', role: 'Финансист', group: 'handover', locked: true, documents: true },
 ];
-export const lifecyclePhaseLabels = { preparation: 'Этап 0 · Подготовка', construction: 'Строительство', handover: 'Сдача и расчёты', closed: 'Проект закрыт', warranty: 'Гарантийное сопровождение' };
+export const lifecyclePhaseLabels = { preparation: 'Этап 00 · До стройки', construction: 'Строительство', handover: 'Сдача и расчёты', closed: 'Проект закрыт', warranty: 'Гарантийное сопровождение' };
 export const createLifecycle = (now, source = {}) => ({
   version: 1, phase: 'preparation', usesEscrow: 'unknown', scope: 'unknown', startedAt: now,
   ...source, items: lifecycleDefinitions.map(def => ({ key: def.key, status: 'pending', required: true, basis: '', documentIds: [] })), history: [],

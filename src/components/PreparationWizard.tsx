@@ -7,9 +7,9 @@ import { Field } from './Ui';
 import { workspacePath } from '../presentation/navigation';
 import './preparation-wizard.css';
 
-export function PreparationWizard({ state, actor, role, onChange }: { state: AppState; actor: string; role: UserRole; onChange: (next: AppState) => void }) {
+export function PreparationWizard({ state, actor, role, onChange, defaultExpanded = false }: { state: AppState; actor: string; role: UserRole; onChange: (next: AppState) => void; defaultExpanded?: boolean }) {
   const lifecycle = state.project.lifecycle;
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [selected, setSelected] = useState('brief');
   const [error, setError] = useState('');
   const current = lifecycle?.items.find(item => item.key === selected);

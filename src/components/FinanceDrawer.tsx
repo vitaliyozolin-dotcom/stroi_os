@@ -1,8 +1,8 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
-export function FinanceDrawer({ title, subtitle, children, onClose }: {
-  title: string; subtitle?: string; children: ReactNode; onClose: () => void;
+export function FinanceDrawer({ title, subtitle, children, footer, onClose }: {
+  title: string; subtitle?: string; children: ReactNode; footer?: ReactNode; onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const closeRef = useRef(onClose);
@@ -26,5 +26,6 @@ export function FinanceDrawer({ title, subtitle, children, onClose }: {
   }}>
     <header className="finance-drawer__header"><div>{subtitle && <span>{subtitle}</span>}<h2>{title}</h2></div><button type="button" className="finance-icon-button" aria-label="Закрыть" onClick={onClose}><X size={22} /></button></header>
     <div className="finance-drawer__body">{children}</div>
+    {footer && <footer className="finance-drawer__footer">{footer}</footer>}
   </dialog>;
 }
