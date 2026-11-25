@@ -22,17 +22,17 @@ const filled = value => typeof value === 'string' && value.trim() !== '' && valu
 export function qualificationBlockers(lead) {
   const q = lead.qualification ?? {};
   const missing = [];
-  if (!(lead.budget > 0)) missing.push('сумма бюджета');
+  if (!Number.isFinite(lead.budget) || !(lead.budget > 0)) missing.push('сумма бюджета');
   if (!filled(q.technology)) missing.push('технология');
   if (!['standard', 'individual'].includes(q.projectType)) missing.push('типовой или индивидуальный проект');
   if (!filled(q.projectModel) || !filled(q.completionScope)) missing.push('проект и комплектация');
-  if (!filled(lead.mortgageStatus)) missing.push('с ипотекой или без');
+  if (!['not_needed', 'needed', 'approved'].includes(lead.mortgageStatus)) missing.push('с ипотекой или без');
   if (!filled(q.financingSource)) missing.push('источник финансирования');
   if (['needed', 'approved'].includes(lead.mortgageStatus)) {
     if (!['with', 'without'].includes(q.downPaymentMode)) missing.push('с ПВ или без ПВ');
     if (!filled(q.mortgageProgram)) missing.push('семейная или обычная ипотека');
   }
-  if (!filled(lead.landStatus)) missing.push('статус участка');
+  if (!['owned', 'reserved', 'searching'].includes(lead.landStatus)) missing.push('статус участка');
   if (!['select', 'check'].includes(q.plotAction)) missing.push('подбор или проверка участка');
   return missing.length ? ['Заполните критерии квалификации: ' + missing.join(', ') + '.'] : [];
 }

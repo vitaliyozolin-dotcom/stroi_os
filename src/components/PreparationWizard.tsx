@@ -95,8 +95,8 @@ export function PreparationWizard({ state, actor, role, onChange, defaultExpande
               <label className="field">Резервные источники финансирования<input maxLength={1000} value={reserve} onChange={event => setReserve(event.target.value)} /></label>
             </div>}
             {item.key === 'contract' && lifecycle.sourceLeadId && <Link className="text-button" to={workspacePath(state.project.id, 'project') + '#project-documents'}>Документы и подписанный договор</Link>}
-            {item.key === 'ppr' && <div className="stage-quick__actions"><Link className="text-button" to={workspacePath(state.project.id, 'schedule')}>Открыть ППР</Link><Link className="text-button" to={workspacePath(state.project.id, 'finance')}>Открыть график финансирования</Link></div>}
-            {item.key === 'escrow' && <div>{escrowFundingBlockers(state).map(text => <p key={text}>{text}</p>)}<Link className="text-button" to={workspacePath(state.project.id, 'finance')}>Открыть подтверждения финансирования</Link></div>}
+            {item.key === 'ppr' && <div className="stage-quick__actions"><Link className="text-button" to={workspacePath(state.project.id, 'schedule')}>Открыть ППР</Link><Link className="text-button" to={workspacePath(state.project.id, 'finance', 'funding-calendar')}>Открыть график финансирования</Link></div>}
+            {item.key === 'escrow' && <div>{escrowFundingBlockers(state).map(text => <p key={text}>{text}</p>)}<Link className="text-button" to={workspacePath(state.project.id, 'finance', 'escrow-funding')}>Открыть подтверждения финансирования</Link></div>}
             <label className="field">Комментарий (необязательно)<input maxLength={3000} value={comment} onChange={event => setComment(event.target.value)} /></label>
             <button type="button" className="text-button" onClick={() => mark(item)}>Сохранить изменения</button>
             {(done || notApplicable) && canReopen && <button className="text-button" type="button" onClick={() => mark(item, 'pending')}>Вернуть в работу</button>}

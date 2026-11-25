@@ -102,7 +102,15 @@ export function FinancePage({ state, actor, role, userId, focusId, onChange, onN
   const handledFocus = useRef<string | null>(null);
   useEffect(() => {
     if (!focusId) { handledFocus.current = null; return; }
-    if (handledFocus.current !== focusId && state.financeEntries.some(entry => entry.id === focusId)) {
+    if (handledFocus.current === focusId) return;
+    if (focusId === 'escrow-funding' || focusId === 'funding-calendar') {
+      handledFocus.current = focusId;
+      setView(focusId === 'escrow-funding' ? 'forecast' : 'payments');
+      if (focusId === 'funding-calendar') setPaymentView('calendar');
+      requestAnimationFrame(() => document.getElementById(focusId === 'escrow-funding' ? 'finance-view-forecast' : 'finance-view-payments')?.scrollIntoView({ block: 'start' }));
+      return;
+    }
+    if (state.financeEntries.some(entry => entry.id === focusId)) {
       handledFocus.current = focusId;
       setSelectedEntryId(focusId);
     }

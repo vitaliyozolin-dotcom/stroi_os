@@ -1,5 +1,5 @@
 import { migrateLead, monthExpired, qualificationBlockers, salesLabel, salesStages, escrowFundingBlockers } from '../../src/domain/sales-workflow.js';
-import { completedSalesStage, lifecycleItemBlockers, migrateLifecycle, milestoneKeys, projectLead } from '../../src/domain/project-lifecycle.js';
+import { completedSalesStage, createLifecycle, lifecycleItemBlockers, migrateLifecycle, milestoneKeys, projectLead } from '../../src/domain/project-lifecycle.js';
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const stageKnown = stage => salesStages.some(def => def.key === stage);
@@ -145,6 +145,11 @@ export async function maintainLeadFunnel(db, now = new Date().toISOString()) {
     }
     for (const [i, state] of states.entries()) {
       if (!state?.project?.id || state.project.id.startsWith('__')) continue;
+      if (!state.project.lifecycle && ['active', 'draft'].includes(state.project.status)) {
+        const underway = state.stages?.some(row => row.actualStart || row.completedOn || ['in_progress', 'accepted', 'awaiting_inspection', 'rework'].includes(row.status));
+        state.project.lifecycle = createLifecycle(now, underway ? { legacyReview: true } : {});
+      }
+      if (!state.project.lifecycle && !state.leads?.length) continue;
       let expired = 0;
       for (const lead of state.leads ?? []) {
         const value = canonical.get(lead.id) || age(lead);
