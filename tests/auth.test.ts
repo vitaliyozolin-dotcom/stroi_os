@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { activationPage } from '../server/access-page.js';
+import { loginPage } from '../server/login-page.js';
 import {
   ACCESS_SESSION_COOKIE,
   UserAccessService,
@@ -82,6 +83,15 @@ test('activation page escapes account data and does not consume a link on GET', 
   assert.match(page, /&lt;script&gt;/);
   assert.match(page, /method="post" action="\/api\/auth\/activate"/);
   assert.match(page, /type="hidden" name="token"/);
+});
+
+test('login and activation remember this device by default and preserve an opt-out on retry', () => {
+  const invitation = { token: 'example', invite: { purpose: 'activate', name: 'User', email: 'user@example.test', role: 'client' } };
+  const checked = /name="rememberDevice" value="1" checked/;
+  assert.match(loginPage(), checked);
+  assert.match(activationPage(invitation), checked);
+  assert.doesNotMatch(loginPage({ error: 'invalid', rememberDevice: false }), checked);
+  assert.doesNotMatch(activationPage({ ...invitation, error: 'weak_password', rememberDevice: false }), checked);
 });
 
 test('server strips forged identity headers and uses revocable personal sessions', async () => {

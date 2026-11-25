@@ -1,3 +1,5 @@
+import { rememberDeviceField, rememberDeviceStyles } from './remember-device-field.js';
+
 const escapeHtml = (value) => String(value)
   .replaceAll('&', '&amp;')
   .replaceAll('<', '&lt;')
@@ -22,6 +24,7 @@ const styles = `
   button,.button{width:100%;height:52px;border:0;border-radius:13px;background:#1f6b45;color:#fff;font:700 15px inherit;cursor:pointer;margin-top:4px;text-decoration:none;display:grid;place-items:center}button:hover,.button:hover{background:#18583a}.error{padding:12px 14px;border-radius:12px;background:#fff0ed;color:#9d382a;font-size:13px;margin:0 0 18px}.foot{text-align:center;color:#879189;font-size:12px;margin-top:18px}
   .brand .mark{background:transparent;border-radius:0}.brand .mark img{display:block;max-width:100%;height:34px;object-fit:contain}
   @media(max-width:520px){body{padding:16px;align-items:end}.card{padding:26px 22px;border-radius:22px}h1{font-size:28px}}
+  ${rememberDeviceStyles}
 `;
 
 const shell = (content, title = 'Доступ — ИКИОМА ОС') => `<!doctype html>
@@ -36,7 +39,7 @@ const shell = (content, title = 'Доступ — ИКИОМА ОС') => `<!doct
     <link rel="manifest" href="/manifest.webmanifest?v=20261019" /><title>${escapeHtml(title)}</title><style>${styles}</style></head>
 <body><main class="shell"><div class="brand"><span class="mark" aria-hidden="true"><img src="/brand/ikioma-mark-20261019.png" alt="" width="28" height="34"></span><span>ИКИОМА ОС</span></div>${content}<div class="foot">Защищённый доступ · ИКИОМА</div></main></body></html>`;
 
-export const activationPage = ({ token, invite, error = '' }) => shell(`
+export const activationPage = ({ token, invite, error = '', rememberDevice = true }) => shell(`
   <section class="card">
     <h1>${invite.purpose === 'reset' ? 'Обновите пароль' : 'Активируйте доступ'}</h1>
     <p>${invite.purpose === 'reset' ? 'Задайте новый пароль. Все прежние сессии будут завершены.' : 'Придумайте пароль — после активации вы войдёте по своему email.'}</p>
@@ -51,6 +54,7 @@ export const activationPage = ({ token, invite, error = '' }) => shell(`
       <input type="hidden" name="token" value="${escapeHtml(token)}">
       <div class="field"><label for="password">Новый пароль</label><input id="password" name="password" type="password" minlength="15" maxlength="128" autocomplete="new-password" required autofocus><small>Не менее 15 символов. Не используйте пароль от почты или Telegram.</small></div>
       <div class="field"><label for="passwordConfirm">Повторите пароль</label><input id="passwordConfirm" name="passwordConfirm" type="password" minlength="15" maxlength="128" autocomplete="new-password" required></div>
+      ${rememberDeviceField(rememberDevice)}
       <button type="submit">${invite.purpose === 'reset' ? 'Сохранить новый пароль' : 'Активировать и войти'}</button>
     </form>
   </section>

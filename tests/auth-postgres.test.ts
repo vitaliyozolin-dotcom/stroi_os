@@ -286,7 +286,7 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
     );
     assert.equal(Number((await pool.query("SELECT revision FROM project_state WHERE project_id='project-profile'")).rows[0].revision), revisionBeforeDuplicate);
 
-    const ownerSessionBeforeRotation = await service.authenticate('owner', 'owner-password-strong-123', { ip: '198.51.100.250' });
+    const ownerSessionBeforeRotation = await service.authenticate('owner', 'owner-password-strong-123', { ip: '198.51.100.250', rememberDevice: true });
     const rotatedOwnerService = new UserAccessService({
       database,
       ownerEmail: 'owner@example.test',
@@ -565,7 +565,7 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
 
     const reset = await service.issueToken({ projectId: 'project-a', userId: 'user-1', actorEmail: 'owner@example.test', purpose: 'reset' });
     const resetToken = new URL(reset.url).pathname.split('/').pop()!;
-    const beforeReset = await service.authenticate('ivan@example.test', 'a-very-strong-password-123', { ip: '198.51.100.4' });
+    const beforeReset = await service.authenticate('ivan@example.test', 'a-very-strong-password-123', { ip: '198.51.100.4', rememberDevice: true });
     const afterReset = await service.activate(resetToken, 'a-new-strong-password-456', 'a-new-strong-password-456', { ip: '198.51.100.4' });
     assert.equal(await service.fromRequest(sessionRequest(beforeReset.token)), null);
     assert.equal((await service.fromRequest(sessionRequest(afterReset.token)))?.email, 'ivan@example.test');
@@ -621,6 +621,16 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
     const idleSession = await service.authenticate('ivan@example.test', 'a-new-strong-password-456', { ip: '198.51.100.6' });
     await pool.query("UPDATE auth_sessions SET last_seen_at='2000-01-01T00:00:00.000Z' WHERE token_hash=$1", [hashAccessToken(idleSession.token)]);
     assert.equal(await service.fromRequest(sessionRequest(idleSession.token)), null);
+
+    const remembered = await service.authenticate('ivan@example.test', 'a-new-strong-password-456', { rememberDevice: true });
+    const rememberedHash = hashAccessToken(remembered.token);
+    const dates = (await pool.query('SELECT created_at,expires_at FROM auth_sessions WHERE token_hash=$1', [rememberedHash])).rows[0];
+    assert.equal(Date.parse(dates.expires_at) - Date.parse(dates.created_at), 90 * 24 * 60 * 60_000);
+    const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
+    await pool.query('UPDATE auth_sessions SET last_seen_at=$1 WHERE token_hash=$2', [lastWeek, rememberedHash]);
+    assert.equal((await service.fromRequest(sessionRequest(remembered.token)))?.email, 'ivan@example.test');
+    await pool.query('UPDATE auth_sessions SET expires_at=$1 WHERE token_hash=$2', [lastWeek, rememberedHash]);
+    assert.equal(await service.fromRequest(sessionRequest(remembered.token)), null);
 
     const racingReset = await service.issueToken({ projectId: 'project-a', userId: 'user-1', actorEmail: 'owner@example.test', purpose: 'reset' });
     const racingResetToken = new URL(racingReset.url).pathname.split('/').pop()!;
@@ -800,6 +810,7 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
         body: new URLSearchParams({ username: 'owner', password: 'owner-password-strong-123' }),
       });
       assert.equal(ownerLogin.status, 303);
+      assert.doesNotMatch(ownerLogin.headers.get('set-cookie') || '', /Max-Age|Expires/i);
       const ownerCookie = (ownerLogin.headers.get('set-cookie') || '').split(';', 1)[0];
       assert.match(ownerCookie, /^stroios_session=/);
       const ownerAccess = await fetch(`${origin}/api/access/users?projectId=project-a`, { headers: { cookie: ownerCookie } });
@@ -887,9 +898,11 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
           token: httpToken,
           password: 'http-user-password-123',
           passwordConfirm: 'http-user-password-123',
+          rememberDevice: '1',
         }),
       });
       assert.equal(httpActivation.status, 303);
+      assert.match(httpActivation.headers.get('set-cookie') || '', /Max-Age=7776000\b/);
       const httpUserCookie = (httpActivation.headers.get('set-cookie') || '').split(';', 1)[0];
       assert.match(httpUserCookie, /^stroios_session=/);
       const replayActivation = await fetch(`${origin}/api/auth/activate`, {
@@ -1035,9 +1048,10 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
       const staffLogin = await fetch(`${origin}/api/auth/login`, {
         method: 'POST', redirect: 'manual',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ username: 'ivan@example.test', password: 'atomic-latest-password-456' }),
+        body: new URLSearchParams({ username: 'ivan@example.test', password: 'atomic-latest-password-456', rememberDevice: '1' }),
       });
       assert.equal(staffLogin.status, 303);
+      assert.match(staffLogin.headers.get('set-cookie') || '', /Max-Age=7776000\b/);
       const staffCookie = (staffLogin.headers.get('set-cookie') || '').split(';', 1)[0];
       const staffAdmin = await fetch(`${origin}/api/access/users?projectId=project-a`, { headers: { cookie: staffCookie } });
       assert.equal(staffAdmin.status, 403);
@@ -1062,10 +1076,11 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
       const blockedProject = await fetch(`${origin}/api/state?projectId=project-b`, { headers: { cookie: staffCookie } });
       assert.equal(blockedProject.status, 401);
 
-      const logout = await fetch(`${origin}/api/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: staffCookie } });
+      const logout = await fetch(`${origin}/api/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: httpUserCookie } });
       assert.equal(logout.status, 303);
+      assert.match(logout.headers.get('set-cookie') || '', /Max-Age=0\b/);
       assert.match(logout.headers.get('clear-site-data') || '', /storage/);
-      const afterLogout = await fetch(`${origin}/`, { redirect: 'manual', headers: { cookie: staffCookie, accept: 'text/html' } });
+      const afterLogout = await fetch(`${origin}/`, { redirect: 'manual', headers: { cookie: httpUserCookie, accept: 'text/html' } });
       assert.equal(afterLogout.status, 303);
     } finally {
       server.kill('SIGTERM');
@@ -1075,6 +1090,14 @@ test('PostgreSQL auth lifecycle is atomic, revocable and project-scoped', { skip
       });
       await rm(clientRoot, { recursive: true, force: true });
     }
+
+    const oldSession = await service.authenticate('owner', 'owner-password-strong-123');
+    await pool.query('ALTER TABLE auth_sessions DROP COLUMN remembered');
+    await pool.query("UPDATE system_meta SET value='2' WHERE key='auth_schema_version'");
+    await service.initialize();
+    assert.equal((await service.fromRequest(sessionRequest(oldSession.token)))?.isOwner, true);
+    const migrated = (await pool.query('SELECT remembered FROM auth_sessions WHERE token_hash=$1', [hashAccessToken(oldSession.token)])).rows[0];
+    assert.equal(migrated.remembered, false);
 
     const legacyMigrationReset = await service.issueToken({ projectId: 'project-a', userId: 'user-1', actorEmail: 'owner@example.test', purpose: 'reset' });
     const legacyMigrationToken = new URL(legacyMigrationReset.url).pathname.split('/').pop()!;
