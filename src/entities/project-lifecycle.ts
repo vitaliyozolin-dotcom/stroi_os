@@ -13,7 +13,10 @@ export interface LifecycleItem {
   confirmedBy?: string;
 }
 export interface ProjectLifecycle {
-  version: 1;
+  version: 1 | 2;
+  previousItems?: LifecycleItem[];
+  primaryFunding?: string;
+  reserveFunding?: string;
   phase: 'preparation' | 'construction' | 'handover' | 'closed' | 'warranty';
   usesEscrow: 'unknown' | 'yes' | 'no';
   scope: 'unknown' | 'warm_shell' | 'engineering' | 'turnkey' | 'custom';

@@ -10,7 +10,7 @@ import { useState, type ReactNode } from 'react';
 import { Modal } from './Ui';
 import { ProjectFilePreview } from './ProjectFilePreview';
 import { projectScheduleDashboard } from '../domain/project-dashboard.js';
-import { lifecycleDefinitions, lifecycleGroupProgress, lifecyclePhaseLabels } from '../domain/project-lifecycle.js';
+import { lifecycleDefinitions, lifecycleGroupProgress, lifecyclePhaseLabels, stepOwner } from '../domain/project-lifecycle.js';
 import './project-lifecycle-dashboard.css';
 
 type Props = { state: AppState; role: UserRole; onNavigate: (page: PageId, id?: string) => void };
@@ -25,7 +25,7 @@ export function ProjectPosition({ state, role, onNavigate }: Props) {
   const next = lifecycleDefinitions.find(item => item.key === checklist.pending[0]);
   if (processPhase && lifecycle) return <div className="project-position">
     <div><small>Текущий этап</small><strong>{lifecyclePhaseLabels[lifecycle.phase]}</strong><span>{checklist.total ? `Подтверждено ${checklist.completed} из ${checklist.total} условий` : state.project.foreman || 'Ответственный не назначен'}</span></div>
-    <div><small>Следующий шаг</small><strong>{['closed', 'warranty'].includes(lifecycle.phase) ? 'Гарантийные обязательства и история' : next ? `${next.number} · ${next.title}` : 'Все условия подтверждены'}</strong><span>{next?.role || 'Откройте маршрут проекта'}</span></div>
+    <div><small>Следующий шаг</small><strong>{['closed', 'warranty'].includes(lifecycle.phase) ? 'Гарантийные обязательства и история' : next ? `${next.number} · ${next.title}` : 'Все условия подтверждены'}</strong><span>{next ? stepOwner(state, next.key) || 'Ответственный не назначен' : 'Откройте маршрут проекта'}</span></div>
     <button type="button" className="button button--secondary" onClick={() => onNavigate('project')}>Открыть этап <ArrowUpRight size={16} /></button>
   </div>;
   if (view.stages.length > 0 && view.accepted === view.stages.length) return <div className="project-position"><div><small>Текущий этап</small><strong>Строительные работы приняты</strong><span>{view.accepted} из {view.stages.length} внесённых работ</span></div><div><small>Следующий шаг</small><strong>Проверить сдачу и расчёты</strong><span>Приёмка заказчиком, документы и условия завершения</span></div><button type="button" className="button button--secondary" onClick={() => onNavigate('project')}>Открыть проект <ArrowUpRight size={16} /></button></div>;
@@ -83,11 +83,11 @@ export function OverviewWorkCards({ state, role, show, onNavigate, onPreparation
         const item = lifecycle?.items.find(row => row.key === key);
         return <button type="button" className="overview-work-row" key={key} onClick={() => onPreparationStep(key)}>
           <strong>{definition?.title || key}</strong>
-          {(!compact || item?.owner || item?.planEnd) && <small className={item?.planEnd && item.planEnd < today ? 'danger-text' : ''}>{[item?.owner || (!compact && 'Назначить ответственного'), item?.planEnd ? formatDate(item.planEnd) : !compact && 'Срок не назначен'].filter(Boolean).join(' · ')}</small>}
+          {(!compact || stepOwner(state, key) || item?.planEnd) && <small className={item?.planEnd && item.planEnd < today ? 'danger-text' : ''}>{[stepOwner(state, key) || (!compact && 'Назначить ответственного'), item?.planEnd ? formatDate(item.planEnd) : !compact && 'Срок не назначен'].filter(Boolean).join(' · ')}</small>}
         </button>;
       })}
       {currentTasks.slice(0, Math.max(0, 3 - pendingSteps.length - (awaiting && role === 'management' ? 1 : 0))).map(task => taskRow(task))}
-      {preparing && pendingSteps.length === 0 && <button type="button" className="overview-work-row" onClick={() => onPreparationStep('readiness')}><strong>Проверить допуск к строительству</strong><small>Открыть этап 00</small></button>}
+      {preparing && pendingSteps.length === 0 && <button type="button" className="overview-work-row" onClick={() => onPreparationStep('ppr')}><strong>Проверить допуск к строительству</strong><small>Открыть этап 00</small></button>}
       {!preparing && !currentTasks.length && !(role === 'management' && awaiting) && <p className="overview-work-empty">Открытых задач пока нет.</p>}
       {plannedTasks.length > 0 && <details className="overview-planned-work"><summary>Запланировано после допуска · {plannedTasks.length}</summary>
         {plannedTasks.slice(0, 3).map(task => taskRow(task, true))}

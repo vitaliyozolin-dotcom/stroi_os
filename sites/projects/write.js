@@ -1,3 +1,4 @@
+import { validateSalesWrite, syncLeadCopies } from '../leads/funnel.js';
 import {
   authenticatedIdentity,
   mergeStateForRole,
@@ -18,7 +19,7 @@ import { validateOrderRelationsChanges } from '../../src/domain/order-relations.
 import { validateOrderDirectoryReferences } from '../orders/directory.js';
 import { validateSharedPaymentWrite } from './shared-payment.js';
 
-import { createLifecycle, validateLifecycleChanges, lifecycleItemBlockers } from '../../src/domain/project-lifecycle.js';
+import { createLifecycle, validateLifecycleChanges } from '../../src/domain/project-lifecycle.js';
 
 const MAX_STATE_BYTES = 6_000_000;
 const MAX_JSON_BODY_BYTES = 32 * 1024;
@@ -108,19 +109,8 @@ const write = async (request, env, context, atomicFinance = false, afterCommit, 
     if (directoryError) return json({ ok: false, error: 'invalid_order_references', message: directoryError }, 422);
     const orderError = validateOrderRelationsChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
     if (orderError) return json({ ok: false, error: 'invalid_order_relations', message: orderError }, 422);
-    for (const lead of mergedState.leads ?? []) {
-      const old = previousSnapshot?.state.leads?.find(row => row.id === lead.id);
-      if (old?.projectId && old.projectId !== lead.projectId) return json({ ok: false, error: 'invalid_lead_transition', message: 'Связь обращения с проектом неизменяема.' }, 422);
-      if (lead.stage === 'won' && old?.stage !== 'won') {
-        const linked = lead.projectId === mergedState.project.id ? { state: mergedState } : lead.projectId ? await readSnapshot(env.DB, lead.projectId) : null;
-        const contract = linked?.state.project.lifecycle?.items?.find(item => item.key === 'contract');
-        if (!linked || linked.state.project.lifecycle?.sourceLeadId !== lead.id || contract?.status !== 'done' || lifecycleItemBlockers(linked.state, 'contract').length) return json({ ok: false, error: 'invalid_lead_transition', message: 'Договор подтверждается в связанном проекте после сметы и загрузки подписанного оригинала.' }, 422);
-      }
-      if (lead.stage === 'preparation' && (old?.stage !== 'preparation' || old?.projectId !== lead.projectId)) {
-        const linked = lead.projectId ? await readSnapshot(env.DB, lead.projectId) : null;
-        if (!linked || linked.state.project.lifecycle?.sourceLeadId !== lead.id) return json({ ok: false, error: 'invalid_lead_transition', message: 'Сначала создайте связанный проект через передачу в подготовку.' }, 422);
-      }
-    }
+    const salesError = await validateSalesWrite(previousSnapshot?.state, mergedState, env.DB, readSnapshot, now);
+    if (salesError) return json({ ok: false, error: 'invalid_lead_transition', message: salesError }, 422);
     const lifecycleError = validateLifecycleChanges(previousSnapshot?.state ?? null, mergedState, identity, now);
     if (lifecycleError) return json({ ok: false, error: 'invalid_project_lifecycle', message: lifecycleError }, 422);
     const stageError = validateStageControl(previousSnapshot?.state ?? null, mergedState, identity, now);
@@ -207,6 +197,8 @@ const write = async (request, env, context, atomicFinance = false, afterCommit, 
         : null;
       return json({ ok: false, error: 'revision_conflict', current: safeCurrent }, 409);
     }
+
+    if (atomicFinance) await syncLeadCopies(env.DB, previousSnapshot?.state, state, actor, now);
 
     // Starting an async function starts its side effects immediately. Under the
     // outer financial transaction, enqueue the callback until COMMIT succeeds and

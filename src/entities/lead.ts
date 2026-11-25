@@ -1,7 +1,13 @@
-export type LeadStage = 'new' | 'qualified' | 'site_visit' | 'estimate' | 'negotiation' | 'preparation' | 'won' | 'lost';
+export type LeadStage = 'new' | 'qualified' | 'deferred' | 'escrow_funded' | 'estimate' | 'negotiation' | 'preparation' | 'won' | 'lost';
 export type LeadSource = 'website' | 'avito' | 'domclick' | 'referral' | 'telegram' | 'manual';
 
 export interface LeadQualificationDetails {
+  technology?: string;
+  projectType?: 'standard' | 'individual' | 'unknown';
+  financingSource?: string;
+  downPaymentMode?: 'with' | 'without' | 'unknown';
+  plotAction?: 'select' | 'check' | 'unknown';
+  plotResult?: 'selected' | 'verified' | 'unknown';
   sourceOrderObjectId?: string;
   address?: string;
   cadastralNumber?: string;
@@ -36,6 +42,9 @@ export interface Lead {
   preparedAt?: string;
   id: string;
   createdAt: string;
+  stageEnteredAt?: string;
+  previousStage?: string;
+  projectManager?: string;
   name: string;
   phone: string;
   email?: string;

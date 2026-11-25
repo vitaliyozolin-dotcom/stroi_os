@@ -77,7 +77,7 @@ const cleanText = (value, max = 240) => String(value || '').trim().slice(0, max)
 
 const mapLeadStage = (stage) => ({
   new: 'new', qualified: 'lead', site_visit: 'lead', estimate: 'proposal',
-  negotiation: 'negotiation', won: 'won', lost: 'lost',
+  preparation: 'lead', negotiation: 'negotiation', won: 'won', escrow_funded: 'won', deferred: 'deferred', lost: 'lost',
 })[String(stage || '').toLowerCase()] || String(stage || 'new').toLowerCase();
 
 const parseStateRow = (row) => {

@@ -1,3 +1,4 @@
+import { ProjectAssignments } from '../components/ProjectAssignments';
 import { projectDisplayName } from '../domain/project-naming.js';
 import { useModuleRepository } from '../useModuleRepository';
 import { createDocumentsRepository } from '../infrastructure/module-project';
@@ -155,6 +156,7 @@ export function ProjectPage({
         {session.role !== 'client' && <button type="button" className="button button--primary" onClick={() => setShowUpload(true)}><UploadCloud size={17} /> Загрузить документ</button>}
       </section>
 
+      <ProjectAssignments key={state.project.id} state={state} role={session.role} onChange={onChange} />
       <nav className="project-passport-nav" aria-label="Карточка проекта"><a href="#project-identity">Паспорт</a><a href="#project-preparation">Этап 0 и завершение</a><a href="#project-documents">Документы</a><a href="#project-photos">Фото объекта</a></nav>
       {session.role === 'management' && <button type="button" className="button button--secondary" onClick={() => onNavigate('customers')}><UsersRound size={18} /> Заказчик, объекты и условия заказа</button>}
 

@@ -150,7 +150,7 @@ for (const mode of ['cancel', 'foreign', 'changed', 'project', 'stage', 'metadat
 });
 
 test('sales and client decisions use independent ports and reject forbidden actors', () => {
- let state = fixture(); state.leads = [lead]; state.decisions = [decision]; const ctx = context();
+ let state = fixture(); state.leads = [{ ...lead, budget: 100, mortgageStatus: 'not_needed', landStatus: 'owned', qualification: { technology: 'СИП', projectType: 'standard', projectModel: 'Вела', completionScope: 'Контур', financingSource: 'Собственные', plotAction: 'check' } }]; state.decisions = [decision]; const ctx = context();
  const salesRepository = adapters.createSalesRepository(() => state, next => { state = next; });
  const clientRepository = adapters.createDecisionsRepository(() => state, next => { state = next; });
  const sales = createMarketingUseCases(salesRepository, ctx.identity, ctx.clock, ctx.ids);

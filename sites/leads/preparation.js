@@ -1,3 +1,4 @@
+import { syncLeadCopies } from './funnel.js';
 import { authenticatedIdentity, projectIdentity } from '../access-control.js';
 import { validateOrderDirectoryReferences } from '../orders/directory.js';
 import { json } from '../lib/http.js';
@@ -28,9 +29,9 @@ export const createLeadPreparationHandler = ({ ensureSchema, readSnapshot }) => 
       const existing = await readSnapshot(db, target.id);
       const linkSource = async (targetState, preparedAt) => {
         if (lead.projectId && lead.projectId !== targetState.project.id) return { error: 'Обращение уже связано с другим проектом.' };
-        if (lead.projectId === targetState.project.id && ['preparation', 'won'].includes(lead.stage)) return { snapshot: { ...source, projectId: sourceId } };
+        if (lead.projectId === targetState.project.id) return { snapshot: { ...source, projectId: sourceId } };
         const sourceState = structuredClone(source.state);
-        sourceState.leads = sourceState.leads.map(row => row.id === lead.id ? { ...row, projectId: targetState.project.id, stage: 'preparation', preparedAt } : row);
+        sourceState.leads = sourceState.leads.map(row => row.id === lead.id ? { ...row, projectId: targetState.project.id, stage: 'preparation', stageEnteredAt: preparedAt, preparedAt } : row);
         sourceState.activity = [{ id: `lead-prepared:${lead.id}`, timestamp: preparedAt, actor: identity.name, text: `Обращение передано в проект ${targetState.project.code}.`, tone: 'positive' }, ...(sourceState.activity ?? [])];
         const stateJson = JSON.stringify(sourceState);
         const result = await db.batch([
@@ -38,6 +39,7 @@ export const createLeadPreparationHandler = ({ ensureSchema, readSnapshot }) => 
           db.prepare("INSERT OR IGNORE INTO audit_log (id, project_id, revision, created_at, actor, role, action, summary, state_bytes) VALUES (?, ?, ?, ?, ?, 'management', 'lead_project_linked', ?, ?)").bind(`lead-linked:${targetState.project.id}`, sourceId, source.revision + 1, preparedAt, identity.name, `Обращение ${lead.id} связано с проектом ${targetState.project.code}`, new TextEncoder().encode(stateJson).length),
         ]);
         if (Number(result?.[0]?.meta?.changes ?? result?.[0]?.changes ?? 0) !== 1) return { error: 'Карточка изменилась. Обновите данные.' };
+        await syncLeadCopies(db, source.state, sourceState, identity.name, preparedAt);
         return { snapshot: { state: sourceState, revision: source.revision + 1, projectId: sourceId, updatedAt: preparedAt, updatedBy: identity.name, updatedRole: 'management' } };
       };
       if (!env.DB.financialTransaction) return json({ ok: false, error: 'transaction_required' }, 503);
@@ -47,7 +49,7 @@ export const createLeadPreparationHandler = ({ ensureSchema, readSnapshot }) => 
         if (linked.error) return json({ ok: false, error: 'lead_project_conflict', message: linked.error }, 409);
         return json({ sourceSnapshot: linked.snapshot, ok: true, created: false, project: { id: existing.state.project.id, code: existing.state.project.code, name: existing.state.project.name }, preparedAt: existing.state.project.createdAt });
       }
-      if (lead.stage === 'lost') return json({ ok: false, error: 'lead_lost', message: 'Возобновите обращение перед передачей в проект.' }, 422);
+      if (lead.stage !== 'qualified') return json({ ok: false, error: 'qualification_required', message: 'Перед передачей в расчёт квалифицируйте заявку до статуса 0.6.' }, 422);
       if (payload.expectedLead !== JSON.stringify(lead)) return json({ ok: false, error: 'lead_changed', message: 'Дождитесь сохранения карточки и повторите передачу.' }, 409);
       const blockers = leadHandoffBlockers(lead);
       if (blockers.length) return json({ ok: false, error: 'lead_incomplete', message: blockers.join(' ') }, 422);

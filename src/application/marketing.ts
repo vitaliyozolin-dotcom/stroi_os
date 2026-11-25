@@ -1,3 +1,4 @@
+import { nextSalesStage, qualificationBlockers } from '../domain/sales-workflow.js';
 import type { LeadStage, UserRole } from '../entities/index';
 import type { SalesSnapshot, SalesPatch } from '../domain/contexts.ts';
 import { moduleChange, executeModule, type ModuleChange, type ModuleRepository } from './module-repository.ts';
@@ -35,14 +36,15 @@ export const changeProjectMarketing = (state: SalesSnapshot, input: MarketingCom
       leads = leads.map(lead => lead.id === current.id ? next : lead); summary = `${current.name}: уточнены параметры участка и финансирования`;
     } else if (input.action === 'handoff') {
       if (!input.targetProjectId.startsWith('lead-')) return { ok: false, error: 'Некорректная связь с проектом.' };
-      leads = leads.map(lead => lead.id === current.id ? { ...lead, stage: 'preparation', projectId: input.targetProjectId, preparedAt: input.preparedAt } : lead);
+      leads = leads.map(lead => lead.id === current.id ? { ...lead, stage: 'preparation', stageEnteredAt: input.preparedAt, projectId: input.targetProjectId, preparedAt: input.preparedAt } : lead);
       summary = `${current.name}: передан в подготовку проекта`;
     } else {
-      const stage = input.stage ?? (['won', 'lost'].includes(current.stage) ? current.stage : marketingStages[marketingStages.indexOf(current.stage) + 1]);
+      const stage = input.stage ?? nextSalesStage(current.stage);
       if (!marketingStages.includes(stage)) return { ok: false, error: 'Выберите допустимый этап воронки.' };
-      if (['preparation', 'won'].includes(stage) && !current.projectId && stage !== current.stage) return { ok: false, error: 'Передайте обращение в подготовку проекта.' };
       if (stage === current.stage) return { ok: true, change: null };
-      leads = leads.map(lead => lead.id === current.id ? { ...lead, stage } : lead); summary = `${current.name}: этап «${marketingStageLabels[stage]}»`; tone = stage === 'won' ? 'positive' : 'neutral';
+      if (stage === 'qualified' && qualificationBlockers(current).length) return { ok: false, error: qualificationBlockers(current).join(' ') };
+      if (['preparation', 'estimate', 'negotiation', 'won', 'escrow_funded'].includes(stage) && !current.projectId) return { ok: false, error: 'Сначала передайте заявку в подготовку проекта.' };
+      leads = leads.map(lead => lead.id === current.id ? { ...lead, stage, stageEnteredAt: clock.now() } : lead); summary = `${current.name}: этап «${marketingStageLabels[stage]}»`; tone = stage === 'won' ? 'positive' : 'neutral';
     }
   }
   return { ok: true, change: moduleChange(state, { leads }, 'lead_updated', summary, { identity: { name: actor }, clock, ids }, tone) };

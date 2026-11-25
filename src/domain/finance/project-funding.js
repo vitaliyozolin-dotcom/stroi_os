@@ -20,6 +20,8 @@ export function validateProjectFundingChanges(previous, state, identity, now) {
   if (!events || typeof events !== 'object' || Array.isArray(events) || Object.keys(events).some(key => !['planned', 'deposited', 'released', 'received'].includes(key))) return 'Проверьте события эскроу.';
   for (const [key, event] of Object.entries(events)) {
     if (!event || !amount(event.amountCents) || !validDate(event.date) || !text(event.source) || !documentValid(event.documentId)) return 'Для события эскроу нужны точная сумма, дата и основание из этого проекта.';
+    const components = [event.bankAmountCents, event.maternityAmountCents].filter(value => value !== undefined);
+    if (components.some(value => !amount(value)) || components.reduce((sum, value) => sum + value, 0) > event.amountCents) return 'Кредитные средства банка и маткапитал входят в общую сумму эскроу и не могут её превышать.';
     if (key !== 'planned' && event.date > today) return 'Фактическое событие эскроу не может быть в будущем.';
   }
   for (const [earlier, later] of [['deposited', 'released'], ['released', 'received']]) {

@@ -72,7 +72,7 @@ export const createLeadHandlers = ({
         if (!identity || (projectId === PUBLIC_LEAD_PROJECT_ID ? !identity.isOwner : identity.role !== 'management')) {
           return json({ ok: false, error: 'project_access_denied' }, 403);
         }
-        const result = await env.DB.prepare(`SELECT id, project_id, created_at, name, phone, email, source, message, status FROM lead_inbox WHERE project_id = ? ORDER BY created_at DESC LIMIT 100`).bind(projectId).all();
+        const result = await env.DB.prepare(`SELECT i.id, i.project_id, i.created_at, i.name, i.phone, i.email, i.source, i.message, i.status, c.entered_at FROM lead_inbox i LEFT JOIN lead_status_clock c ON c.lead_id = i.id WHERE i.project_id = ? ORDER BY i.created_at DESC`).bind(projectId).all();
         return json({ ok: true, leads: result?.results ?? [] });
       } catch {
         return json({ ok: false, error: 'storage_error' }, 500);

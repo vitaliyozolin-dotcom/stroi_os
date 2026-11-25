@@ -6,7 +6,7 @@ import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
 import { constructionOverview } from '../domain/construction-overview';
 import { formatDate } from '../presentation/formatting';
-import { constructionLaunchBlockers, lifecycleDefinitions, lifecycleGroupProgress } from '../domain/project-lifecycle.js';
+import { constructionLaunchBlockers, lifecycleDefinitions, lifecycleGroupProgress, stepOwner } from '../domain/project-lifecycle.js';
 import { PreparationWizard } from './PreparationWizard';
 import { Modal } from './Ui';
 import { stageStatusLabel } from '../presentation/status-labels';
@@ -30,7 +30,7 @@ export function ConstructionNow({ state, role, actor, userId, onChange, onNaviga
       <span className="launch-summary__number">00</span>
       <div><h2>До стройки</h2>
         <p>{preparation.completed} из {preparation.total} подтверждено</p>
-        {nextStep && showNextStep && <p>{nextStep.title} · {nextItem?.owner || 'Назначить ответственного'}{nextItem?.planEnd ? ` · до ${formatDate(nextItem.planEnd)}` : ''}</p>}
+        {nextStep && showNextStep && <p>{nextStep.title} · {stepOwner(state, nextStep.key) || 'Назначить ответственного'}{nextItem?.planEnd ? ` · до ${formatDate(nextItem.planEnd)}` : ''}</p>}
       </div>
       <button className="button button--light" type="button" onClick={() => onPreparationStep(nextStep?.key || 'brief')}>{compact ? 'Чек-лист' : 'Открыть чек-лист'} <ArrowUpRight size={14} /></button>
       <progress value={preparation.completed} max={preparation.total || 1} aria-label="Готовность к строительству" />
@@ -66,10 +66,10 @@ export function ConstructionNow({ state, role, actor, userId, onChange, onNaviga
       <div className="construction-now__legend"><span>Начало</span><span>{view.accepted} из {view.stages.length} приняты · выделены активные</span><span>Завершение</span></div>
     </>}
     {preparationStep && <Modal side title="00 · До стройки" onClose={() => onPreparationStep(null)}>
-      {role === 'management' && preparing ? <PreparationWizard state={state} actor={actor} role={role} onChange={onChange} defaultExpanded initialStep={preparationStep} embedded /> :
+      {role === 'management' && state.project.lifecycle?.phase === 'preparation' ? <PreparationWizard state={state} actor={actor} role={role} onChange={onChange} defaultExpanded initialStep={preparationStep} embedded /> :
         <dl className="stage-facts">{lifecycleDefinitions.filter(def => def.group === 'preparation' && !(def.escrow && state.project.lifecycle?.usesEscrow === 'no')).map(def => {
           const item = state.project.lifecycle?.items.find(row => row.key === def.key);
-          return <div key={def.key}><dt>{def.title}</dt><dd>{item?.owner ? `${item.owner} · ` : ''}{preparation.pending.includes(def.key) ? 'Не подтверждено' : item?.status === 'not_applicable' ? 'Не применяется' : 'Подтверждено'}</dd></div>;
+          return <div key={def.key}><dt>{def.number} · {def.title}</dt><dd>{stepOwner(state, def.key) || 'Ответственный не назначен'} · {preparation.pending.includes(def.key) ? 'Не подтверждено' : item?.status === 'not_applicable' ? 'Не применяется' : 'Подтверждено'}</dd></div>;
         })}</dl>}
     </Modal>}
     {selectedStage && <StageQuickUpdate {...{state, role, actor, userId, onChange, onNavigate}} stageId={selectedStage} onClose={() => setSelectedStage(null)} />}

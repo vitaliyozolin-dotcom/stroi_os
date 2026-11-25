@@ -1,3 +1,4 @@
+import { SitePreparationSteps } from './SitePreparationSteps';
 import { useState } from 'react';
 import type { AppState, UserRole } from '../entities/index';
 import type { PageId } from '../presentation/navigation';
@@ -30,22 +31,13 @@ export function StageQuickUpdate({ state, stageId, role, actor, userId, onChange
   if (review) return <ScheduleReconciliation {...{ state, role, actor, userId, onChange }} initialId={stageId} onClose={() => setReview(false)} />;
   return <Modal side title={stage.shortName || stage.name} subtitle={stageStatusLabel[stage.status]} onClose={onClose}>
     <div className="stage-quick">
-      {isSitePreparation && <details open>
-        <summary>Готовность площадки</summary>
-        <ul>
-          <li>Электричество или генератор</li>
-          <li>Бытовка</li>
-          <li>Бригада и дата выхода</li>
-          <li>Подъезд и разгрузка</li>
-          <li>Место хранения материалов</li>
-        </ul>
-      </details>}
+      {isSitePreparation && <SitePreparationSteps stage={stage} state={state} canEdit={allowed && !launchLocked && stage.status !== 'accepted'} canAssign={role === 'management'} onChange={onChange} />}
       {stageTasks.length > 0 && <section aria-label="Подэтапы">
         <h3>Подэтапы</h3>
         <ul className="preparation-steps">
           {stageTasks.map(task => <li className="preparation-step" key={task.id}>
             <button type="button" className="text-button" onClick={() => { onClose(); onNavigate('tasks', task.id); }}>
-              {task.title} · {taskStatusLabel[task.status]}
+              {task.title} · {taskStatusLabel[task.status]}<small>{task.assigneeName || 'Ответственный не назначен'}</small>
             </button>
           </li>)}
         </ul>

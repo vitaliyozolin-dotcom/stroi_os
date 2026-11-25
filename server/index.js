@@ -1,3 +1,4 @@
+import { maintainLeadFunnel } from '../sites/leads/funnel.js';
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
@@ -431,10 +432,12 @@ const writeResponse = async (outgoing, response) => {
 };
 
 let telegramOutboxTimer;
+let leadFunnelTimer;
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    if (leadFunnelTimer) clearInterval(leadFunnelTimer);
     if (telegramOutboxTimer) clearInterval(telegramOutboxTimer);
     const closed = await waitWithTimeout(new Promise((resolveClose) => server.close(resolveClose)), 20_000);
     if (!closed) server.closeAllConnections?.();
@@ -456,6 +459,9 @@ server.listen(port, '0.0.0.0', () => {
     }),
     trackBackground,
   );
+  const refreshSales = createExclusiveTaskRunner(() => maintainLeadFunnel(database), trackBackground);
+  void refreshSales().catch(() => {});
+  leadFunnelTimer = setInterval(() => void refreshSales().catch(() => {}), 60_000);
   void flushOutbox();
   telegramOutboxTimer = setInterval(() => void flushOutbox(), telegramOutboxIntervalMs);
   trackBackground(ensureTelegramWebhook(process.env)
