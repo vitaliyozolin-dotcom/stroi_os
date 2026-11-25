@@ -169,3 +169,65 @@
   font-size: 13px;
   line-height: 1.4;
 }
+
+.construction-now__mobile-toggle { display: none; }
+
+@media (max-width: 600px) {
+  .app-shell .page-container .overview-page {
+    --block-inset: 10px;
+    --block-gap: 12px;
+    --block-border: var(--border);
+  }
+  .overview-page :is(.overview-finance, .overview-work-card, .construction-now) { box-shadow: none; }
+  .overview-page .overview-block-heading,
+  .overview-page .overview-block-heading > span { background: var(--surface-soft); color: var(--ink); }
+  .app-shell .page-container .overview-money .metric-card { border-radius: 0; padding: 8px; }
+  .overview-page .overview-money .metric-card:not(.metric-card--warning) { background: var(--surface); }
+  .overview-page .launch-summary { padding: 10px; column-gap: 12px; }
+  .overview-page .launch-summary__number { font-size: 22px; }
+  .overview-page .construction-now__mobile-toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+  }
+  .overview-page .construction-now__mobile-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+  .app-shell .overview-page .construction-now__stages {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    margin-top: 0;
+    overflow: visible;
+  }
+  .app-shell .overview-page .construction-now__stages[data-expanded="false"],
+  .overview-page .construction-now__legend { display: none; }
+  .app-shell .overview-page .construction-stage {
+    justify-content: flex-start;
+    min-height: 44px;
+    padding: 6px;
+    border-bottom-width: 1px;
+  }
+  .app-shell .overview-page .construction-stage__point { min-width: 20px; }
+  .overview-page .launch-hint { margin: 0; }
+  .app-shell .mobile-bottom-nav a { border-radius: 0; }
+}
+
+@media (max-width: 600px) {
+  .app-shell--overview .page-container > .help-fab-wrap {
+    position: static;
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .app-shell--overview .page-container > .help-fab-wrap .help-fab--feedback {
+    width: auto;
+    padding-inline: 12px;
+  }
+  .app-shell--overview .page-container > .help-fab-wrap .help-fab--feedback span { display: inline; }
+}
