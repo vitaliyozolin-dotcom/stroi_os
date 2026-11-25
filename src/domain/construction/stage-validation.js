@@ -29,6 +29,17 @@ export function validateStageControl(previous, next, identity, now = new Date().
   } else { project.workForecastUpdatedAt = oldProject.workForecastUpdatedAt; project.workForecastUpdatedBy = oldProject.workForecastUpdatedBy; }
   for (const stage of next.stages ?? []) {
     const before = oldStages.get(stage.id);
+    if (before?.siteChecks && stage.siteChecks === undefined) stage.siteChecks = before.siteChecks;
+    if (!same(before?.siteChecks, stage.siteChecks)) {
+      const checks = stage.siteChecks;
+      if (!checks || typeof checks !== 'object' || Array.isArray(checks) || Object.keys(checks).some(key => !['power','housing','crew','access','storage'].includes(key))) return 'Проверьте подэтапы подготовки площадки.';
+      for (const key of new Set([...Object.keys(before?.siteChecks ?? {}), ...Object.keys(checks)])) {
+        const item = checks[key], old = before?.siteChecks?.[key];
+        if (!item || typeof item !== 'object' || Array.isArray(item) || item.owner !== undefined && (typeof item.owner !== 'string' || item.owner.length > 160) || item.done !== undefined && typeof item.done !== 'boolean') return 'Проверьте ответственного и результат подэтапа.';
+        if (!manager && (identity.role !== 'foreman' || stage.schedule && stage.schedule.reporterId !== identity.id || item.owner !== old?.owner)) return 'Ответственного назначает управление.';
+        if (before?.status === 'accepted' && item.done !== old?.done) return 'Подэтап уже принят.';
+      }
+    }
     if (!before) { if (!manager || !['ready', 'not_ready'].includes(stage.status) || stage.actualStart || stage.completedOn || stage.ownerAcceptance) return 'Новый этап добавляет управление без подстановки приёмки.'; continue; }
     const statusChanged = stage.status !== before.status;
     const ownerAccepts = Boolean(stage.ownerAcceptance && !before.ownerAcceptance);

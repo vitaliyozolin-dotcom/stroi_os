@@ -1,0 +1,5 @@
+.marketing-funnel { grid-template-columns: repeat(auto-fit,minmax(165px,1fr)); }
+.marketing-funnel__step { text-align: left; }
+.marketing-funnel__step > span { flex-basis: 35px; min-width: 35px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.marketing-funnel__step strong { font-size: 13px; }
+@media (max-width: 900px) { .marketing-funnel__step { min-width: 175px; } }

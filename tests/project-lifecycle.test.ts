@@ -7,7 +7,7 @@ import { stateForRole } from '../sites/access-control.js';
 import type { Lead } from '../src/entities/index';
 const now = '2026-11-17T19:00:00.000Z';
 const owner = { role: 'management' as const, name: 'Owner' };
-const lead: Lead = { id: 'lead-1', name: 'Client', phone: '+79990000000', createdAt: now, source: 'manual', stage: 'negotiation', owner: 'Manager', nextAction: 'Prepare', region: 'Рощино', budget: 7000000, landStatus: 'owned', mortgageStatus: 'approved', qualification: { approvedLoan: 5600000, downPayment: 1400000, bank: 'Bank', address: 'Рощино, участок 7' } };
+const lead: Lead = { id: 'lead-1', name: 'Client', phone: '+79990000000', createdAt: now, source: 'manual', stage: 'qualified', stageEnteredAt: now, projectManager: 'Project Manager', owner: 'Lead Owner', nextAction: 'Prepare', region: 'Рощино', budget: 7000000, landStatus: 'owned', mortgageStatus: 'approved', qualification: { technology: 'СИП', projectType: 'standard', projectModel: 'Вела', completionScope: 'Тёплый контур', financingSource: 'Ипотека', mortgageProgram: 'Семейная', downPaymentMode: 'with', plotAction: 'check', plotResult: 'verified', approvedLoan: 5600000, downPayment: 1400000, bank: 'Bank', address: 'Рощино, участок 7' } };
 const fixture = () => { const s = structuredClone(seedState); s.project.id = 'source'; s.project.code = 'H-002'; s.leads = [structuredClone(lead)]; return s; };
 
 test('lead conversion keeps client money out of internal budget, transfers qualification and creates stage0', async () => {
@@ -24,8 +24,8 @@ test('lead conversion keeps client money out of internal budget, transfers quali
   assert.ok(constructionLaunchBlockers(target).length > 0);
 });
 
-test('qualification requires only critical handoff data and allows searching for a plot', () => {
-  assert.deepEqual(leadHandoffBlockers({ ...lead, landStatus: 'searching', qualification: {} }), []);
+test('qualification records the criteria and the result of a plot search before handoff', () => {
+  assert.deepEqual(leadHandoffBlockers({ ...lead, landStatus: 'searching', qualification: { ...lead.qualification, plotAction: 'select', plotResult: 'selected' } }), []);
   assert.ok(leadHandoffBlockers({ ...lead, budget: undefined }).some(message => /бюджет/.test(message)));
   assert.ok(leadHandoffBlockers({ ...lead, mortgageStatus: 'unknown' }).length);
 });
@@ -36,7 +36,7 @@ test('stage0 preserves its route and allows a completion mark without a note or 
   assert.match(validateLifecycleChanges(before, next, owner, now), /удалить/);
   next = structuredClone(before); next.project.lifecycle!.legacyReview = true;
   assert.match(validateLifecycleChanges(before, next, owner, now), /неизменяемы/);
-  next = structuredClone(before); next.project.contractValue = 9500000;
+  next = structuredClone(before); next.project.contractValue = 9500000; next.project.lifecycle!.primaryFunding = 'Собственные'; next.project.lifecycle!.reserveFunding = 'Кредитная линия';
   next.project.lifecycle!.items.find(item => item.key === 'estimate')!.status = 'done';
   assert.equal(validateLifecycleChanges(before, next, owner, now), '');
   assert.equal(lifecycleGroupProgress(next).completed, 1);
@@ -76,7 +76,10 @@ function storeFixture() {
   const snapshots = new Map<string, any>([['source', { state: fixture(), revision: 1 }]]);
   const audits: any[] = [];
   const db: any = {
-    prepare(sql: string) { return { sql, values: [] as any[], bind(...values: any[]) { this.values = values; return this; }, async all() { return {results:[...snapshots.values()].map(row=>({state_json:JSON.stringify(row.state)}))}; } }; },
+    prepare(sql: string) { return { sql, values: [] as any[], bind(...values: any[]) { this.values = values; return this; }, async all() {
+      if (sql.includes('FROM lead_inbox')) return { results: [] };
+      return {results:[...snapshots.entries()].filter(([id]) => !sql.includes('<>') || id !== this.values[0]).map(([id,row])=>({project_id:id,revision:row.revision,state_json:JSON.stringify(row.state)}))};
+    } }; },
     async batch(statements: any[]) { return statements.map(statement => {
       if (/INTO project_state/.test(statement.sql)) { const [id, text] = statement.values; if(snapshots.has(id)) return {changes:0}; snapshots.set(id,{state:JSON.parse(text),revision:1}); return {changes:1}; }
       if (/UPDATE project_state/.test(statement.sql)) { const [text, revision, , , , id, expected] = statement.values; if (snapshots.get(id)?.revision !== expected) return { changes: 0 }; snapshots.set(id,{state:JSON.parse(text),revision}); return {changes:1}; }
@@ -125,7 +128,7 @@ test('handoff rejects source collision and preserves canonical object references
 
 test('complete preparation can launch construction and treats bank escrow separately from contractor cash', () => {
   const before = fixture(); before.project.lifecycle = createLifecycle(now);
-  const next = structuredClone(before); const route = next.project.lifecycle!; route.usesEscrow = 'no'; route.scope = 'turnkey'; next.project.address = 'Рощино, участок 7';
+  const next = structuredClone(before); const route = next.project.lifecycle!; route.usesEscrow = 'no'; route.primaryFunding = 'Собственные'; route.reserveFunding = 'Кредитная линия'; route.scope = 'turnkey'; next.project.address = 'Рощино, участок 7';
   next.budgetMeta.estimateKind = 'internal_cost';
   next.documents = [{id:'estimate',name:'Смета',category:'specification',fileKey:'source/estimate',type:'PDF',status:'current',updatedAt:now,clientVisible:false},{id:'contract',name:'Договор',category:'contract',fileKey:'source/contract',type:'PDF',status:'signed',updatedAt:now,clientVisible:false}];
   next.stages = [{...next.stages[0],status:'ready',planStart:'2026-11-20',planEnd:'2026-12-20',actualStart:undefined,completedOn:undefined}];

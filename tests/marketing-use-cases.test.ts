@@ -1,3 +1,4 @@
+import type { LeadStage } from '../src/entities/lead';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { seedState } from '../src/seed.ts';
@@ -33,16 +34,26 @@ test('step 2: qualifying a lead preserves identity and no-op makes no write', ()
  let writes = 0; const repeat = useCases(next, () => { writes++; }).execute({ action: 'qualify', leadId: 'existing', expected: leadSnapshot(next, 'existing'), patch: { landStatus: 'owned' } }); assert.ok(repeat.ok); if (repeat.ok) assert.equal(repeat.change, null); assert.equal(writes, 0);
  assert.equal(useCases(next).execute({ action: 'qualify', leadId: 'existing', expected, patch: { landStatus: 'owned' } }).ok, false);
 });
-test('step 3: forward progression stops at won/lost while explicit selection can reopen a lead', () => {
- let state = fixture();
- for (const stage of ['qualified', 'site_visit', 'estimate', 'negotiation']) { const result = useCases(state).execute({ action: 'stage', leadId: 'existing', expected: leadSnapshot(state, 'existing') }); assert.ok(result.ok && result.change); if (!result.ok || !result.change) return; state = result.change.state; assert.equal(state.leads[0].stage, stage); }
- const blocked = useCases(state).execute({ action: 'stage', leadId: 'existing', expected: leadSnapshot(state, 'existing') }); assert.equal(blocked.ok, false);
- const handed = useCases(state).execute({ action: 'handoff', leadId: 'existing', expected: leadSnapshot(state, 'existing'), targetProjectId: 'lead-stable', preparedAt: clock.now() }); assert.ok(handed.ok && handed.change); if (!handed.ok || !handed.change) return; state = handed.change.state; assert.equal(state.leads[0].stage, 'preparation'); assert.equal(state.leads[0].projectId, 'lead-stable');
- const signed = useCases(state).execute({ action: 'stage', leadId: 'existing', expected: leadSnapshot(state, 'existing'), stage: 'won' }); assert.ok(signed.ok && signed.change); if (!signed.ok || !signed.change) return; state = signed.change.state;
- const terminal = useCases(state).execute({ action: 'stage', leadId: 'existing', expected: leadSnapshot(state, 'existing') }); assert.ok(terminal.ok); if (terminal.ok) assert.equal(terminal.change, null);
- const lost = useCases(state).execute({ action: 'stage', leadId: 'existing', expected: leadSnapshot(state, 'existing'), stage: 'lost' }); assert.ok(lost.ok && lost.change); if (!lost.ok || !lost.change) return;
- const noAdvance = useCases(lost.change.state).execute({ action: 'stage', leadId: 'existing', expected: leadSnapshot(lost.change.state, 'existing') }); assert.ok(noAdvance.ok); if (noAdvance.ok) assert.equal(noAdvance.change, null);
- const reopened = useCases(state).execute({ action: 'stage', leadId: 'existing', expected: leadSnapshot(state, 'existing'), stage: 'qualified' }); assert.ok(reopened.ok && reopened.change);
+test('qualification, estimate handoff, contract and escrow follow the numbered funnel', () => {
+ const state = fixture();
+ const run = (stage?: LeadStage) => useCases(state).execute({ action:'stage', leadId:'existing', expected:leadSnapshot(state,'existing'), stage });
+ assert.equal(run('qualified').ok, false);
+ Object.assign(state.leads[0], { budget:100, landStatus:'owned', mortgageStatus:'not_needed', qualification:{ technology:'СИП', projectType:'standard', projectModel:'Вела', completionScope:'Контур', financingSource:'Собственные', plotAction:'check' } });
+ const qualified = run();
+ assert.ok(qualified.ok && qualified.change); state.leads = qualified.change.state.leads;
+ assert.equal(state.leads[0].stage, 'qualified');
+ assert.equal(run().ok, false);
+ const linked = useCases(state).execute({ action:'handoff',leadId:'existing', expected:leadSnapshot(state,'existing'),targetProjectId:'lead-stable',preparedAt:clock.now() });
+ assert.ok(linked.ok && linked.change); state.leads = linked.change.state.leads;
+ for (const stage of ['estimate', 'negotiation', 'won', 'escrow_funded']) {
+   const result = run(); assert.ok(result.ok && result.change); state.leads = result.change.state.leads;
+   assert.equal(state.leads[0].stage,stage);
+ }
+ for (const terminal of ['escrow_funded','deferred','lost'] as const) {
+   state.leads[0].stage = terminal;
+   assert.deepEqual(run(),{ok:true,change:null});
+   assert.ok(run('new').ok);
+ }
 });
 const incoming = () => ({ id: 'web-1', name: 'Клиент сайта', phone: '+7 002', created_at: clock.now(), source: 'unknown', message: 'Дом' });
 test('step 4: import deduplicates both existing and repeated records and preserves latest edits', () => {
@@ -60,20 +71,20 @@ test('all existing lead commands reject missing/stale cross-project records', ()
 test('UI has explicit commands, cancellable import, latest-snapshot access and error feedback', () => { const page = readFileSync(new URL('../src/pages/MarketingPage.tsx', import.meta.url), 'utf8'); assert.doesNotMatch(page, /createMarketingCommands|saveChange\(|leads:|activity:|uid\(/); assert.match(page, /latest\.current\.execute/); assert.match(page, /controller\.abort\(\)/); assert.match(page, /response\.ok/); assert.match(page, /Повторить загрузку заявок/); });
 
 test('direct successful-stage selection cannot skip project creation or write a false contract', () => {
- for (const stage of ['new','qualified','site_visit','estimate','negotiation','preparation','lost'] as const) {
+ for (const stage of ['new','qualified','deferred','estimate','negotiation','preparation','lost'] as const) {
   const state = fixture(); state.leads[0].stage=stage; let writes=0;
   const result=useCases(state,()=>{writes++;}).execute({action:'stage',leadId:'existing',expected:leadSnapshot(state,'existing'),stage:'won'});
   assert.equal(result.ok,false); if(!result.ok) assert.match(result.error,/подготовку проекта/);
   assert.equal(writes,0); assert.equal(state.leads[0].stage,stage);
  }
  const historical=fixture(); historical.leads[0].stage='won';
- const noOp=useCases(historical).execute({action:'stage',leadId:'existing',expected:leadSnapshot(historical,'existing')});
+ const noOp=useCases(historical).execute({action:'stage',leadId:'existing',expected:leadSnapshot(historical,'existing'),stage:'won'});
  assert.ok(noOp.ok); if(noOp.ok) assert.equal(noOp.change,null);
 });
-test('CRM successful-stage UI routes unlinked leads to handoff and checks saved contract before won', () => {
+test('CRM uses the saved project milestone when selecting a sales status', () => {
  const page=readFileSync(new URL('../src/pages/MarketingPage.tsx',import.meta.url),'utf8');
- assert.match(page,/if \(patch.stage === 'won'\)[^\n]+if \(!lead.projectId\) void prepareProject\(lead\); else void confirmContract\(lead\)/);
- assert.match(page,/contract\?\.status !== 'done' \|\| lifecycleItemBlockers\(target, 'contract'\)\.length/);
+ assert.match(page,/confirmMilestone\(lead, patch.stage\)/);
+ assert.match(page,/item\?\.status !== 'done'/);
+ assert.match(page,/escrowFundingBlockers\(target\)/);
  assert.match(page,/cache: 'no-store'/);
- assert.match(page,/lead.stage === 'preparation'\) \{ void confirmContract\(lead\)/);
 });

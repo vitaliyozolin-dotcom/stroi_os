@@ -73,6 +73,7 @@ export interface Stage {
   baseline?: PlanBaseline;
   planHistory?: PlanChange[];
   planChangeReason?: string;
+  siteChecks?: Record<string, { owner?: string; done?: boolean }>;
   responsible: string;
   responsibleId?: string;
   dependencyId?: string;

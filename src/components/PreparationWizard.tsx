@@ -1,7 +1,11 @@
+import { Link } from 'react-router';
+import { workspacePath } from '../presentation/navigation';
+import { PersonField } from './ProjectAssignments';
+import { escrowFundingBlockers } from '../domain/sales-workflow.js';
 import { useState } from 'react';
 import { ArrowRight, Check, ChevronDown, Plus } from 'lucide-react';
 import type { AppState, LifecycleItem, ProjectLifecycle, UserRole } from '../entities/index';
-import { constructionLaunchBlockers, createLifecycle, lifecycleDefinitions, lifecycleGroupProgress, lifecyclePhaseLabels, validateLifecycleChanges } from '../domain/project-lifecycle.js';
+import { constructionLaunchBlockers, createLifecycle, lifecycleDefinitions, lifecycleItemBlockers, stepOwner, lifecycleGroupProgress, lifecyclePhaseLabels, validateLifecycleChanges } from '../domain/project-lifecycle.js';
 import './preparation-wizard.css';
 
 const phaseNext = { preparation: 'construction', construction: 'handover', handover: 'closed', closed: 'warranty' } as const;
@@ -11,6 +15,9 @@ export function PreparationWizard({ state, actor, role, onChange, defaultExpande
   const lifecycle = state.project.lifecycle;
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [openStep, setOpenStep] = useState<string | null>(null);
+  const [assignee, setAssignee] = useState('');
+  const [primary, setPrimary] = useState('');
+  const [reserve, setReserve] = useState('');
   const [comment, setComment] = useState('');
   const [error, setError] = useState('');
   if (role !== 'management') return null;
@@ -41,10 +48,20 @@ export function PreparationWizard({ state, actor, role, onChange, defaultExpande
     : phase === 'construction' ? state.stages.length > 0 && state.stages.every(stage => stage.status === 'accepted')
     : phase === 'handover' ? progress.pending.length === 0 : true;
   const canReopen = phase === 'preparation' || phase === 'handover';
-  const mark = (item: LifecycleItem, status: 'done' | 'pending') => {
-    const nextItem = { ...item, status, basis: openStep === item.key ? comment.trim() : item.basis };
+  const people = state.settings.users.filter(user => user.status === 'active' && user.role !== 'client').map(user => user.name);
+  const open = (item: LifecycleItem) => {
+    setError(''); setOpenStep(item.key);
+    setAssignee(item.owner || ''); setComment(item.basis);
+    setPrimary(lifecycle.primaryFunding || ''); setReserve(lifecycle.reserveFunding || '');
+  };
+  const mark = (item: LifecycleItem, status = item.status) => {
+    const editing = openStep === item.key;
+    const nextItem = { ...item, status, ...(editing ? { basis: comment.trim(), owner: assignee.trim() } : {}) };
     const usesEscrow = item.key === 'escrow' && status === 'done' && lifecycle.usesEscrow === 'unknown' ? 'yes' : lifecycle.usesEscrow;
-    if (commit({ ...lifecycle, usesEscrow, items: lifecycle.items.map(row => row.key === item.key ? nextItem : row) })) setOpenStep(null);
+    if (!editing && status === 'done' && (item.key === 'estimate' && (!lifecycle.primaryFunding || !lifecycle.reserveFunding) || item.key === 'escrow' && escrowFundingBlockers(state).length || item.key === 'contract' && lifecycle.sourceLeadId && lifecycleItemBlockers(state, 'contract').length)) {
+      open(item); return;
+    }
+    if (commit({ ...lifecycle, usesEscrow, ...(editing && item.key === 'estimate' ? { primaryFunding: primary.trim(), reserveFunding: reserve.trim() } : {}), items: lifecycle.items.map(row => row.key === item.key ? nextItem : row) })) setOpenStep(null);
   };
 
   return <section className={embedded ? 'preparation-wizard preparation-wizard--embedded' : 'panel preparation-wizard'}>
@@ -59,23 +76,29 @@ export function PreparationWizard({ state, actor, role, onChange, defaultExpande
         const item = lifecycle.items.find(row => row.key === def.key);
         if (!item) return null;
         const done = item.status === 'done';
-        const open = openStep === item.key;
+        const editing = openStep === item.key;
         const notApplicable = item.status === 'not_applicable';
         return <li key={item.key} className="preparation-step" data-current={initialStep === item.key && !done}>
           <div className="preparation-step__row">
-            <button type="button" className="preparation-step__title" aria-expanded={open} onClick={() => {
-              setOpenStep(open ? null : item.key);
-              setComment(item.basis);
-            }}>
-              <span>{def.number}</span><strong>{def.title}</strong><ChevronDown size={14} aria-hidden="true" />
+            <button type="button" className="preparation-step__title" aria-expanded={editing} onClick={() => editing ? setOpenStep(null) : open(item)}>
+              <span>{def.number}</span><span className="preparation-step__caption"><strong>{done && def.key !== 'ppr' ? def.result : def.title}</strong><small>{stepOwner(state, item.key) || 'Ответственный не назначен'}</small></span><ChevronDown size={14} aria-hidden="true" />
             </button>
             {done ? <span className="preparation-step__done"><Check size={16} /> Выполнено</span>
               : notApplicable ? <span className="preparation-step__done">Не применяется</span>
               : <button type="button" className="button button--secondary" aria-label={`Готово: ${def.title}`} onClick={() => mark(item, 'done')}>Готово</button>}
           </div>
-          {open && <div className="preparation-step__details">
-            {!done && !notApplicable ? <input aria-label="Комментарий (необязательно)" placeholder="Комментарий (необязательно)" maxLength={3000} value={comment} onChange={event => setComment(event.target.value)} />
-              : item.basis && <p>{item.basis}</p>}
+          {editing && <div className="preparation-step__details modal-form">
+            <p>{done && def.key !== 'ppr' ? def.title : def.result}</p>
+            <PersonField label="Ответственный за подэтап" value={assignee} people={people} onChange={setAssignee} />
+            {item.key === 'estimate' && <div className="form-grid">
+              <label className="field">Основные источники финансирования<input maxLength={1000} value={primary} onChange={event => setPrimary(event.target.value)} /></label>
+              <label className="field">Резервные источники финансирования<input maxLength={1000} value={reserve} onChange={event => setReserve(event.target.value)} /></label>
+            </div>}
+            {item.key === 'contract' && lifecycle.sourceLeadId && <Link className="text-button" to={workspacePath(state.project.id, 'project') + '#project-documents'}>Документы и подписанный договор</Link>}
+            {item.key === 'ppr' && <div className="stage-quick__actions"><Link className="text-button" to={workspacePath(state.project.id, 'schedule')}>Открыть ППР</Link><Link className="text-button" to={workspacePath(state.project.id, 'finance')}>Открыть график финансирования</Link></div>}
+            {item.key === 'escrow' && <div>{escrowFundingBlockers(state).map(text => <p key={text}>{text}</p>)}<Link className="text-button" to={workspacePath(state.project.id, 'finance')}>Открыть подтверждения финансирования</Link></div>}
+            <label className="field">Комментарий (необязательно)<input maxLength={3000} value={comment} onChange={event => setComment(event.target.value)} /></label>
+            <button type="button" className="text-button" onClick={() => mark(item)}>Сохранить изменения</button>
             {(done || notApplicable) && canReopen && <button className="text-button" type="button" onClick={() => mark(item, 'pending')}>Вернуть в работу</button>}
           </div>}
         </li>;

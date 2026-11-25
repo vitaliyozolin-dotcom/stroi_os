@@ -34,3 +34,18 @@
   .preparation-step__row > .button { min-height: 44px; }
   .preparation-step__details input { font-size: 16px; }
 }
+.preparation-step__title { grid-template-columns: 34px minmax(0,1fr) 14px; }
+.preparation-step__title .preparation-step__caption { display: grid; gap: 3px; color: var(--ink); font-size: 14px; }
+.preparation-step__caption small { color: var(--muted); font-weight: 400; }
+.preparation-step__details { gap: 8px; }
+.preparation-step__details .text-button { justify-self: start; }
+.project-assignments { padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px; border: 1px solid var(--border); }
+.project-assignments dl { display: flex; flex-wrap: wrap; gap: 12px 32px; margin: 0; }
+.project-assignments dt { color: var(--muted); font-size: 13px; }
+.project-assignments dd { margin: 2px 0 0; font-weight: 600; }
+.project-assignments form { flex: 1; }
+.stage-quick li button small { color: var(--muted); }
+
+.site-preparation-task { display: grid; gap: 3px; padding: 8px 0; }
+.site-preparation-task strong { font-size: 14px; }
+.site-preparation-task .text-button { justify-self: start; }

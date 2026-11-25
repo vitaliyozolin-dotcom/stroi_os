@@ -1,3 +1,4 @@
+import { maintainLeadFunnel } from './leads/funnel.js';
 import { ensureSchema, ensureBattleReady, battleReadiness, initializeBattleRuntime, BATTLE_RESET_KEY as RUNTIME_BATTLE_RESET_KEY } from './runtime/initialization.js';
 import { readSnapshot } from './projects/snapshot.js';
 import { telegramFileToR2, resolveTelegramDraftFile } from './telegram/files.js';
@@ -364,5 +365,6 @@ export default {
       : env;
     await ensureBattleReady(scheduledEnv);
     context.waitUntil(flushTelegramOutbox(scheduledEnv));
+    context.waitUntil(maintainLeadFunnel(scheduledEnv.DB));
   },
 };

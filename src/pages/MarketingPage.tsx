@@ -1,7 +1,10 @@
+import './marketing-funnel.css';
+import { nextSalesStage, salesStages, escrowFundingBlockers } from '../domain/sales-workflow.js';
+import { PersonField } from '../components/ProjectAssignments';
 import type { RemoteProjectSnapshot } from '../application';
 import { Link } from 'react-router';
 import { LeadQualificationForm } from '../components/LeadQualificationForm';
-import { leadHandoffBlockers, lifecycleItemBlockers } from '../domain/project-lifecycle.js';
+import { leadHandoffBlockers, lifecycleItemBlockers, milestoneKeys } from '../domain/project-lifecycle.js';
 import type { LeadQualification } from '../domain/marketing';
 import { workspacePath } from '../presentation/navigation';
 import { useModuleRepository } from '../useModuleRepository';
@@ -42,7 +45,7 @@ const mortgageLabels: Record<NonNullable<Lead['mortgageStatus']>, string> = {
 };
 
 const stageTone = (stage: LeadStage): 'neutral' | 'positive' | 'warning' | 'danger' | 'blue' => {
-  if (stage === 'won') return 'positive';
+  if (stage === 'won' || stage === 'escrow_funded') return 'positive';
   if (stage === 'lost') return 'danger';
   if (stage === 'estimate' || stage === 'negotiation') return 'blue';
   if (stage === 'new') return 'warning';
@@ -60,8 +63,8 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
   const [draftProjectId, setDraftProjectId] = useState(state.project.id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [stageFilter, setStageFilter] = useState<LeadStage | 'all'>('all');
-  const [form, setForm] = useState({ name: '', phone: '', email: '', source: 'manual' as LeadSource, budget: '', houseArea: '', region: '', landStatus: 'unknown' as NonNullable<Lead['landStatus']>, mortgageStatus: 'unknown' as NonNullable<Lead['mortgageStatus']>, nextAction: 'Позвонить и квалифицировать заявку', nextActionAt: '', owner: actor, notes: '' });
+  const [stageFilter, setStageFilter] = useState<LeadStage | 'all' | 'contracted'>('all');
+  const [form, setForm] = useState({ name: '', phone: '', email: '', source: 'manual' as LeadSource, budget: '', houseArea: '', region: '', landStatus: 'unknown' as NonNullable<Lead['landStatus']>, mortgageStatus: 'unknown' as NonNullable<Lead['mortgageStatus']>, nextAction: 'Позвонить и квалифицировать заявку', nextActionAt: '', owner: actor, projectManager: '', notes: '' });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -82,10 +85,10 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
   }, [focusId, state.leads]);
 
   const visible = useMemo(() => state.leads
-    .filter((lead) => stageFilter === 'all' || lead.stage === stageFilter)
+    .filter((lead) => stageFilter === 'all' || lead.stage === stageFilter || stageFilter === 'contracted' && ['won', 'escrow_funded'].includes(lead.stage))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [stageFilter, state.leads]);
-  const active = state.leads.filter((lead) => !['won', 'lost'].includes(lead.stage));
-  const won = state.leads.filter((lead) => lead.stage === 'won');
+  const active = state.leads.filter((lead) => !['won', 'escrow_funded', 'lost', 'deferred'].includes(lead.stage));
+  const won = state.leads.filter((lead) => ['won', 'escrow_funded'].includes(lead.stage));
   const pipeline = active.reduce((sum, lead) => sum + (lead.budget ?? 0), 0);
   const conversion = state.leads.length ? Math.round(won.length / state.leads.length * 100) : 0;
   const selected = state.leads.find((lead) => lead.id === selectedId) ?? null;
@@ -96,12 +99,16 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
     if (!result.ok) { setCommandError(result.error); return; }
     setCommandError('');
     setShowForm(false);
-    setForm({ ...form, name: '', phone: '', email: '', budget: '', houseArea: '', region: '', notes: '' });
+    setForm({ ...form, name: '', phone: '', email: '', budget: '', houseArea: '', region: '', owner: actor, projectManager: '', notes: '' });
   };
 
   const updateLead = (leadId: string, patch: LeadQualification & { stage?: LeadStage }) => {
-    if (patch.stage === 'won') { const lead = state.leads.find(row => row.id === leadId); if (lead && lead.stage !== 'won') { if (!lead.projectId) void prepareProject(lead); else void confirmContract(lead); } return; }
-    if (patch.stage === 'preparation') { const lead = state.leads.find(row => row.id === leadId); if (lead) void prepareProject(lead); return; }
+    if (patch.stage) {
+      const lead = state.leads.find(row => row.id === leadId);
+      if (!lead || lead.stage === patch.stage) return;
+      if (patch.stage === 'preparation' && !lead.projectId) { void prepareProject(lead); return; }
+      if (milestoneKeys[patch.stage]) { void confirmMilestone(lead, patch.stage); return; }
+    }
     const result = marketing.execute(patch.stage ? { action: 'stage', leadId, stage: patch.stage, expected: leadSnapshot(state, leadId) } : { action: 'qualify', leadId, patch, expected: leadSnapshot(state, leadId) });
     setCommandError(result.ok ? '' : result.error);
   };
@@ -119,30 +126,25 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
     } catch (error) { setCommandError(error instanceof Error ? error.message : 'Не удалось передать обращение в проект.'); }
     finally { setHandoffBusy(false); }
   };
-  const confirmContract = async (lead: Lead) => {
-    if (!lead.projectId) { await prepareProject(lead); return; }
+  const confirmMilestone = async (lead: Lead, stage: LeadStage) => {
+    if (!lead.projectId) { setCommandError('Сначала передайте квалифицированную заявку руководителю проекта в расчёт (0.7).'); return; }
     const expected = leadSnapshot(state, lead.id);
     setCommandError(''); setHandoffBusy(true);
     try {
       const response = await requestApi(`/api/state?projectId=${encodeURIComponent(lead.projectId)}`, { cache: 'no-store' });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.message || 'Не удалось проверить договор связанного проекта.');
       const target = body.snapshot?.state as AppState | undefined;
-      if (!target || target.project.id !== lead.projectId || target.project.lifecycle?.sourceLeadId !== lead.id) throw new Error('Связанный проект обращения не подтверждён.');
-      const contract = target.project.lifecycle.items.find(item => item.key === 'contract');
-      if (contract?.status !== 'done' || lifecycleItemBlockers(target, 'contract').length) throw new Error('Сначала подтвердите договор с подписанным оригиналом в этапе 0 связанного проекта.');
-      const result = latest.current.execute({ action: 'stage', leadId: lead.id, expected, stage: 'won' });
+      if (!response.ok || target?.project.lifecycle?.sourceLeadId !== lead.id) throw new Error('Не удалось проверить связанный проект.');
+      const item = target.project.lifecycle.items.find(row => row.key === milestoneKeys[stage]);
+      if (item?.status !== 'done') throw new Error('Откройте связанный проект и подтвердите результат в этапе 00. Статус заявки обновится автоматически.');
+      if (stage === 'won' && lifecycleItemBlockers(target, 'contract').length) throw new Error('Подтвердите подписанный договор в документах проекта.');
+      if (stage === 'escrow_funded' && escrowFundingBlockers(target).length) throw new Error(escrowFundingBlockers(target).join(' '));
+      const result = latest.current.execute({ action: 'stage', leadId: lead.id, expected, stage });
       if (!result.ok) setCommandError(result.error);
-    } catch (error) { setCommandError(error instanceof Error ? error.message : 'Не удалось проверить договор.'); }
+    } catch (error) { setCommandError(error instanceof Error ? error.message : 'Не удалось проверить результат.'); }
     finally { setHandoffBusy(false); }
   };
-  const advanceLead = (lead: Lead) => {
-    if (lead.stage === 'preparation') { void confirmContract(lead); return; }
-    if (lead.stage === 'negotiation') { void prepareProject(lead); return; }
-    const result = marketing.execute({ action: 'stage', leadId: lead.id, expected: leadSnapshot(state, lead.id) });
-    setCommandError(result.ok ? '' : result.error);
-  };
-
+  const people = state.settings.users.filter(user => user.status === 'active' && user.role !== 'client').map(user => user.name);
   return (
     <div className="page-stack marketing-page">
       {importError && <p role="alert">{importError} <button type="button" onClick={() => setImportAttempt(value => value + 1)}>Повторить загрузку заявок</button></p>}
@@ -159,18 +161,18 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
       <section className="metric-grid">
         <MetricCard label="Новые заявки" value={`${state.leads.filter((lead) => lead.stage === 'new').length}`} detail={<span>требуют первичного контакта</span>} icon={UsersRound} onClick={() => setStageFilter('new')} />
         <MetricCard label="Активная воронка" value={shortMoney(pipeline)} detail={<span>{active.length} потенциальных проектов</span>} icon={BadgeRussianRuble} onClick={() => setStageFilter('all')} />
-        <MetricCard label="Договоры" value={`${won.length}`} detail={<span>Суммы договоров — в связанных проектах</span>} icon={CheckCircle2} tone="positive" onClick={() => setStageFilter('won')} />
-        <MetricCard label="Конверсия в договор" value={`${conversion}%`} detail={<span>по всем заведённым обращениям</span>} icon={Target} tone="dark" onClick={() => setStageFilter('won')} />
+        <MetricCard label="Договоры" value={`${won.length}`} detail={<span>Суммы договоров — в связанных проектах</span>} icon={CheckCircle2} tone="positive" onClick={() => setStageFilter('contracted')} />
+        <MetricCard label="Конверсия в договор" value={`${conversion}%`} detail={<span>по всем заведённым обращениям</span>} icon={Target} tone="dark" onClick={() => setStageFilter('contracted')} />
       </section>
 
       <section className="panel marketing-funnel-panel">
         <SectionHeader eyebrow="Сквозной путь" title="Воронка заявок" action={<button type="button" className="text-button" onClick={() => setStageFilter('all')}><Filter size={15} /> Сбросить фильтр</button>} />
         <div className="marketing-funnel">
-          {stageOrder.filter((stage) => stage !== 'lost').map((stage, index) => {
+          {salesStages.map(({ key: stage, code, label }) => {
             const leads = state.leads.filter((lead) => lead.stage === stage);
             return (
               <button type="button" className={stageFilter === stage ? 'marketing-funnel__step marketing-funnel__step--active' : 'marketing-funnel__step'} key={stage} onClick={() => setStageFilter(stage)}>
-                <span>{index + 1}</span><div><strong>{stageLabels[stage]}</strong><small>{leads.length} · {shortMoney(leads.reduce((sum, lead) => sum + (lead.budget ?? 0), 0))}</small></div>
+                <span>{code}</span><div><strong>{label}</strong><small>{leads.length} · {shortMoney(leads.reduce((sum, lead) => sum + (lead.budget ?? 0), 0))}</small></div>
               </button>
             );
           })}
@@ -178,7 +180,7 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
       </section>
 
       <section className="panel leads-panel">
-        <SectionHeader eyebrow="CRM" title={stageFilter === 'all' ? 'Все обращения' : stageLabels[stageFilter]} action={<span className="count-badge">{visible.length}</span>} />
+        <SectionHeader eyebrow="CRM" title={stageFilter === 'all' ? 'Все обращения' : stageFilter === 'contracted' ? 'Заключённые договоры' : stageLabels[stageFilter]} action={<span className="count-badge">{visible.length}</span>} />
         <div className="lead-list">
           {visible.map((lead) => (
             <button type="button" className="lead-row" key={lead.id} onClick={() => { setHandoffTarget(null); setSelectedId(lead.id); }}>
@@ -202,7 +204,7 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
             <div className="form-grid form-grid--three"><Field label="Бюджет, ₽"><input type="number" min="0" value={form.budget} onChange={(event) => setForm({ ...form, budget: event.target.value })} /></Field><Field label="Площадь, м²"><input type="number" min="0" value={form.houseArea} onChange={(event) => setForm({ ...form, houseArea: event.target.value })} /></Field><Field label="Район"><input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} /></Field></div>
             <div className="form-grid"><Field label="Земельный участок"><select value={form.landStatus} onChange={(event) => setForm({ ...form, landStatus: event.target.value as NonNullable<Lead['landStatus']> })}>{Object.entries(landLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></Field><Field label="Финансирование"><select value={form.mortgageStatus} onChange={(event) => setForm({ ...form, mortgageStatus: event.target.value as NonNullable<Lead['mortgageStatus']> })}>{Object.entries(mortgageLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></Field></div>
             <div className="form-grid"><Field label="Следующее действие"><input value={form.nextAction} onChange={(event) => setForm({ ...form, nextAction: event.target.value })} /></Field><Field label="Когда"><input type="datetime-local" value={form.nextActionAt} onChange={(event) => setForm({ ...form, nextActionAt: event.target.value })} /></Field></div>
-            <Field label="Ответственный"><select value={form.owner} onChange={(event) => setForm({ ...form, owner: event.target.value })}>{state.settings.users.filter((user) => user.status === 'active' && user.role === 'management').map((user) => <option value={user.name} key={user.id}>{user.name}</option>)}</select></Field>
+            <div className="form-grid"><PersonField label="Чей лид" value={form.owner} people={people} onChange={owner => setForm({ ...form, owner })} /><PersonField label="Менеджер проекта" value={form.projectManager} people={people} onChange={projectManager => setForm({ ...form, projectManager })} /></div>
             <Field label="Комментарий"><textarea rows={3} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></Field>
             <div className="modal__actions"><button type="button" className="button button--ghost" onClick={() => setShowForm(false)}>Отмена</button><button type="submit" className="button button--primary"><Plus size={17} /> Создать заявку</button></div>
           </form>
@@ -214,15 +216,15 @@ export function MarketingPage({ state, actor, role, focusId, onChange, onServerS
           {commandError && <p role="alert" className="form-warning">{commandError}</p>}<div className="entity-detail-grid">
             <section className="entity-detail-card"><small>Контакт</small><strong><Phone size={16} /> {selected.phone}</strong><span>{selected.email ?? 'Email не указан'}</span></section>
             <section className="entity-detail-card"><small>Параметры дома</small><strong>{selected.houseArea ? `${selected.houseArea} м²` : 'Площадь не указана'}</strong><span>{selected.region ?? 'Район не указан'}</span></section>
-            <section className="entity-detail-card"><small>Потенциал</small><strong>{selected.budget ? money(selected.budget) : 'Не оценён'}</strong><span>Ответственный: {selected.owner}</span></section>
+            <section className="entity-detail-card"><small>Потенциал</small><strong>{selected.budget ? money(selected.budget) : 'Не оценён'}</strong><span>Чей лид · {selected.owner || 'Не указан'}</span></section>
             <section className="entity-detail-card entity-detail-card--editable"><small>Земельный участок</small><select aria-label="Статус земельного участка" value={selected.landStatus ?? 'unknown'} onChange={(event) => updateLead(selected.id, { landStatus: event.target.value as NonNullable<Lead['landStatus']> })}>{Object.entries(landLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><span>Можно уточнить прямо в карточке</span></section>
             <section className="entity-detail-card entity-detail-card--editable"><small>Ипотека</small><select aria-label="Статус ипотеки" value={selected.mortgageStatus ?? 'unknown'} onChange={(event) => updateLead(selected.id, { mortgageStatus: event.target.value as NonNullable<Lead['mortgageStatus']> })}>{Object.entries(mortgageLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><span>Нужна ли помощь с одобрением</span></section>
           </div>
-          <LeadQualificationForm objects={state.orderRelations?.objects} key={selected.id} lead={selected} onSave={patch => updateLead(selected.id, { ...patch, qualification: { ...patch.qualification, updatedAt: new Date().toISOString(), updatedBy: actor } })} />
-          {(selected.projectId || handoffTarget) && <div className="entity-detail-section"><strong>Связанный проект</strong><p><Link to={workspacePath(selected.projectId || handoffTarget!.id, 'project')}>{handoffTarget?.code || 'Открыть'} · {handoffTarget?.name || 'Подготовка объекта'}</Link></p><small>Передача в подготовку не считается подписанным договором.</small></div>}
-          <div className="entity-detail-section"><span className="eyebrow">Текущий этап</span><div className="stage-choice">{stageOrder.map((stage) => <button type="button" key={stage} disabled={handoffBusy} className={selected.stage === stage ? 'active' : ''} onClick={() => updateLead(selected.id, { stage })}>{stage === 'won' && selected.stage !== 'won' ? selected.projectId ? 'Проверить договор' : 'Договор → подготовить проект' : stageLabels[stage]}</button>)}</div></div>
+          <LeadQualificationForm people={people} objects={state.orderRelations?.objects} key={selected.id} lead={selected} onSave={patch => updateLead(selected.id, { ...patch, qualification: { ...patch.qualification, updatedAt: new Date().toISOString(), updatedBy: actor } })} />
+          {(selected.projectId || handoffTarget) && <div className="entity-detail-section"><strong>Связанный проект</strong><p><Link to={workspacePath(selected.projectId || handoffTarget!.id, 'project')}>{handoffTarget?.code || 'Открыть'} · {handoffTarget?.name || 'Подготовка объекта'}</Link></p></div>}
+          <div className="entity-detail-section"><span className="eyebrow">Статус заявки</span><h3>{stageLabels[selected.stage]}</h3>{selected.stageEnteredAt && <small>В этом статусе с {formatDateTime(selected.stageEnteredAt)}</small>}{selected.stage === 'new' && <p>Через календарный месяц без смены статуса заявка перейдёт в отложенный спрос.</p>}<div className="stage-choice">{stageOrder.map((stage) => <button type="button" key={stage} disabled={handoffBusy} className={selected.stage === stage ? 'active' : ''} onClick={() => updateLead(selected.id, { stage })}>{stageLabels[stage]}</button>)}</div></div>
           <div className="entity-detail-section"><span className="eyebrow">Следующий шаг</span><h3>{selected.nextAction}</h3><p>{selected.nextActionAt ? formatDateTime(selected.nextActionAt) : 'Срок не задан'} · {selected.notes ?? 'Комментариев пока нет'}</p></div>
-          <div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => window.location.href = `tel:${selected.phone.replace(/\s/g, '')}`}><Phone size={17} /> Позвонить</button>{!['won', 'lost'].includes(selected.stage) && <button type="button" className="button button--primary" disabled={handoffBusy} onClick={() => advanceLead(selected)}>{handoffBusy ? 'Создаём проект…' : selected.stage === 'negotiation' ? 'Передать в проект' : selected.stage === 'preparation' ? 'Проверить договор' : 'Следующий этап'} <ArrowRight size={17} /></button>}</div>
+          <div className="modal__actions"><button type="button" className="button button--secondary" onClick={() => window.location.href = `tel:${selected.phone.replace(/\s/g, '')}`}><Phone size={17} /> Позвонить</button>{!['escrow_funded', 'lost', 'deferred'].includes(selected.stage) && <button type="button" className="button button--primary" disabled={handoffBusy} onClick={() => updateLead(selected.id, { stage: nextSalesStage(selected.stage) })}>{handoffBusy ? 'Проверяем…' : selected.stage === 'qualified' ? 'Передать в расчёт' : 'Следующий статус'} <ArrowRight size={17} /></button>}</div>
         </Modal>
       )}
     </div>

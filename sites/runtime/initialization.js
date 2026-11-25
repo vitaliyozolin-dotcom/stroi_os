@@ -68,6 +68,7 @@ export const ensureSchema = async (db) => {
           status TEXT NOT NULL
         )
       `).run(),
+      db.prepare(`CREATE TABLE IF NOT EXISTS lead_status_clock (lead_id TEXT PRIMARY KEY, entered_at TEXT NOT NULL)`).run(),
       db.prepare(`
         CREATE TABLE IF NOT EXISTS public_lead_rate_limits (
           key TEXT NOT NULL,

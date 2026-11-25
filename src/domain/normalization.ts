@@ -1,3 +1,5 @@
+import { migrateLifecycle } from './project-lifecycle.js';
+import { migrateLead } from './sales-workflow.js';
 import type { AppState } from '../entities/index';
 import { normalizeOrderRelations } from './order-relations.js';
 
@@ -11,6 +13,7 @@ export const normalizeAppStateWithFallback = (state: AppState, fallback: AppStat
 
   return {
     ...state,
+    project: state.project.lifecycle ? { ...state.project, lifecycle: migrateLifecycle(state.project.lifecycle) } : state.project,
     ...(state.orderRelations === undefined ? {} : { orderRelations: normalizeOrderRelations(state.orderRelations) }),
     budgetMeta: state.budgetMeta ?? fallback.budgetMeta,
     procurement: state.procurement.map((item) => ({
@@ -20,7 +23,7 @@ export const normalizeAppStateWithFallback = (state: AppState, fallback: AppStat
     })),
     counterparties: Array.isArray(state.counterparties) ? state.counterparties : fallback.counterparties,
     supplierQuotes: Array.isArray(state.supplierQuotes) ? state.supplierQuotes : fallback.supplierQuotes,
-    leads: Array.isArray(state.leads) ? state.leads : fallback.leads,
+    leads: (Array.isArray(state.leads) ? state.leads : fallback.leads).map(lead => migrateLead(lead, new Date().toISOString(), state.activity)),
     tasks: (Array.isArray(state.tasks)
       ? state.tasks
       : state.project.id === fallback.project.id

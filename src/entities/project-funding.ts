@@ -1,5 +1,7 @@
 export interface FundingEvidence {
   amountCents: number;
+  bankAmountCents?: number;
+  maternityAmountCents?: number;
   date: string;
   source: string;
   documentId?: string;

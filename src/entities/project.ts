@@ -27,6 +27,8 @@ export interface HouseProject {
   baseline?: PlanBaseline;
   planHistory?: PlanChange[];
   planChangeReason?: string;
+  leadOwner?: string;
+  projectManager?: string;
   foreman: string;
   cameraStatus: 'online' | 'offline';
   cameraUrl?: string;

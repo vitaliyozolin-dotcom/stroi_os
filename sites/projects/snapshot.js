@@ -1,3 +1,5 @@
+import { normalizeSalesState } from '../leads/funnel.js';
+
 export const readSnapshot = async (db, projectId) => {
   const row = await db.prepare(`
     SELECT project_id, state_json, revision, updated_at, updated_by, updated_role
@@ -8,7 +10,7 @@ export const readSnapshot = async (db, projectId) => {
 
   return {
     projectId: row.project_id,
-    state: JSON.parse(row.state_json),
+    state: normalizeSalesState(JSON.parse(row.state_json), new Date().toISOString()),
     revision: Number(row.revision),
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
