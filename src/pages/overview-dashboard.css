@@ -231,3 +231,31 @@
   }
   .app-shell--overview .page-container > .help-fab-wrap .help-fab--feedback span { display: inline; }
 }
+
+@media (max-width: 600px) {
+  .overview-page .launch-summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+  .app-shell .page-container .overview-page .launch-summary .button {
+    grid-column: auto;
+    padding-inline: 8px;
+    white-space: nowrap;
+  }
+  .overview-page .launch-summary .button svg { display: none; }
+  .overview-page .overview-planned-work { padding-block: 0; }
+  .overview-page .overview-planned-work > summary { min-height: 44px; align-content: center; }
+  .overview-page .overview-finance { padding-bottom: 0; }
+  .overview-finance-list { margin: 0; }
+  .overview-finance-list > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
+  }
+  .overview-finance-list dt { min-width: 0; }
+  .overview-finance-list dt small { display: block; color: var(--muted); }
+  .overview-finance-list dd { margin: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+}

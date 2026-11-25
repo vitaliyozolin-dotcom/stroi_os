@@ -53,7 +53,7 @@ export function ProjectDashboardTimeline({ state, onNavigate }: Props) {
   </section>;
 }
 
-export function OverviewWorkCards({ state, role, show, onNavigate, onPreparationStep, afterTasks }: Props & { show: (widget: DashboardWidget) => boolean; onPreparationStep: (key: string) => void; afterTasks?: ReactNode }) {
+export function OverviewWorkCards({ state, role, show, onNavigate, onPreparationStep, afterTasks, compact = false }: Props & { show: (widget: DashboardWidget) => boolean; onPreparationStep: (key: string) => void; afterTasks?: ReactNode; compact?: boolean }) {
   const today = useScheduleToday();
   const lifecycle = state.project.lifecycle;
   const preparing = lifecycle?.phase === 'preparation' && !lifecycle.legacyReview;
@@ -63,7 +63,8 @@ export function OverviewWorkCards({ state, role, show, onNavigate, onPreparation
   const currentTasks = preparing ? tasks.filter(task => !task.stageId) : tasks;
   const plannedTasks = preparing ? tasks.filter(task => task.stageId) : [];
   const taskRow = (task: AppState['tasks'][number], planned = false) => <button type="button" className="overview-work-row" key={task.id} onClick={() => onNavigate('tasks', task.id)}>
-    <strong>{task.title}</strong><small className={!planned && task.dueDate && task.dueDate < today ? 'danger-text' : ''}>{task.dueDate ? `${!planned && task.dueDate < today ? 'Просрочено · ' : ''}${formatDate(task.dueDate)}` : 'Срок не назначен'} · {task.assigneeName || 'Назначить ответственного'}</small>
+    <strong>{task.title}</strong>
+    {(!compact || task.dueDate || task.assigneeName) && <small className={!planned && task.dueDate && task.dueDate < today ? 'danger-text' : ''}>{[task.dueDate ? `${!planned && task.dueDate < today ? 'Просрочено · ' : ''}${formatDate(task.dueDate)}` : !compact && 'Срок не назначен', task.assigneeName || (!compact && 'Назначить ответственного')].filter(Boolean).join(' · ')}</small>}
   </button>;
   const supplies = state.procurement.filter(item => !['accepted', 'issued'].includes(item.status))
     .sort((a, b) => (a.expectedDeliveryDate || a.neededBy || '9999').localeCompare(b.expectedDeliveryDate || b.neededBy || '9999'));
@@ -75,14 +76,14 @@ export function OverviewWorkCards({ state, role, show, onNavigate, onPreparation
   const qualityLabels = { pending: 'Ожидает отчёта', in_review: 'На проверке', rework: 'Нужна доработка', accepted: 'Принято' };
   const docLabels = { draft: 'Черновик', current: 'Актуальный', signed: 'Подписан' };
   return <section className="overview-work-grid" aria-label="Ближайшая работа по проекту">
-    {role !== 'client' && show('tasks') && <article className="panel overview-work-card overview-work-card--tasks"><header className="overview-block-heading"><ListTodo size={18} aria-hidden="true" /><h2>Ближайшие действия</h2><span>{pendingSteps.length + currentTasks.length + (role === 'management' && awaiting ? 1 : 0)}</span></header>
+    {role !== 'client' && show('tasks') && <article className="panel overview-work-card overview-work-card--tasks"><header className="overview-block-heading"><ListTodo size={18} aria-hidden="true" /><h2>Ближайшие действия</h2> {compact ? <button type="button" className="text-button" onClick={() => onNavigate('tasks')} aria-label="Все задачи">Все <ArrowUpRight size={14} /></button> : <span>{pendingSteps.length + currentTasks.length + (role === 'management' && awaiting ? 1 : 0)}</span>}</header>
       {role === 'management' && awaiting && <button type="button" className="overview-work-row" onClick={() => onNavigate('schedule', awaiting.id)}><strong>Принять: {awaiting.shortName || awaiting.name}</strong><small>Работа передана на проверку</small></button>}
       {pendingSteps.slice(0, 3).map(key => {
         const definition = lifecycleDefinitions.find(item => item.key === key);
         const item = lifecycle?.items.find(row => row.key === key);
         return <button type="button" className="overview-work-row" key={key} onClick={() => onPreparationStep(key)}>
           <strong>{definition?.title || key}</strong>
-          <small className={item?.planEnd && item.planEnd < today ? 'danger-text' : ''}>{item?.owner || 'Назначить ответственного'} · {item?.planEnd ? formatDate(item.planEnd) : 'Срок не назначен'}</small>
+          {(!compact || item?.owner || item?.planEnd) && <small className={item?.planEnd && item.planEnd < today ? 'danger-text' : ''}>{[item?.owner || (!compact && 'Назначить ответственного'), item?.planEnd ? formatDate(item.planEnd) : !compact && 'Срок не назначен'].filter(Boolean).join(' · ')}</small>}
         </button>;
       })}
       {currentTasks.slice(0, Math.max(0, 3 - pendingSteps.length - (awaiting && role === 'management' ? 1 : 0))).map(task => taskRow(task))}
@@ -91,7 +92,7 @@ export function OverviewWorkCards({ state, role, show, onNavigate, onPreparation
       {plannedTasks.length > 0 && <details className="overview-planned-work"><summary>Запланировано после допуска · {plannedTasks.length}</summary>
         {plannedTasks.slice(0, 3).map(task => taskRow(task, true))}
       </details>}
-      <button type="button" className="text-button overview-work-link" onClick={() => onNavigate('tasks')}>Канбан задач <ArrowUpRight size={16} /></button></article>}
+      {!compact && <button type="button" className="text-button overview-work-link" onClick={() => onNavigate('tasks')}>Канбан задач <ArrowUpRight size={16} /></button>}</article>}
     {afterTasks}
     {role !== 'client' && show('supply') && <article className="panel overview-work-card overview-work-card--supply"><header className="overview-block-heading"><PackageSearch size={18} aria-hidden="true" /><h2>Поставки</h2><span>{supplies.length}</span></header>
       {preparing && supplies.length > 0 && <p className="overview-work-empty">Закупки и поставки можно планировать до допуска</p>}
