@@ -5,10 +5,11 @@ import { normalizeClientAddress } from '../sites/lib/validation.js';
 export const ACCESS_SESSION_COOKIE = 'stroios_session';
 export const ACCESS_SESSION_TTL_MS = 12 * 60 * 60_000;
 export const ACCESS_SESSION_IDLE_MS = 60 * 60_000;
+const REMEMBERED_SESSION_TTL_MS = 90 * 24 * 60 * 60_000;
 export const ACCESS_INVITE_TTL_MS = 7 * 24 * 60 * 60_000;
 export const ACCESS_RESET_TTL_MS = 60 * 60_000;
 export const ACCESS_BODY_LIMIT = 16 * 1024;
-export const ACCESS_SCHEMA_VERSION = 2;
+export const ACCESS_SCHEMA_VERSION = 3;
 
 const scrypt = promisify(scryptCallback);
 const PASSWORD_MIN_LENGTH = 15;
@@ -132,7 +133,7 @@ const accessSchema = [
     auth_user_id TEXT REFERENCES auth_users(id) ON DELETE CASCADE,
     principal_email TEXT NOT NULL, principal_name TEXT NOT NULL, is_owner BOOLEAN NOT NULL,
     created_at TEXT NOT NULL, expires_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, revoked_at TEXT,
-    ip_hash TEXT, user_agent_hash TEXT
+    ip_hash TEXT, user_agent_hash TEXT, remembered BOOLEAN NOT NULL DEFAULT FALSE
   )`,
   `CREATE TABLE IF NOT EXISTS auth_login_limits (
     key_hash TEXT PRIMARY KEY, attempts INTEGER NOT NULL, window_started_at TEXT NOT NULL,
@@ -211,6 +212,9 @@ export class UserAccessService {
         );
         await client.query('DELETE FROM auth_login_limits');
       }
+      if (previousVersion < 3) {
+        await client.query('ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS remembered BOOLEAN NOT NULL DEFAULT FALSE');
+      }
       await client.query(`
         INSERT INTO system_meta (key,value,updated_at) VALUES ('auth_schema_version',$1,$2)
         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=EXCLUDED.updated_at
@@ -253,36 +257,38 @@ export class UserAccessService {
     }
   }
 
-  cookie(token) {
+  cookie(token, maxAgeMs) {
     const secure = this.secureCookie ? '; Secure' : '';
-    return `${ACCESS_SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(this.sessionTtlMs / 1000)}${secure}`;
+    const lifetime = maxAgeMs === undefined ? '' : `; Max-Age=${Math.floor(maxAgeMs / 1000)}`;
+    return `${ACCESS_SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax${lifetime}${secure}`;
   }
 
   clearCookie() {
-    const secure = this.secureCookie ? '; Secure' : '';
-    return `${ACCESS_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
+    return this.cookie('', 0);
   }
 
   tokenFromRequest(request) {
     return parseCookieHeader(request.headers.get('cookie'))[ACCESS_SESSION_COOKIE] || '';
   }
 
-  async createSession(identity, { ip = '', userAgent = '' } = {}, client = this.pool) {
+  async createSession(identity, { ip = '', userAgent = '', rememberDevice = false } = {}, client = this.pool) {
     const token = randomBytes(32).toString('base64url');
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + this.sessionTtlMs);
+    const ttlMs = rememberDevice ? REMEMBERED_SESSION_TTL_MS : this.sessionTtlMs;
+    const expiresAt = new Date(now.getTime() + ttlMs);
     await client.query(`
       INSERT INTO auth_sessions (
         id, token_hash, auth_user_id, principal_email, principal_name, is_owner,
-        created_at, expires_at, last_seen_at, revoked_at, ip_hash, user_agent_hash
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$7,NULL,$9,$10)
+        created_at, expires_at, last_seen_at, revoked_at, ip_hash, user_agent_hash, remembered
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$7,NULL,$9,$10,$11)
     `, [
       randomUUID(), hashAccessToken(token), identity.accountId || null,
       identity.email, identity.name, Boolean(identity.isOwner), now.toISOString(), expiresAt.toISOString(),
       ip ? hashAccessToken(`ip:${ip}`) : null,
       userAgent ? hashAccessToken(`ua:${userAgent}`) : null,
+      rememberDevice,
     ]);
-    return { token, identity };
+    return { token, identity, cookie: this.cookie(token, rememberDevice ? ttlMs : undefined) };
   }
 
   async fromRequest(request) {
@@ -294,7 +300,8 @@ export class UserAccessService {
       SELECT s.auth_user_id, s.principal_email, s.principal_name, s.is_owner
       FROM auth_sessions s
       LEFT JOIN auth_users u ON u.id = s.auth_user_id
-      WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2 AND s.last_seen_at > $3
+      WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2
+        AND (s.remembered OR s.last_seen_at > $3)
         AND (s.is_owner = TRUE OR (
           u.status = 'active' AND EXISTS (
             SELECT 1 FROM auth_memberships m WHERE m.auth_user_id = u.id AND m.status = 'active'

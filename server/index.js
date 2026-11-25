@@ -326,39 +326,43 @@ const server = createServer(async (incoming, outgoing) => {
     if (url.pathname === '/api/auth/login' && request.method === 'POST') {
       if (!hasValidOrigin(request)) return writeResponse(outgoing, new Response('Forbidden', { status: 403 }));
       let username = '';
+      let rememberDevice = false;
       try {
         const form = await readFormLimited(request);
+        rememberDevice = form.get('rememberDevice') === '1';
         username = String(form.get('username') || '').trim();
         const password = String(form.get('password') || '');
         const session = await userAccess.authenticate(username, password, {
-          ip: clientKey(incoming), userAgent: request.headers.get('user-agent') || '',
+          ip: clientKey(incoming), userAgent: request.headers.get('user-agent') || '', rememberDevice,
         });
-        return writeResponse(outgoing, redirect('/', { 'Set-Cookie': userAccess.cookie(session.token) }));
+        return writeResponse(outgoing, redirect('/', { 'Set-Cookie': session.cookie }));
       } catch (error) {
         const blocked = error instanceof AccessError && error.code === 'rate_limited';
         const status = error instanceof AccessError ? error.status : 500;
         const extra = blocked ? { 'Retry-After': String(error.retryAfter || 900) } : {};
-        return writeResponse(outgoing, htmlResponse(loginPage({ username, error: 'invalid', blocked }), status, extra));
+        return writeResponse(outgoing, htmlResponse(loginPage({ username, error: 'invalid', blocked, rememberDevice }), status, extra));
       }
     }
 
     if (url.pathname === '/api/auth/activate' && request.method === 'POST') {
       if (!hasValidOrigin(request)) return writeResponse(outgoing, new Response('Forbidden', { status: 403 }));
       let token = '';
+      let rememberDevice = false;
       try {
         const form = await readFormLimited(request);
+        rememberDevice = form.get('rememberDevice') === '1';
         token = String(form.get('token') || '');
         const password = String(form.get('password') || '');
         const passwordConfirm = String(form.get('passwordConfirm') || '');
         const session = await userAccess.activate(token, password, passwordConfirm, {
-          ip: clientKey(incoming), userAgent: request.headers.get('user-agent') || '',
+          ip: clientKey(incoming), userAgent: request.headers.get('user-agent') || '', rememberDevice,
         });
-        return writeResponse(outgoing, redirect('/', { 'Set-Cookie': userAccess.cookie(session.token) }));
+        return writeResponse(outgoing, redirect('/', { 'Set-Cookie': session.cookie }));
       } catch (error) {
         if (error instanceof AccessError && ['weak_password', 'password_mismatch'].includes(error.code)) {
           try {
             const invite = await userAccess.inspectToken(token);
-            return writeResponse(outgoing, htmlResponse(activationPage({ token, invite, error: error.code }), error.status));
+            return writeResponse(outgoing, htmlResponse(activationPage({ token, invite, error: error.code, rememberDevice }), error.status));
           } catch { /* Ссылка стала недействительной между проверкой и отправкой формы. */ }
         }
         return writeResponse(outgoing, htmlResponse(invalidActivationPage(), error instanceof AccessError ? error.status : 500));

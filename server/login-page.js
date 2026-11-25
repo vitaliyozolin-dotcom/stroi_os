@@ -1,3 +1,5 @@
+import { rememberDeviceField, rememberDeviceStyles } from './remember-device-field.js';
+
 const escapeHtml = (value) => String(value)
   .replaceAll('&', '&amp;')
   .replaceAll('<', '&lt;')
@@ -5,7 +7,7 @@ const escapeHtml = (value) => String(value)
   .replaceAll('"', '&quot;')
   .replaceAll("'", '&#039;');
 
-export const loginPage = ({ username = '', error = '', blocked = false, notice = '' } = {}) => `<!doctype html>
+export const loginPage = ({ username = '', error = '', blocked = false, notice = '', rememberDevice = true } = {}) => `<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
@@ -49,6 +51,7 @@ export const loginPage = ({ username = '', error = '', blocked = false, notice =
     @media(max-width:760px) and (max-height:700px){.identity{padding-top:max(20px,env(safe-area-inset-top));padding-bottom:20px}.mobile-note{margin-top:12px}.entry{padding-top:26px}.eyebrow{margin-bottom:14px}.intro{margin-bottom:22px}.foot{margin-top:24px}}
     .brand .mark{background:transparent;border-radius:0}.brand .mark img{display:block;width:32px;height:38px;object-fit:contain}.brand{letter-spacing:0}.brand em{color:#e77c38}
     @media(max-width:760px){.brand .mark img{width:28px;height:34px}}
+    ${rememberDeviceStyles}
   </style>
 </head>
 <body>
@@ -73,6 +76,7 @@ export const loginPage = ({ username = '', error = '', blocked = false, notice =
       <form method="post" action="/api/auth/login">
         <div class="field"><label for="username">Email</label><input id="username" name="username" type="text" value="${escapeHtml(username)}" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="name@company.ru" required></div>
         <div class="field"><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+        ${rememberDeviceField(rememberDevice)}
         <button class="submit" type="submit"><span>Войти</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></button>
       </form>
       <p class="help">Нет доступа? Обратитесь к администратору проекта.</p>
