@@ -183,8 +183,6 @@
   .overview-page .overview-block-heading > span { background: var(--surface-soft); color: var(--ink); }
   .app-shell .page-container .overview-money .metric-card { border-radius: 0; padding: 8px; }
   .overview-page .overview-money .metric-card:not(.metric-card--warning) { background: var(--surface); }
-  .overview-page .launch-summary { padding: 10px; column-gap: 12px; }
-  .overview-page .launch-summary__number { font-size: 22px; }
   .overview-page .construction-now__mobile-toggle {
     display: flex;
     justify-content: space-between;
@@ -220,8 +218,11 @@
 @media (max-width: 600px) {
   .overview-page .launch-summary {
     grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 6px 10px;
+    gap: 8px 10px;
+    padding: 16px 10px;
   }
+  .overview-page .launch-summary__number { font-size: 26px; }
+  .app-shell .page-container .overview-page .launch-summary h2 { font-size: 18px; }
   .app-shell .page-container .overview-page .launch-summary .button {
     grid-column: auto;
     padding-inline: 8px;
