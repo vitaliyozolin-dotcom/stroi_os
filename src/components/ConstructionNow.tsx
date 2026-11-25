@@ -11,7 +11,7 @@ import { PreparationWizard } from './PreparationWizard';
 import { Modal } from './Ui';
 import { stageStatusLabel } from '../presentation/status-labels';
 
-export function ConstructionNow({ state, role, actor, userId, onChange, onNavigate, preparationStep, onPreparationStep }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; preparationStep: string | null; onPreparationStep: (key: string | null) => void }) {
+export function ConstructionNow({ state, role, actor, userId, onChange, onNavigate, preparationStep, onPreparationStep, compact = false, showNextStep = true }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; preparationStep: string | null; onPreparationStep: (key: string | null) => void; compact?: boolean; showNextStep?: boolean }) {
   const stagesId = useId();
   const [stagesExpanded, setStagesExpanded] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
@@ -30,9 +30,9 @@ export function ConstructionNow({ state, role, actor, userId, onChange, onNaviga
       <span className="launch-summary__number">00</span>
       <div><h2>До стройки</h2>
         <p>{preparation.completed} из {preparation.total} подтверждено</p>
-        {nextStep && <p>{nextStep.title} · {nextItem?.owner || 'Назначить ответственного'}{nextItem?.planEnd ? ` · до ${formatDate(nextItem.planEnd)}` : ''}</p>}
+        {nextStep && showNextStep && <p>{nextStep.title} · {nextItem?.owner || 'Назначить ответственного'}{nextItem?.planEnd ? ` · до ${formatDate(nextItem.planEnd)}` : ''}</p>}
       </div>
-      <button className="button button--light" type="button" onClick={() => onPreparationStep(nextStep?.key || 'brief')}>Открыть чек-лист <ArrowUpRight size={14} /></button>
+      <button className="button button--light" type="button" onClick={() => onPreparationStep(nextStep?.key || 'brief')}>{compact ? 'Чек-лист' : 'Открыть чек-лист'} <ArrowUpRight size={14} /></button>
       <progress value={preparation.completed} max={preparation.total || 1} aria-label="Готовность к строительству" />
     </div> : <div className={`construction-now__body${hasPhoto ? "" : " construction-now__body--no-photo"}`}>
       {hasPhoto && <button type="button" className="construction-now__photo" onClick={() => onNavigate('project')} aria-label="Открыть полевой дневник объекта">
@@ -62,7 +62,7 @@ export function ConstructionNow({ state, role, actor, userId, onChange, onNaviga
           <span className="construction-stage__line" /><span className="construction-stage__point">{launchLocked && index === 0 ? <LockKeyhole size={13} /> : stage.status === 'accepted' ? <Check size={12} /> : String(index + 1).padStart(2, '0')}</span><span className="construction-stage__name">{stage.shortName || stage.name}</span>
         </button></li>)}
       </ol>
-      {launchLocked && <p className="launch-hint">Этап 01 доступен после закрытия этапа 00</p>}
+      {launchLocked && <p className="launch-hint">{compact ? 'Подготовка после допуска' : 'Этап 01 доступен после закрытия этапа 00'}</p>}
       <div className="construction-now__legend"><span>Начало</span><span>{view.accepted} из {view.stages.length} приняты · выделены активные</span><span>Завершение</span></div>
     </>}
     {preparationStep && <Modal side title="00 · До стройки" onClose={() => onPreparationStep(null)}>
