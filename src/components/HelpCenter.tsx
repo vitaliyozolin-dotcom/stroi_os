@@ -5,7 +5,7 @@ import {
   HelpCircle, ListTodo, Megaphone, MessageSquareWarning, PackageSearch, Send, Settings2,
   ShieldCheck, X,
 } from 'lucide-react';
-import type { PageId } from '../presentation/navigation';
+import { pageLabel, pageLabels, type PageId } from '../presentation/navigation';
 import { Field, Modal } from './Ui';
 
 type TourStep = { page?: PageId; selector: string; title: string; text: string; openProjects?: boolean };
@@ -14,6 +14,7 @@ type FeedbackItem = { id: string; createdAt: string; createdBy: string; page: st
 
 const COMPLETED_KEY = 'stroios.help.completed.v2';
 const DISMISSED_KEY = 'stroios.help.dismissed.v2';
+const emptyFeedback = { category: 'Ошибка', title: '', details: '' };
 
 const topics: Topic[] = [
   { id: 'project', title: 'Проекты и карточка дома', text: 'Создание объекта, документы, команда и исходные данные.', icon: FolderPlus, steps: [
@@ -50,7 +51,17 @@ const topics: Topic[] = [
   ] },
 ];
 
-export function HelpCenter({ projectId, currentPage, onNavigate, onOpenProjects, onCloseProjects, onOpenQuestions }: { onOpenQuestions: () => void; projectId: string; currentPage: PageId; onNavigate: (page: PageId) => void; onOpenProjects: () => void; onCloseProjects: () => void }) {
+interface HelpCenterProps {
+  projectId: string;
+  currentPage: PageId;
+  pages: PageId[];
+  onNavigate: (page: PageId) => void;
+  onOpenProjects: () => void;
+  onCloseProjects: () => void;
+  onOpenQuestions: () => void;
+}
+
+export function HelpCenter({ projectId, currentPage, pages, onNavigate, onOpenProjects, onCloseProjects, onOpenQuestions }: HelpCenterProps) {
   const [open, setOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [welcome, setWelcome] = useState(() => window.localStorage.getItem('stroios.help.seen.v1') !== 'yes');
@@ -61,12 +72,12 @@ export function HelpCenter({ projectId, currentPage, onNavigate, onOpenProjects,
   const [tour, setTour] = useState<Topic | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
-  const [feedback, setFeedback] = useState({ category: 'Ошибка', title: '', details: '' });
+  const [feedback, setFeedback] = useState({ ...emptyFeedback, page: currentPage });
+  const [sending, setSending] = useState(false);
   const [feedbackItems, setFeedbackItems] = useState<FeedbackItem[]>([]);
   const [feedbackStatus, setFeedbackStatus] = useState('');
   const step = tour?.steps[stepIndex];
   const trainingFinished = completed.length >= topics.length;
-  const showFeedbackFab = dismissed || trainingFinished;
 
   const activate = (topic: Topic, index = 0) => {
     const next = topic.steps[index];
@@ -117,32 +128,82 @@ export function HelpCenter({ projectId, currentPage, onNavigate, onOpenProjects,
     activate(tour, stepIndex + 1);
   };
 
+  const openFeedback = () => {
+    closeWelcome();
+    setFeedbackStatus('');
+    setFeedback((draft) => draft.title || draft.details ? draft : { ...draft, page: currentPage });
+    setFeedbackOpen(true);
+  };
+
   const submitFeedback = async (event: FormEvent) => {
     event.preventDefault();
-    if (!feedback.title.trim() || !feedback.details.trim()) return;
-    setFeedbackStatus('Отправляем…');
+    if (sending || !feedback.title.trim() || !feedback.details.trim()) return;
+    setSending(true);
+    setFeedbackStatus('');
     try {
-      const response = await requestApi('/api/developer-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ projectId, page: currentPage, ...feedback }) });
+      const response = await requestApi('/api/developer-feedback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ projectId, ...feedback }),
+      });
       const body = await response.json() as { item?: FeedbackItem; error?: string };
       if (!response.ok || !body.item) throw new Error(body.error ?? 'request_failed');
       setFeedbackItems((items) => [body.item!, ...items]);
-      setFeedback({ category: 'Ошибка', title: '', details: '' });
+      setFeedback({ ...emptyFeedback, page: currentPage });
       setFeedbackStatus('Правка сохранена и видна разработчику.');
     } catch {
       setFeedbackStatus('Не удалось сохранить. Проверьте соединение и повторите.');
+    } finally {
+      setSending(false);
     }
   };
 
   return <>
-    {welcome && !open && !tour && !showFeedbackFab && <div className="help-welcome"><button type="button" onClick={dismissTraining} aria-label="Закрыть обучение"><X size={15} /></button><strong>Я помогу освоиться</strong><p>Покажу ключевые процессы: от заявки и сметы до поставки, качества и уведомлений.</p><button type="button" className="text-button" onClick={() => { closeWelcome(); setOpen(true); }}>Открыть обучение</button></div>}
+    {welcome && !open && !tour && !feedbackOpen && !dismissed && !trainingFinished && <div className="help-welcome"><button type="button" onClick={dismissTraining} aria-label="Закрыть обучение"><X size={15} /></button><strong>Я помогу освоиться</strong><p>Покажу ключевые процессы: от заявки и сметы до поставки, качества и уведомлений.</p><button type="button" className="text-button" onClick={() => { closeWelcome(); setOpen(true); }}>Открыть обучение</button></div>}
     <div className="help-fab-wrap">
-      {!showFeedbackFab && <button type="button" className="help-fab-dismiss" aria-label="Закрыть обучение и открыть правки разработчику" onClick={dismissTraining}><X size={13} /></button>}
-      <button type="button" className={`help-fab ${showFeedbackFab ? 'help-fab--feedback' : ''}`} aria-label={showFeedbackFab ? 'Правки разработчику' : 'Обучение'} onClick={() => { closeWelcome(); showFeedbackFab ? setFeedbackOpen(true) : setOpen(true); }}>
-        {showFeedbackFab ? <><MessageSquareWarning size={20} /><span>Правки</span></> : <HelpCircle size={24} />}
+      <button type="button" className="help-fab help-fab--feedback" aria-label="Правки разработчику" aria-haspopup="dialog" onClick={openFeedback}>
+        <MessageSquareWarning size={20} aria-hidden="true" /><span>Правки</span>
       </button>
     </div>
-    {open && <Modal title="Обучение ИКИОМА ОС" subtitle={`${completed.length} из ${topics.length} разделов пройдено. Можно закрыть обучение — на его месте появятся «Правки».`} onClose={() => setOpen(false)}><div className="help-topics"><button type="button" onClick={() => { setOpen(false); onOpenQuestions(); }}><span><HelpCircle size={21} /></span><div><strong>Вопросы и подсказки</strong><p>Ответы по расходам и реестр вопросов для будущих подсказок.</p></div><ChevronRight size={18} /></button>{topics.map((topic) => { const Icon = topic.icon; const done = completed.includes(topic.id); return <button type="button" key={topic.id} onClick={() => activate(topic)}><span>{done ? <Check size={21} /> : <Icon size={21} />}</span><div><strong>{topic.title}</strong><p>{topic.text}</p></div><ChevronRight size={18} /></button>; })}<article><span><BookOpen size={21} /></span><div><strong>Главное правило ИКИОМА ОС</strong><p>Каждая сумма и дата должны иметь основание: этап, заказ, приёмку и документ.</p></div></article><button type="button" className="help-dismiss-row" onClick={dismissTraining}><span><X size={20} /></span><div><strong>Закрыть обучение</strong><p>Вместо него появится раздел «Правки разработчику».</p></div><ChevronRight size={18} /></button></div></Modal>}
-    {feedbackOpen && <Modal title="Правки разработчику" subtitle="Правки сохраняются в серверной очереди ИКИОМА ОС. Разработчик видит проект, раздел, автора и время отправки." onClose={() => setFeedbackOpen(false)}><button type="button" className="button button--secondary" onClick={() => { setFeedbackOpen(false); onOpenQuestions(); }}>Вопросы и подсказки</button><form className="developer-feedback" onSubmit={submitFeedback}><div className="form-grid form-grid--2"><Field label="Тип"><select value={feedback.category} onChange={(event) => setFeedback((value) => ({ ...value, category: event.target.value }))}><option>Ошибка</option><option>Улучшение</option><option>Вопрос</option></select></Field><Field label="Раздел"><input value={currentPage} readOnly /></Field></div><Field label="Коротко"><input value={feedback.title} maxLength={160} required placeholder="Что нужно исправить" onChange={(event) => setFeedback((value) => ({ ...value, title: event.target.value }))} /></Field><Field label="Подробности"><textarea value={feedback.details} maxLength={3000} required rows={5} placeholder="Что произошло, что ожидали и как воспроизвести" onChange={(event) => setFeedback((value) => ({ ...value, details: event.target.value }))} /></Field><button type="submit" className="button button--primary"><Send size={16} /> Отправить разработчику</button>{feedbackStatus && <p className="developer-feedback__status">{feedbackStatus}</p>}</form>{feedbackItems.length > 0 && <section className="developer-feedback__history"><strong>Очередь для разработчика</strong>{feedbackItems.slice(0, 10).map((item) => <article key={item.id}><span>{item.category} · {item.status === 'new' ? 'новая' : item.status}</span><strong>{item.title}</strong><p>{item.details}</p><small>{item.createdBy} · раздел {item.page} · {new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(item.createdAt))}</small></article>)}</section>}</Modal>}
+    {open && <Modal title="Обучение ИКИОМА ОС" subtitle={`${completed.length} из ${topics.length} разделов пройдено.`} onClose={() => setOpen(false)}><div className="help-topics"><button type="button" onClick={() => { setOpen(false); onOpenQuestions(); }}><span><HelpCircle size={21} /></span><div><strong>Вопросы и подсказки</strong><p>Ответы по расходам и реестр вопросов для будущих подсказок.</p></div><ChevronRight size={18} /></button>{topics.map((topic) => { const Icon = topic.icon; const done = completed.includes(topic.id); return <button type="button" key={topic.id} onClick={() => activate(topic)}><span>{done ? <Check size={21} /> : <Icon size={21} />}</span><div><strong>{topic.title}</strong><p>{topic.text}</p></div><ChevronRight size={18} /></button>; })}<article><span><BookOpen size={21} /></span><div><strong>Главное правило ИКИОМА ОС</strong><p>Каждая сумма и дата должны иметь основание: этап, заказ, приёмку и документ.</p></div></article><button type="button" className="help-dismiss-row" onClick={dismissTraining}><span><X size={20} /></span><div><strong>Закрыть обучение</strong></div><ChevronRight size={18} /></button></div></Modal>}
+    {feedbackOpen && <Modal title="Правки разработчику" onClose={() => setFeedbackOpen(false)}>
+      <form className="developer-feedback" onSubmit={submitFeedback}>
+        <div className="form-grid form-grid--2">
+          <Field label="Тип">
+            <select value={feedback.category} onChange={(event) => setFeedback({ ...feedback, category: event.target.value })}>
+              <option>Ошибка</option><option>Улучшение</option><option>Вопрос</option>
+            </select>
+          </Field>
+          <Field label="Раздел">
+            <select value={feedback.page} onChange={(event) => setFeedback({ ...feedback, page: event.target.value as PageId })}>
+              {pages.map((id) => <option key={id} value={id}>{pageLabels[id]}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Коротко">
+          <input value={feedback.title} maxLength={160} required placeholder="Что нужно исправить" onChange={(event) => setFeedback({ ...feedback, title: event.target.value })} />
+        </Field>
+        <Field label="Подробности">
+          <textarea value={feedback.details} maxLength={3000} required rows={5} placeholder="Что произошло, что ожидали и как воспроизвести" onChange={(event) => setFeedback({ ...feedback, details: event.target.value })} />
+        </Field>
+        <button type="submit" className="button button--primary" disabled={sending}>
+          <Send size={16} /> {sending ? 'Отправляем…' : 'Отправить разработчику'}
+        </button>
+        {feedbackStatus && <p role="status" className="developer-feedback__status">{feedbackStatus}</p>}
+      </form>
+      <div className="modal__actions">
+        <button type="button" className="text-button" onClick={() => { setFeedbackOpen(false); onOpenQuestions(); }}>Вопросы и подсказки</button>
+        <button type="button" className="text-button" onClick={() => { setFeedbackOpen(false); setOpen(true); }}>Обучение</button>
+      </div>
+      {feedbackItems.length > 0 && <section className="developer-feedback__history">
+        <strong>Очередь для разработчика</strong>
+        {feedbackItems.slice(0, 10).map((item) => <article key={item.id}>
+          <span>{item.category} · {item.status === 'new' ? 'новая' : item.status}</span>
+          <strong>{item.title}</strong>
+          <p>{item.details}</p>
+          <small>{item.createdBy} · {pageLabel(item.page)} · {new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(item.createdAt))}</small>
+        </article>)}
+      </section>}
+    </Modal>}
     {tour && step && <div className="tour-layer"><button type="button" className="tour-scrim" aria-label="Закрыть обучение" onClick={() => setTour(null)} />{rect && <div className="tour-highlight" style={{ left: rect.left - 5, top: rect.top - 5, width: rect.width + 10, height: rect.height + 10 }} />}<section className="tour-callout" style={calloutStyle}><div className="tour-callout__progress">Шаг {stepIndex + 1} из {tour.steps.length}<button type="button" onClick={() => setTour(null)}><X size={16} /></button></div><h3>{step.title}</h3><p>{step.text}</p><div><button type="button" className="button button--ghost button--compact" disabled={stepIndex === 0} onClick={() => activate(tour, stepIndex - 1)}><ChevronLeft size={15} /> Назад</button><button type="button" className="button button--primary button--compact" onClick={next}>{stepIndex === tour.steps.length - 1 ? 'Готово' : 'Дальше'} <ChevronRight size={15} /></button></div></section></div>}
   </>;
 }

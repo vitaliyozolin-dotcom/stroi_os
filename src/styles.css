@@ -6479,23 +6479,6 @@ p {
   font-weight: 800;
 }
 
-.help-fab-dismiss {
-  position: absolute;
-  right: -5px;
-  top: -7px;
-  z-index: 2;
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  color: var(--forest);
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 3px 9px rgba(13, 61, 45, .16);
-  cursor: pointer;
-}
-
 .help-welcome {
   position: fixed;
   right: 24px;
@@ -8985,8 +8968,7 @@ button.project-quick-card:hover {
   .project-heading--overview { min-height:0; padding:18px; }
   .project-heading--overview h1 { font-size:1.75rem; line-height:1.15; margin-top:10px; }
   .project-heading--overview .project-heading__meta { flex-wrap:wrap; gap:6px 10px; }
-  .help-fab--feedback { width:44px; height:44px; padding:0; }
-  .help-fab--feedback span { display:none; }
+  .help-fab--feedback { height: 44px; padding-inline: 12px; }
 }
 @media (max-width:360px) {
   .baseline-metrics, .schedule-records__grid, .stage-radar__dates, .stage-radar__actions { grid-template-columns:1fr; }

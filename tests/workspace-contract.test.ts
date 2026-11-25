@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { allowedPages } from '../src/presentation/navigation.ts';
+import { allowedPages, pageLabel } from '../src/presentation/navigation.ts';
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -15,11 +15,15 @@ test('management workspace has a real profile logout and no client-cabinet navig
   assert.doesNotMatch(overview, /onNavigate\('client'\)/);
 });
 
-test('training can be dismissed and is replaced with developer feedback', () => {
+test('feedback is available independently of training and submits the chosen workspace section', () => {
   const help = source('src/components/HelpCenter.tsx');
 
-  assert.match(help, /aria-label="Закрыть обучение и открыть правки разработчику"/);
-  assert.match(help, /showFeedbackFab \? setFeedbackOpen\(true\) : setOpen\(true\)/);
+  assert.match(help, /aria-label="Правки разработчику"[^>]*onClick=\{openFeedback\}/);
+  assert.match(help, /select value=\{feedback\.page\}/);
+  assert.match(help, /JSON\.stringify\(\{ projectId, \.\.\.feedback \}\)/);
+  assert.equal(pageLabel('overview'), 'Главная');
+  assert.equal(pageLabel('finance'), 'Финансы');
+  assert.equal(pageLabel('Старый раздел'), 'Старый раздел');
   assert.ok(help.includes("requestApi('/api/developer-feedback'"));
   assert.ok(source('src/infrastructure/api-http.ts').includes('fetch(input, init)'));
   assert.match(help, /completed\.length >= topics\.length/);

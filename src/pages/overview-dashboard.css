@@ -218,21 +218,6 @@
 }
 
 @media (max-width: 600px) {
-  .app-shell--overview .page-container > .help-fab-wrap {
-    position: static;
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-    margin-top: 12px;
-  }
-  .app-shell--overview .page-container > .help-fab-wrap .help-fab--feedback {
-    width: auto;
-    padding-inline: 12px;
-  }
-  .app-shell--overview .page-container > .help-fab-wrap .help-fab--feedback span { display: inline; }
-}
-
-@media (max-width: 600px) {
   .overview-page .launch-summary {
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 6px 10px;
