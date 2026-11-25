@@ -182,12 +182,12 @@ export function TasksPage({
   const savePaymentPreview = showForm && editingTask && hasLinkedPayments(editingTask.id)
     ? previewTaskSave(state, { name: actor, role, id: session.id }, systemClock.now(), { taskId: editingTask.id, expected: openedTask, draft: form }) : null;
   const statusPaymentAction = selected?.status === 'done' ? 'in_progress'
-    : selected?.status === 'review' || selected?.status === 'in_progress' && !selected.reviewerId ? 'done' : null;
+    : selected?.status === 'review' || selected && ['todo', 'in_progress', 'waiting'].includes(selected.status) && !selected.reviewerId ? 'done' : null;
   const statusPaymentPreview = selected && statusPaymentAction && hasLinkedPayments(selected.id)
     ? previewTaskStatus(state, { name: actor, role, id: session.id }, systemClock.now(), {
       taskId: selected.id, expected: taskSnapshot(state, selected.id), status: statusPaymentAction,
       text: statusPaymentAction === 'done' ? 'Задача выполнена' : 'Задача открыта повторно',
-      extra: { completionNote: statusPaymentAction === 'done' ? completionNote.trim() || 'Выполнено ответственным' : undefined },
+      extra: { completionNote: statusPaymentAction === 'done' ? completionNote.trim() || undefined : undefined },
     }) : null;
 
   const openCreate = () => {
@@ -399,17 +399,18 @@ export function TasksPage({
             {selected.completionNote && <div className="task-result"><CheckCircle2 size={18} /><span><strong>Результат выполнения</strong><p>{selected.completionNote}</p></span></div>}
 
             {statusPaymentPreview && <section><p className="muted">{statusPaymentAction === 'done' ? 'Если закрыть задачу сегодня:' : 'Если открыть задачу повторно:'}</p><SchedulePaymentImpact before={state} preview={statusPaymentPreview} role={role} today={todayKey} /></section>}
+            {!['done', 'canceled'].includes(selected.status) && <Field label="Комментарий к выполнению (необязательно)"><input maxLength={3000} value={completionNote} onChange={event => setCompletionNote(event.target.value)} /></Field>}
             <div className="task-detail__actions">
               {role === 'management' && <button type="button" className="button button--secondary" onClick={() => openEdit(selected)}><Pencil size={16} /> Редактировать</button>}
               {selected.status === 'todo' && <button type="button" className="button button--primary" onClick={() => changeStatus(selected, 'in_progress', 'Задача взята в работу')}><Play size={16} /> Начать</button>}
               {selected.status === 'in_progress' && <button type="button" className="button button--secondary" disabled={!comment.trim()} onClick={() => changeStatus(selected, 'waiting', `Задача поставлена в ожидание: ${comment.trim()}`, { blockerReason: comment.trim() })}><CirclePause size={16} /> В ожидание</button>}
-              {selected.status === 'in_progress' && <button type="button" className="button button--primary" onClick={() => changeStatus(selected, selected.reviewerId ? 'review' : 'done', selected.reviewerId ? 'Результат отправлен на проверку' : 'Задача выполнена', selected.reviewerId ? {} : { completionNote: completionNote.trim() || 'Выполнено ответственным' })}><ShieldCheck size={16} /> {selected.reviewerId ? 'На проверку' : 'Выполнить'}</button>}
+              {['todo', 'in_progress', 'waiting'].includes(selected.status) && <button type="button" className="button button--primary" onClick={() => changeStatus(selected, selected.reviewerId ? 'review' : 'done', selected.reviewerId ? 'Результат отправлен на проверку' : 'Задача выполнена', { completionNote: completionNote.trim() || undefined, blockerReason: undefined })}><ShieldCheck size={16} /> {selected.reviewerId ? 'На проверку' : 'Готово'}</button>}
               {selected.status === 'waiting' && <button type="button" className="button button--primary" onClick={() => changeStatus(selected, 'in_progress', 'Работа по задаче возобновлена', { blockerReason: undefined })}><Play size={16} /> Возобновить</button>}
               {selected.status === 'review' && <button type="button" className="button button--secondary" onClick={() => changeStatus(selected, 'in_progress', 'Задача возвращена в работу')}><RotateCcw size={16} /> Вернуть в работу</button>}
               {selected.status === 'done' && role === 'management' && <button type="button" className="button button--secondary" onClick={() => changeStatus(selected, 'in_progress', 'Задача открыта повторно', { completionNote: undefined })}><RotateCcw size={16} /> Открыть снова</button>}
             </div>
 
-            {selected.status === 'review' && (role === 'management' || !selected.reviewerId) && <div className="task-completion"><Field label="Подтверждённый результат" hint="Без результата задача не считается закрытой"><textarea rows={2} value={completionNote} onChange={(event) => setCompletionNote(event.target.value)} placeholder="Что сделано, принято и где лежит подтверждение" /></Field><button type="button" className="button button--primary" disabled={!completionNote.trim()} onClick={() => changeStatus(selected, 'done', 'Задача принята и выполнена', { completionNote: completionNote.trim() })}><Check size={16} /> Принять и закрыть</button></div>}
+            {selected.status === 'review' && (role === 'management' || !selected.reviewerId) && <button type="button" className="button button--primary" onClick={() => changeStatus(selected, 'done', 'Задача принята и выполнена', { completionNote: completionNote.trim() || selected.completionNote })}><Check size={16} /> Принять и закрыть</button>}
 
             {selected.planHistory?.length ? <div className="baseline-history"><strong>Переносы плана</strong>{selected.planHistory.slice(-5).reverse().map((h, i) => <p key={i}>{h.before || '—'} → {h.after || '—'} · {h.reason}<small>{h.actor} · {formatDate(h.at.slice(0, 10))}</small></p>)}</div> : null}
             <div className="task-history-layout">

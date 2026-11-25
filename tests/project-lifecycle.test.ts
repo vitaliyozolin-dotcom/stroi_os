@@ -30,7 +30,7 @@ test('qualification requires only critical handoff data and allows searching for
   assert.ok(leadHandoffBlockers({ ...lead, mortgageStatus: 'unknown' }).length);
 });
 
-test('stage0 cannot be removed, bypassed by legacy flag, or made complete by contract price', () => {
+test('stage0 preserves its route and allows a completion mark without a note or attachment', () => {
   const before = fixture(); before.project.lifecycle = createLifecycle(now);
   let next = structuredClone(before); delete next.project.lifecycle;
   assert.match(validateLifecycleChanges(before, next, owner, now), /удалить/);
@@ -38,7 +38,10 @@ test('stage0 cannot be removed, bypassed by legacy flag, or made complete by con
   assert.match(validateLifecycleChanges(before, next, owner, now), /неизменяемы/);
   next = structuredClone(before); next.project.contractValue = 9500000;
   next.project.lifecycle!.items.find(item => item.key === 'estimate')!.status = 'done';
-  assert.match(validateLifecycleChanges(before, next, owner, now), /себестоимости/);
+  assert.equal(validateLifecycleChanges(before, next, owner, now), '');
+  assert.equal(lifecycleGroupProgress(next).completed, 1);
+  assert.equal(next.project.lifecycle!.items.find(item => item.key === 'estimate')!.confirmedBy, owner.name);
+  assert.ok(constructionLaunchBlockers(next).length > 0);
   next = structuredClone(before); next.project.lifecycle!.items.find(item => item.key === 'contract')!.required = false;
   assert.match(validateLifecycleChanges(before, next, owner, now), /отключить/);
 });
@@ -52,7 +55,7 @@ test('unchanged lifecycle still blocks raw stage start, and legacy projects reta
   assert.equal(validateLifecycleChanges(before, next, owner, now), '');
 });
 
-test('escrow applicability changes counts, unknown state remains a blocker, client cannot read details', () => {
+test('escrow stays in the checklist until marked inapplicable; clients cannot read details', () => {
   const state = fixture(); state.project.lifecycle = createLifecycle(now);
   const unknown = lifecycleGroupProgress(state).total;
   state.project.lifecycle.usesEscrow = 'no';

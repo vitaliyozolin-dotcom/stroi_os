@@ -11,7 +11,7 @@ import { PreparationWizard } from './PreparationWizard';
 import { Modal } from './Ui';
 import { stageStatusLabel } from '../presentation/status-labels';
 
-export function ConstructionNow({ state, role, actor, userId, onChange, onNavigate, preparationStep, onPreparationStep }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId) => void; preparationStep: string | null; onPreparationStep: (key: string | null) => void }) {
+export function ConstructionNow({ state, role, actor, userId, onChange, onNavigate, preparationStep, onPreparationStep }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId, entityId?: string) => void; preparationStep: string | null; onPreparationStep: (key: string | null) => void }) {
   const stagesId = useId();
   const [stagesExpanded, setStagesExpanded] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
