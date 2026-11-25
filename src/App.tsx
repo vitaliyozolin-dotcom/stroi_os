@@ -227,6 +227,7 @@ function App() {
             : route.projectId && route.projectId !== state.project.id ? <div className="task-empty" role="status" aria-live="polite"><strong>{sync.phase === 'loading' ? 'Загружаем проект…' : 'Не удалось открыть проект'}</strong>{sync.phase !== 'loading' && <><p>{sync.message || 'Проверьте доступ к проекту или подключение к сети.'}</p><button type="button" className="button button--primary" onClick={() => navigate(role === 'client' ? 'client' : 'overview')}>К текущему проекту</button></>}</div>
             : location.pathname === '/' ? <div role="status">Открываем раздел…</div>
             : <WorkspacePages key={`${state.project.id}:${page}`} state={state} session={session} role={role} focusEntityId={focusEntityId} updateState={updateState} navigate={navigate} applyServerSnapshot={applyServerSnapshot} reconcileServerSnapshot={reconcileServerSnapshot} openQuestions={() => setQuestionsOpen(true)} openProjects={() => { if (session.isOwner) { setNewOrderCustomerId(undefined); setCreateProjectOpen(true); } }} openProject={(projectId, targetPage = 'customers') => { if (allowedPages(role).includes(targetPage)) void changeLocation(workspacePath(projectId, targetPage)); }} createOrder={customerId => { if (session.isOwner) { setNewOrderCustomerId(customerId); setCreateProjectOpen(true); } }} syncPhase={sync.phase} />}
+          {role === 'management' && <HelpCenter onOpenQuestions={() => setQuestionsOpen(true)} projectId={state.project.id} currentPage={page} onNavigate={navigate} onOpenProjects={() => setProjectOpen(true)} onCloseProjects={() => setProjectOpen(false)} />}
         </main>
       </div>
 
@@ -269,7 +270,6 @@ function App() {
       }} />}
 
       {role === 'management' && questionsOpen && <QuestionRegistry key={state.project.id} projectId={state.project.id} currentPage={page} onClose={() => setQuestionsOpen(false)} />}
-      {role === 'management' && <HelpCenter onOpenQuestions={() => setQuestionsOpen(true)} projectId={state.project.id} currentPage={page} onNavigate={navigate} onOpenProjects={() => setProjectOpen(true)} onCloseProjects={() => setProjectOpen(false)} />}
     </div>
   );
 }

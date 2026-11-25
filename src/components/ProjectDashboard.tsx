@@ -6,7 +6,7 @@ import { constructionOverview } from '../domain/construction-overview';
 import { formatDate, formatDateTime } from '../presentation/formatting';
 import { useScheduleToday } from './ProjectScheduleDates';
 import { SectionHeader } from './Ui';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Modal } from './Ui';
 import { ProjectFilePreview } from './ProjectFilePreview';
 import { projectScheduleDashboard } from '../domain/project-dashboard.js';
@@ -53,7 +53,7 @@ export function ProjectDashboardTimeline({ state, onNavigate }: Props) {
   </section>;
 }
 
-export function OverviewWorkCards({ state, role, show, onNavigate, onPreparationStep }: Props & { show: (widget: DashboardWidget) => boolean; onPreparationStep: (key: string) => void }) {
+export function OverviewWorkCards({ state, role, show, onNavigate, onPreparationStep, afterTasks }: Props & { show: (widget: DashboardWidget) => boolean; onPreparationStep: (key: string) => void; afterTasks?: ReactNode }) {
   const today = useScheduleToday();
   const lifecycle = state.project.lifecycle;
   const preparing = lifecycle?.phase === 'preparation' && !lifecycle.legacyReview;
@@ -92,6 +92,7 @@ export function OverviewWorkCards({ state, role, show, onNavigate, onPreparation
         {plannedTasks.slice(0, 3).map(task => taskRow(task, true))}
       </details>}
       <button type="button" className="text-button overview-work-link" onClick={() => onNavigate('tasks')}>Канбан задач <ArrowUpRight size={16} /></button></article>}
+    {afterTasks}
     {role !== 'client' && show('supply') && <article className="panel overview-work-card overview-work-card--supply"><header className="overview-block-heading"><PackageSearch size={18} aria-hidden="true" /><h2>Поставки</h2><span>{supplies.length}</span></header>
       {preparing && supplies.length > 0 && <p className="overview-work-empty">Закупки и поставки можно планировать до допуска</p>}
       {supplies.slice(0, 2).map(item => <button type="button" className="overview-work-row" key={item.id} onClick={() => onNavigate('procurement', item.id)}><strong>{item.item}</strong><small>{supplyLabels[item.status]} · {item.expectedDeliveryDate || item.neededBy ? formatDate(item.expectedDeliveryDate || item.neededBy) : 'Срок не указан'}</small>{item.risk && <small className="danger-text">{item.risk}</small>}</button>)}

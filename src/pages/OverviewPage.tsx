@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import type { StateChangeSink } from '../application';
 import {
   ArrowUpRight,
@@ -18,8 +18,17 @@ import { MetricCard, SectionHeader, StatusBadge } from '../components/Ui';
 import { ConstructionNow } from '../components/ConstructionNow';
 import './overview-dashboard.css';
 
+const compactOverview = '(max-width: 600px)';
+const subscribeToCompactOverview = (onChange: () => void) => {
+  const media = window.matchMedia(compactOverview);
+  media.addEventListener('change', onChange);
+  return () => media.removeEventListener('change', onChange);
+};
+const isCompactOverview = () => window.matchMedia(compactOverview).matches;
+
 export function OverviewPage({ state, role, actor, userId, onChange, onNavigate, onOpenProjects }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: StateChangeSink; onNavigate: (page: PageId, entityId?: string) => void; onOpenProjects?: () => void }) {
   const [preparationStep, setPreparationStep] = useState<string | null>(null);
+  const compact = useSyncExternalStore(subscribeToCompactOverview, isCompactOverview, () => false);
   const today = useScheduleToday();
   const finance = financeWorkspaceSummary(state, today);
   const amount = (cents: number | null) => cents === null ? 'Не указано' : shortMoney(cents / 100);
@@ -65,33 +74,35 @@ export function OverviewPage({ state, role, actor, userId, onChange, onNavigate,
     );
   }
 
+  const financePanel = role === 'management' && show('finance') && (
+    <section className="panel overview-finance" aria-labelledby="overview-finance-title">
+      <header className="overview-block-heading">
+        <Banknote size={18} aria-hidden="true" />
+        <h2 id="overview-finance-title">Финансы</h2>
+        <button type="button" className="text-button" onClick={() => onNavigate('finance')}>
+          Открыть финансы <ArrowUpRight size={15} />
+        </button>
+      </header>
+      <div className="overview-contract-line">
+        <span>Цена договора</span>
+        <strong>{amount(finance.contractCents)}</strong>
+      </div>
+      <div className="metric-grid overview-money">
+        <MetricCard label="Смета себестоимости" value={amount(finance.internalBudgetCents)} detail={<span>{finance.internalBudgetCents === null ? 'Нужна внутренняя смета' : finance.internalBudgetApproved ? 'Утверждённый бюджет' : 'Требует утверждения'}</span>} icon={CircleDollarSign} onClick={() => onNavigate('finance')} />
+        <MetricCard label="Оплачено" value={amount(finance.paidCents)} detail={<span>{finance.paidCents === null ? 'Оплаты ещё не внесены' : 'Учтённые денежные операции'}</span>} icon={Banknote} onClick={() => onNavigate('finance')} />
+        <MetricCard label="Доступно сейчас" value={amount(finance.availableCashCents)} detail={<span>{finance.availableCashCents === null ? 'Остаток не внесён' : 'Без средств на эскроу'}</span>} icon={CircleDollarSign} tone={finance.availableCashCents !== null && finance.availableCashCents < 0 ? 'warning' : 'default'} onClick={() => onNavigate('finance')} />
+        <MetricCard label="Прогноз затрат" value={amount(finance.forecastCents)} detail={<span>{finance.forecastCents === null ? 'Остаток работ не оценён' : finance.forecastComplete ? 'С учётом оставшихся работ' : 'Предварительно · есть пробелы'}</span>} icon={TrendingUp} onClick={() => onNavigate('finance')} />
+      </div>
+    </section>
+  );
+
   return (
     <div className="page-stack overview-page">
       <ConstructionNow state={state} role={role} actor={actor} userId={userId} onChange={onChange} onNavigate={onNavigate} preparationStep={preparationStep} onPreparationStep={setPreparationStep} />
-      {role === 'management' && show('finance') && (
-        <section className="panel overview-finance" aria-labelledby="overview-finance-title">
-          <header className="overview-block-heading">
-            <Banknote size={18} aria-hidden="true" />
-            <h2 id="overview-finance-title">Финансы</h2>
-            <button type="button" className="text-button" onClick={() => onNavigate('finance')}>
-              Открыть финансы <ArrowUpRight size={15} />
-            </button>
-          </header>
-          <div className="overview-contract-line">
-            <span>Цена договора</span>
-            <strong>{amount(finance.contractCents)}</strong>
-          </div>
-          <div className="metric-grid overview-money">
-            <MetricCard label="Смета себестоимости" value={amount(finance.internalBudgetCents)} detail={<span>{finance.internalBudgetCents === null ? 'Нужна внутренняя смета' : finance.internalBudgetApproved ? 'Утверждённый бюджет' : 'Требует утверждения'}</span>} icon={CircleDollarSign} onClick={() => onNavigate('finance')} />
-            <MetricCard label="Оплачено" value={amount(finance.paidCents)} detail={<span>{finance.paidCents === null ? 'Оплаты ещё не внесены' : 'Учтённые денежные операции'}</span>} icon={Banknote} onClick={() => onNavigate('finance')} />
-            <MetricCard label="Доступно сейчас" value={amount(finance.availableCashCents)} detail={<span>{finance.availableCashCents === null ? 'Остаток не внесён' : 'Без средств на эскроу'}</span>} icon={CircleDollarSign} tone={finance.availableCashCents !== null && finance.availableCashCents < 0 ? 'warning' : 'default'} onClick={() => onNavigate('finance')} />
-            <MetricCard label="Прогноз затрат" value={amount(finance.forecastCents)} detail={<span>{finance.forecastCents === null ? 'Остаток работ не оценён' : finance.forecastComplete ? 'С учётом оставшихся работ' : 'Предварительно · есть пробелы'}</span>} icon={TrendingUp} onClick={() => onNavigate('finance')} />
-          </div>
-        </section>
-      )}
+      {!compact && financePanel}
       {role === 'management' && state.project.status === 'draft' && <section className="panel"><p>Объём, сроки и стоимость этого заказа ещё уточняются. Заполните участников, объекты и условия, затем добавьте план работ.</p><button type="button" className="button button--primary" onClick={() => onNavigate('customers')}>Заполнить заказ</button></section>}
 
-      <OverviewWorkCards state={state} role={role} show={show} onNavigate={onNavigate} onPreparationStep={setPreparationStep} />
+      <OverviewWorkCards state={state} role={role} show={show} onNavigate={onNavigate} onPreparationStep={setPreparationStep} afterTasks={compact ? financePanel : null} />
 
       {show('activity') && <details className="overview-history"><summary>История проекта</summary>
         <SectionHeader eyebrow="Журнал проекта" title="История изменений" />

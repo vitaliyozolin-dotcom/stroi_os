@@ -1,5 +1,5 @@
-import { ArrowUpRight, Check, Image as ImageIcon, LockKeyhole } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowUpRight, Check, ChevronDown, Image as ImageIcon, LockKeyhole } from 'lucide-react';
+import { useId, useState } from 'react';
 import { StageQuickUpdate } from './StageQuickUpdate';
 import { SiteProgress } from './SiteProgress';
 import type { AppState, UserRole } from '../entities/index';
@@ -12,6 +12,8 @@ import { Modal } from './Ui';
 import { stageStatusLabel } from '../presentation/status-labels';
 
 export function ConstructionNow({ state, role, actor, userId, onChange, onNavigate, preparationStep, onPreparationStep }: { state: AppState; role: UserRole; actor: string; userId?: string; onChange: (state: AppState) => void; onNavigate: (page: PageId) => void; preparationStep: string | null; onPreparationStep: (key: string | null) => void }) {
+  const stagesId = useId();
+  const [stagesExpanded, setStagesExpanded] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const preparing = state.project.lifecycle?.phase === 'preparation' && !state.project.lifecycle.legacyReview;
   const preparation = lifecycleGroupProgress(state);
@@ -51,7 +53,10 @@ export function ConstructionNow({ state, role, actor, userId, onChange, onNaviga
       </div>
     </div>}
     {view.stages.length > 0 && <>
-      <ol className="construction-now__stages" aria-label="Этапы от начала до завершения">
+      <button type="button" className="construction-now__mobile-toggle" aria-expanded={stagesExpanded} aria-controls={stagesId} onClick={() => setStagesExpanded(value => !value)}>
+        Этапы строительства <ChevronDown size={16} aria-hidden="true" />
+      </button>
+      <ol id={stagesId} className="construction-now__stages" data-expanded={stagesExpanded} aria-label="Этапы от начала до завершения">
         {state.project.lifecycle && <li><button type="button" className={`construction-stage${preparing ? ' construction-stage--current' : ''}`} onClick={() => onPreparationStep(nextStep?.key || 'brief')}><span className="construction-stage__point">00</span><span className="construction-stage__name">До стройки</span></button></li>}
         {view.stages.map((stage, index) => <li key={stage.id}><button type="button" className={`construction-stage construction-stage--${stage.status}`} onClick={() => setSelectedStage(stage.id)} aria-label={`${stage.name}: ${stageStatusLabel[stage.status]}`} title={`${stage.name} · ${stageStatusLabel[stage.status]}`}>
           <span className="construction-stage__line" /><span className="construction-stage__point">{launchLocked && index === 0 ? <LockKeyhole size={13} /> : stage.status === 'accepted' ? <Check size={12} /> : String(index + 1).padStart(2, '0')}</span><span className="construction-stage__name">{stage.shortName || stage.name}</span>
