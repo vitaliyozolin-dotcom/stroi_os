@@ -34,8 +34,6 @@ export const lifecycleItemBlockers = (state, key) => {
   if (def.escrow && lifecycle.usesEscrow === 'no') return [];
   const result = [];
   if (def.escrow && lifecycle.usesEscrow === 'unknown') result.push('Уточните, используется ли эскроу.');
-  if (!clean(item.basis)) result.push('Укажите основание подтверждения.');
-  if (def.documents && !(item.documentIds ?? []).some(id => documentExists(state, id))) result.push('Приложите документ с доступным оригиналом.');
   if (key === 'scope' && lifecycle.scope === 'unknown') result.push('Выберите комплектацию.');
   if (key === 'site' && !clean(state.project.address)) result.push('Укажите адрес или местонахождение участка в карточке заказа.');
   if (key === 'estimate' && (state.budgetMeta?.estimateKind !== 'internal_cost' || !(state.budgetLines ?? []).length)) result.push('Нужна внутренняя смета себестоимости; цена договора её не заменяет.');
@@ -44,13 +42,7 @@ export const lifecycleItemBlockers = (state, key) => {
     const outgoing = (state.financeEntries ?? []).filter(entry => entry.kind === 'expense' && entry.amount > 0 && (entry.dueDate || entry.date) && entry.stageId && state.stages.some(stage => stage.id === entry.stageId));
     if (!outgoing.length && !(state.treasury?.cashPlans ?? []).some(plan => plan.kind === 'expense' && plan.amountCents > 0 && (plan.date || plan.dateRule?.stageId && state.stages.some(stage => stage.id === plan.dateRule.stageId)))) result.push('Добавьте расходный план с суммой и датой, связанный с работами ППР.');
   }
-  const prerequisites = { site: ['brief'], scope: ['brief', 'site'], estimate: ['scope'], commercial: ['estimate'], ppr: ['scope', 'estimate'], contract: ['brief', 'site', 'scope', 'estimate', 'commercial'], readiness: ['contract', 'ppr', 'funding', ...(lifecycle.usesEscrow === 'yes' ? ['escrow'] : [])] };
-  if (!lifecycle.legacyReview && (prerequisites[key] ?? []).some(requiredKey => lifecycle.items.find(row => row.key === requiredKey)?.status !== 'done' || lifecycleItemBlockers(state, requiredKey).length)) result.push('Сначала подтвердите предшествующие результаты подготовки.');
-  if (key === 'contract' && !lifecycle.legacyReview) {
-    const missing = ['brief', 'site', 'scope', 'estimate', 'commercial'].filter(requiredKey => lifecycle.items.find(row => row.key === requiredKey)?.status !== 'done' || lifecycleItemBlockers(state, requiredKey).length);
-    if (missing.length) result.push('Сначала подтвердите задание, участок, комплектацию и обе сметы.');
-  }
-  if (key === 'contract' && !(item.documentIds ?? []).some(id => state.documents?.some(doc => doc.id === id && doc.fileKey && doc.status === 'signed' && doc.category === 'contract'))) result.push('Укажите подписанный договор.');
+  if (key === 'contract' && !state.documents?.some(doc => doc.fileKey && doc.status === 'signed' && doc.category === 'contract')) result.push('Укажите подписанный договор.');
   if (key === 'funding') {
     const funding = state.project.funding?.contractor;
     if (!funding?.confirmed || !(funding.amountCents > 0) || !funding.date || !clean(funding.source) || !documentExists(state, funding.documentId)) result.push('Подтвердите источник оборотных средств, сумму, дату и документ в финансах.');
@@ -72,7 +64,7 @@ export const lifecycleGroupProgress = (state, group = 'preparation') => {
   const pending = active.filter(def => {
     const item = lifecycle.items.find(row => row.key === def.key);
     if (item?.status === 'not_applicable' && !def.locked && clean(item.basis)) return false;
-    return item?.status !== 'done' || lifecycleItemBlockers(state, def.key).length;
+    return item?.status !== 'done';
   });
   return { total: active.length, completed: active.length - pending.length, pending: pending.map(def => def.key) };
 };
@@ -81,7 +73,7 @@ export const constructionLaunchBlockers = state => {
   if (!lifecycle) return []; // Existing construction is not retroactively blocked by a new empty checklist.
   if (lifecycle.legacyReview) return [];
   const pending = lifecycleGroupProgress(state).pending;
-  return [...(state.project.funding?.route === 'escrow' && lifecycle.usesEscrow !== 'yes' ? ['Схема финансирования требует эскроу'] : []), ...(lifecycle.usesEscrow === 'unknown' ? ['Уточнить схему эскроу'] : []), ...pending.map(key => lifecycleDefinitions.find(def => def.key === key).title)];
+  return [...(state.project.funding?.route === 'escrow' && lifecycle.usesEscrow !== 'yes' ? ['Схема финансирования требует эскроу'] : []), ...pending.map(key => lifecycleDefinitions.find(def => def.key === key).title)];
 };
 export const validateLifecycleChanges = (previous, next, identity, now = new Date().toISOString()) => {
   const before = previous?.project?.lifecycle, after = next?.project?.lifecycle;
@@ -113,9 +105,9 @@ export const validateLifecycleChanges = (previous, next, identity, now = new Dat
     const old = before?.items.find(row => row.key === def.key);
     if (item.status === 'done' && (!old || !same(old, item))) {
       if (def.group === 'handover' && !['handover', 'closed', 'warranty'].includes(after.phase) && !after.legacyReview) return 'Результаты сдачи подтверждаются после завершения строительства.';
-      const blockers = lifecycleItemBlockers(next, item.key);
-      if (blockers.length) return `${def.title}: ${blockers.join(' ')}`;
       item.confirmedAt = now; item.confirmedBy = identity.name;
+    } else if (old?.status === 'done' && item.status !== 'done') {
+      delete item.confirmedAt; delete item.confirmedBy; delete item.completedOn;
     }
   }
   if (before && before.phase !== after.phase) {

@@ -6,14 +6,14 @@ import { StageControlModal } from './StageControlModal';
 import { ScheduleReconciliation } from './ScheduleReconciliation';
 import { Modal } from './Ui';
 import { formatDate } from '../presentation/formatting';
-import { stageStatusLabel } from '../presentation/status-labels';
+import { stageStatusLabel, taskStatusLabel } from '../presentation/status-labels';
 import { confirmedSiteUpdate } from '../domain/construction/index.js';
 import { constructionLaunchBlockers } from '../domain/project-lifecycle.js';
 import { planToday } from '../domain/construction/index.js';
 
 export function StageQuickUpdate({ state, stageId, role, actor, userId, onChange, onClose, onNavigate }: {
   state: AppState; stageId: string; role: UserRole; actor: string; userId?: string;
-  onChange: (state: AppState) => void; onClose: () => void; onNavigate: (page: PageId) => void;
+  onChange: (state: AppState) => void; onClose: () => void; onNavigate: (page: PageId, entityId?: string) => void;
 }) {
   const [action, setAction] = useState<StageAction | null>(null);
   const [review, setReview] = useState(false);
@@ -39,11 +39,17 @@ export function StageQuickUpdate({ state, stageId, role, actor, userId, onChange
           <li>Подъезд и разгрузка</li>
           <li>Место хранения материалов</li>
         </ul>
-        {stageTasks.length > 0 && <dl className="stage-facts">
-          {stageTasks.map(task => <div key={task.id}><dt>{task.title}</dt><dd>{task.status === 'done' ? 'Выполнено' : 'Открыто'}{task.assigneeName ? ` · ${task.assigneeName}` : ''}</dd></div>)}
-        </dl>}
-        <button type="button" className="text-button" onClick={() => onNavigate('tasks')}>Открыть задачи</button>
       </details>}
+      {stageTasks.length > 0 && <section aria-label="Подэтапы">
+        <h3>Подэтапы</h3>
+        <ul className="preparation-steps">
+          {stageTasks.map(task => <li className="preparation-step" key={task.id}>
+            <button type="button" className="text-button" onClick={() => { onClose(); onNavigate('tasks', task.id); }}>
+              {task.title} · {taskStatusLabel[task.status]}
+            </button>
+          </li>)}
+        </ul>
+      </section>}
       <dl className="stage-facts">
         {!isSitePreparation && <>
           <div><dt>КП</dt><dd>{quotes.length ? <button type="button" className="text-button" onClick={() => onNavigate('procurement')}>{quotes.length} получено · {quotes.filter(quote => quote.status === 'selected').length} выбрано</button> : 'Нет связанных КП'}</dd></div>
