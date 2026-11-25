@@ -23,6 +23,8 @@ export const pageLabels: Record<PageId, string> = {
 export const isPageId = (value: string | null): value is PageId =>
   value !== null && Object.hasOwn(pageLabels, value);
 
+export const pageLabel = (page: string) => isPageId(page) ? pageLabels[page] : page;
+
 export const allowedPages = (role: 'management' | 'foreman' | 'client'): PageId[] => {
   if (role === 'client') return ['client'];
   if (role === 'foreman') return ['overview', 'project', 'tasks', 'schedule', 'procurement', 'quality'];
